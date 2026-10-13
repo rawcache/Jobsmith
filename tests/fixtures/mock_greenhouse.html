@@ -1,0 +1,73 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mock Greenhouse</title>
+<style>.listbox{border:1px solid #ccc} .opt{padding:4px}</style></head>
+<body>
+<form id="app" onsubmit="event.preventDefault(); done();">
+  <label for="first_name">First Name*</label><input id="first_name" required>
+  <label for="last_name">Last Name*</label><input id="last_name" required>
+  <label for="email">Email*</label><input id="email" type="email" required>
+  <label for="country">Country*</label>
+  <div class="combo"><input id="country" role="combobox" autocomplete="off" data-options='["Canada +1","United Kingdom +44","United States +1"]'></div>
+  <label for="phone">Phone</label><input id="phone">
+  <label for="resume">Resume/CV*</label><input id="resume" type="file" style="display:none">
+  <label for="cover_letter">Cover Letter</label><input id="cover_letter" type="file" style="display:none">
+  <label for="question_1001">LinkedIn Profile</label><input id="question_1001">
+  <label for="question_1002">What is your cumulative GPA?*</label>
+  <div class="combo"><input id="question_1002" role="combobox" autocomplete="off" data-options='["Below 3.0","3.0 - 3.49","3.5 - 3.79","3.8 - 4.0"]'></div>
+  <label for="question_1003">Will you now or in the future require visa sponsorship?*</label>
+  <select id="question_1003"><option value="">Select...</option><option>Yes</option><option>No</option></select>
+  <label for="question_1004">Why do you want to work at Acme Robotics?*</label><textarea id="question_1004"></textarea>
+  <label for="question_1005">Do you have any outstanding offers?*</label>
+  <div class="combo"><input id="question_1005" role="combobox" autocomplete="off" data-options='["Yes","No"]'></div>
+  <label for="candidate-location">Location (City)*</label>
+  <div class="combo"><input id="candidate-location" role="combobox" autocomplete="off" data-options='["Boston, Georgia, United States","Boston, Massachusetts, United States","Atlanta, Georgia, United States"]'></div>
+  <label for="school--0">School*</label>
+  <div class="combo"><input id="school--0" role="combobox" autocomplete="off" data-options='["Example Institute of Technology","Example State University"]'></div>
+  <label for="degree--0">Degree*</label>
+  <div class="combo"><input id="degree--0" role="combobox" autocomplete="off" data-options='["Associate&#39;s Degree","Bachelor&#39;s Degree","Master&#39;s Degree"]'></div>
+  <label for="discipline--0">Discipline*</label>
+  <div class="combo"><input id="discipline--0" role="combobox" autocomplete="off" data-options='["Computer Engineering","Computer Science","Electrical Engineering"]'></div>
+  <label for="start-month--0">Start date month*</label>
+  <div class="combo"><input id="start-month--0" role="combobox" autocomplete="off" data-options='["January","February","May","August"]'></div>
+  <label for="start-year--0">Start date year*</label><input id="start-year--0" type="number">
+  <label for="end-month--0">End date month*</label>
+  <div class="combo"><input id="end-month--0" role="combobox" autocomplete="off" data-options='["January","February","May","August"]'></div>
+  <label for="end-year--0">End date year*</label><input id="end-year--0" type="number">
+  <label for="4028769003">How do you identify? (race/ethnicity)</label>
+  <div class="combo"><input id="4028769003" role="combobox" autocomplete="off" data-options='["East Asian","South Asian","White","I prefer not to say"]'></div>
+  <label for="hispanic_ethnicity">Are you Hispanic/Latino?</label>
+  <div class="combo"><input id="hispanic_ethnicity" role="combobox" autocomplete="off" data-options='["Yes","No","Decline To Self Identify"]'></div>
+  <label for="gender">Gender</label>
+  <div class="combo"><input id="gender" role="combobox" autocomplete="off" data-options='["Male","Female","Decline To Self Identify"]'></div>
+  <button type="submit">Submit application</button>
+</form>
+<div id="thanks" style="display:none"><h1>Thank you for applying!</h1></div>
+<script>
+// Minimal react-select imitation: typing shows role=option items; clicking one sets the value.
+document.querySelectorAll('[role=combobox]').forEach(inp => {
+  const opts = JSON.parse(inp.dataset.options);
+  let box = null;
+  const close = () => { if (box) { box.remove(); box = null; } };
+  const show = () => {
+    close();
+    box = document.createElement('div'); box.className = 'listbox'; box.setAttribute('role', 'listbox');
+    const q = inp.value.toLowerCase();
+    opts.filter(o => o.toLowerCase().includes(q) || q === '').forEach(o => {
+      const d = document.createElement('div'); d.className = 'opt'; d.setAttribute('role', 'option'); d.textContent = o;
+      d.addEventListener('click', () => {
+        // like react-select: the input empties and the choice shows as text beside it
+        inp.value = ''; inp.dataset.selected = o; close();
+        let sv = inp.parentElement.querySelector('.single-value');
+        if (!sv) { sv = document.createElement('div'); sv.className = 'single-value'; inp.parentElement.prepend(sv); }
+        sv.textContent = o;
+      });
+      box.appendChild(d);
+    });
+    inp.parentElement.appendChild(box);
+  };
+  inp.addEventListener('input', show);
+  inp.addEventListener('keydown', e => { if (e.key === 'ArrowDown' && !box) show(); if (e.key === 'Escape') close(); });
+});
+window.done = () => { document.getElementById('app').style.display = 'none'; document.getElementById('thanks').style.display = 'block'; };
+</script>
+</body></html>

@@ -1,0 +1,257 @@
+"""SQLite storage. Plain sqlite3 + small helpers; JSON columns are stored as TEXT."""
+from __future__ import annotations
+
+import json
+import sqlite3
+import threading
+import time
+from contextlib import contextmanager
+from typing import Any, Iterable
+
+from .config import DB_PATH, DEFAULT_SETTINGS
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+-- Uploaded source material (resume = the "holy grail", plus LinkedIn export, etc.)
+CREATE TABLE IF NOT EXISTS documents (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,              -- resume | linkedin | other
+  filename TEXT NOT NULL,
+  path TEXT NOT NULL,
+  text TEXT NOT NULL DEFAULT '',
+  is_primary INTEGER NOT NULL DEFAULT 0,
+  created_at REAL NOT NULL
+);
+
+-- Atomic, citable facts about the user. Every generated claim must cite these.
+CREATE TABLE IF NOT EXISTS facts (
+  id TEXT PRIMARY KEY,             -- f_xxxxxx
+  category TEXT NOT NULL,          -- identity|education|experience|project|skill|award|leadership|link|other
+  subject TEXT NOT NULL DEFAULT '',-- e.g. "Rooms To Go - ML Engineer Intern"
+  text TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT '', -- filename or "user"
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at REAL NOT NULL
+);
+
+-- Answer bank for standard / legally sensitive questions. Only the user sets these.
+CREATE TABLE IF NOT EXISTS answers (
+  key TEXT PRIMARY KEY,            -- canonical key, e.g. work_authorized_us
+  label TEXT NOT NULL,
+  value TEXT NOT NULL DEFAULT '',
+  confirmed INTEGER NOT NULL DEFAULT 0, -- 0 = inferred, needs user confirmation
+  updated_at REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sources (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,              -- simplify_github | url
+  url TEXT NOT NULL UNIQUE,
+  active INTEGER NOT NULL DEFAULT 1,
+  last_synced REAL,
+  last_count INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS jobs (
+  id TEXT PRIMARY KEY,
+  source_id INTEGER,
+  external_id TEXT,
+  company TEXT NOT NULL,
+  title TEXT NOT NULL,
+  url TEXT NOT NULL,
+  ats TEXT NOT NULL DEFAULT 'unknown',
+  locations TEXT NOT NULL DEFAULT '[]',
+  terms TEXT NOT NULL DEFAULT '[]',
+  category TEXT NOT NULL DEFAULT '',
+  sponsorship TEXT NOT NULL DEFAULT '',
+  degrees TEXT NOT NULL DEFAULT '[]',
+  date_posted REAL,
+  active INTEGER NOT NULL DEFAULT 1,
+  description TEXT NOT NULL DEFAULT '',
+  questions TEXT NOT NULL DEFAULT '[]',  -- normalized form fields
+  research TEXT NOT NULL DEFAULT '{}',
+  fit_score REAL,
+  fit_reasons TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'new',     -- new|skipped|fetched|drafted|filling|filled|submitted|error
+  verdict TEXT,                           -- job-level green/red from the user
+  verdict_note TEXT,
+  error TEXT,
+  created_at REAL NOT NULL,
+  updated_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS jobs_status ON jobs(status);
+CREATE INDEX IF NOT EXISTS jobs_company ON jobs(company);
+
+-- One row per form field per job: what Jobsmith proposes and what the user decided.
+CREATE TABLE IF NOT EXISTS drafts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id TEXT NOT NULL,
+  field TEXT NOT NULL,             -- form field name (e.g. question_12345)
+  label TEXT NOT NULL,
+  qtype TEXT NOT NULL,             -- text|textarea|select|multiselect|file|checkbox
+  required INTEGER NOT NULL DEFAULT 0,
+  options TEXT NOT NULL DEFAULT '[]',
+  kind TEXT NOT NULL,              -- standard|answer_bank|generated|file
+  canon TEXT,                      -- canonical key for standard/answer-bank questions
+  answer TEXT NOT NULL DEFAULT '',
+  fact_ids TEXT NOT NULL DEFAULT '[]',
+  rationale TEXT NOT NULL DEFAULT '',
+  confidence REAL NOT NULL DEFAULT 0,
+  issues TEXT NOT NULL DEFAULT '[]', -- validator findings
+  verdict TEXT,                    -- green|red|null
+  note TEXT,                       -- user's reason (esp. for red)
+  final_answer TEXT,               -- user's edited answer, if any
+  updated_at REAL NOT NULL,
+  UNIQUE(job_id, field)
+);
+
+-- AI usage per call, so you can see what each application costs.
+CREATE TABLE IF NOT EXISTS usage (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id TEXT,                     -- NULL for profile parsing, commands, etc.
+  purpose TEXT NOT NULL,           -- research|answers|command|profile|other
+  backend TEXT NOT NULL,
+  model TEXT NOT NULL DEFAULT '',
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  cached_tokens INTEGER NOT NULL DEFAULT 0,
+  web_searches INTEGER NOT NULL DEFAULT 0,
+  cost_usd REAL,                   -- what the provider reported (Claude Code reports an API-equivalent figure)
+  seconds REAL,
+  at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS usage_job ON usage(job_id);
+
+-- Background work: drafting, filling, submitting.
+CREATE TABLE IF NOT EXISTS runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id TEXT NOT NULL,
+  kind TEXT NOT NULL,              -- fetch|research|draft|fill|submit
+  status TEXT NOT NULL,            -- queued|running|done|error|waiting_user
+  log TEXT NOT NULL DEFAULT '',
+  screenshot TEXT,
+  snapshot TEXT,
+  started_at REAL,
+  finished_at REAL
+);
+"""
+
+_lock = threading.RLock()
+_conn: sqlite3.Connection | None = None
+
+
+def conn() -> sqlite3.Connection:
+    global _conn
+    if _conn is None:
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        c = sqlite3.connect(DB_PATH, check_same_thread=False, isolation_level=None)
+        c.row_factory = sqlite3.Row
+        c.execute("PRAGMA journal_mode=WAL")
+        c.execute("PRAGMA foreign_keys=ON")
+        c.executescript(SCHEMA)
+        cols = {r[1] for r in c.execute("PRAGMA table_info(jobs)").fetchall()}
+        for col in ("referral_name", "referral_url", "hold_reason", "outcome"):
+            if col not in cols:
+                c.execute(f"ALTER TABLE jobs ADD COLUMN {col} TEXT")
+        if "eligibility" not in cols:
+            c.execute("ALTER TABLE jobs ADD COLUMN eligibility TEXT NOT NULL DEFAULT '{}'")
+        dcols = {r[1] for r in c.execute("PRAGMA table_info(drafts)").fetchall()}
+        if "model" not in dcols:
+            c.execute("ALTER TABLE drafts ADD COLUMN model TEXT")
+        _conn = c
+    return _conn
+
+
+def reset_for_tests(path) -> None:
+    """Point the module at a fresh database (used by tests)."""
+    global _conn
+    import jobsmith.config as cfg
+    cfg.DB_PATH = path
+    globals()["DB_PATH"] = path
+    _conn = None
+
+
+@contextmanager
+def tx():
+    c = conn()
+    with _lock:
+        c.execute("BEGIN")
+        try:
+            yield c
+            c.execute("COMMIT")
+        except Exception:
+            c.execute("ROLLBACK")
+            raise
+
+
+def q(sql: str, params: Iterable[Any] = ()) -> list[dict]:
+    with _lock:
+        return [dict(r) for r in conn().execute(sql, tuple(params)).fetchall()]
+
+
+def q1(sql: str, params: Iterable[Any] = ()) -> dict | None:
+    rows = q(sql, params)
+    return rows[0] if rows else None
+
+
+def x(sql: str, params: Iterable[Any] = ()) -> int:
+    with _lock:
+        cur = conn().execute(sql, tuple(params))
+        return cur.lastrowid
+
+
+def now() -> float:
+    return time.time()
+
+
+# ---------------------------------------------------------------- JSON helpers
+JSON_COLS = {
+    "locations", "terms", "degrees", "questions", "research", "fit_reasons",
+    "options", "fact_ids", "issues", "eligibility",
+}
+
+
+def decode(row: dict | None) -> dict | None:
+    if row is None:
+        return None
+    out = dict(row)
+    for k in JSON_COLS & out.keys():
+        v = out[k]
+        if isinstance(v, str):
+            try:
+                out[k] = json.loads(v)
+            except json.JSONDecodeError:
+                pass
+    return out
+
+
+def enc(v: Any) -> str:
+    return json.dumps(v, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------- settings
+def get_settings() -> dict:
+    s = dict(DEFAULT_SETTINGS)
+    for r in q("SELECT key, value FROM settings"):
+        try:
+            s[r["key"]] = json.loads(r["value"])
+        except json.JSONDecodeError:
+            s[r["key"]] = r["value"]
+    return s
+
+
+def get_setting(key: str):
+    return get_settings().get(key)
+
+
+def set_settings(values: dict) -> dict:
+    for k, v in values.items():
+        if k not in DEFAULT_SETTINGS:
+            continue
+        x("INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+          (k, json.dumps(v)))
+    return get_settings()

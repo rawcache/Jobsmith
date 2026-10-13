@@ -1,0 +1,56 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mock multi-page application</title></head>
+<body>
+<div id="app"></div>
+<script>
+let step = 'job';
+const state = {};
+function render() {
+  const app = document.getElementById('app');
+  if (step === 'job') {
+    app.innerHTML = '<h1>Hardware Intern</h1><button data-automation-id="adventureButton" onclick="go(\'signin\')">Apply</button>';
+  } else if (step === 'signin') {
+    app.innerHTML = '<h2>Sign In</h2><label for="em">Email</label><input id="em"><label for="pw">Password</label><input id="pw" type="password"><button id="signin" onclick="go(\'p1\')">Sign In</button>';
+  } else if (step === 'p1') {
+    app.innerHTML = `<h2>My Information</h2><form onsubmit="return false">
+      <label for="first">Legal First Name*</label><input id="first" required>
+      <label for="email">Email Address*</label><input id="email" required>
+      <label id="hl">How Did You Hear About Us?*</label>
+      <button type="button" id="heard" aria-haspopup="listbox" aria-labelledby="hl" aria-required="true">Select One</button>
+      <div id="lb"></div>
+      <label for="resume">Upload resume</label><input id="resume" type="file">
+      </form>
+      <button data-automation-id="bottom-navigation-next-button" onclick="next1()">Save and Continue</button>
+      <div role="alert" id="err"></div>`;
+    document.getElementById('heard').onclick = () => {
+      document.getElementById('lb').innerHTML = ['Job Board', 'LinkedIn', 'Employee Referral'].map(o =>
+        `<div role="option" onclick="pick('${o}')">${o}</div>`).join('');
+    };
+  } else if (step === 'p2') {
+    app.innerHTML = `<h2>Application Questions</h2>
+      <label for="why">Why are you interested in this role?*</label><textarea id="why" required></textarea>
+      <fieldset><legend>Will you require visa sponsorship?*</legend>
+        <label><input type="radio" name="spons" value="Yes" required> Yes</label>
+        <label><input type="radio" name="spons" value="No"> No</label></fieldset>
+      <button data-automation-id="bottom-navigation-next-button" onclick="next2()">Save and Continue</button>`;
+  } else if (step === 'review') {
+    app.innerHTML = `<h2>Review</h2><pre id="summary">${JSON.stringify(state)}</pre><button onclick="go('done')">Submit</button>`;
+  } else if (step === 'done') {
+    app.innerHTML = '<h1>Thank you for applying!</h1>';
+  }
+}
+window.go = s => { step = s; render(); };
+window.pick = o => { document.getElementById('heard').innerText = o; document.getElementById('lb').innerHTML = ''; };
+window.next1 = () => {
+  state.first = document.getElementById('first').value; state.email = document.getElementById('email').value;
+  state.heard = document.getElementById('heard').innerText; state.resume = document.getElementById('resume').files.length;
+  if (!state.first || state.heard === 'Select One') { document.getElementById('err').innerText = 'Errors found on page'; return; }
+  go('p2');
+};
+window.next2 = () => {
+  state.why = document.getElementById('why').value;
+  const r = document.querySelector('input[name=spons]:checked'); state.spons = r ? r.value : '';
+  go('review');
+};
+render();
+</script></body></html>

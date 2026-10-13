@@ -1,0 +1,26 @@
+<!doctype html><html><body>
+<div id="app">
+  <input id="first_name" value="Alex">
+  <div id="code" style="display:none">
+    <p>A verification code was sent to alex@example.edu. To submit your application, enter the 8-character code to confirm you're a human.</p>
+    <label>Security code</label>
+    <div id="boxes"></div>
+  </div>
+  <button type="submit" id="submit" onclick="go()">Submit application</button>
+</div>
+<div id="thanks" style="display:none"><h1>Thank you for applying!</h1></div>
+<script>
+const boxes = document.getElementById('boxes');
+for (let i = 0; i < 8; i++) {
+  const b = document.createElement('input'); b.id = 'security-input-' + i; b.maxLength = 1; b.size = 1;
+  b.setAttribute('aria-label', 'Security code character ' + (i + 1));
+  b.addEventListener('input', () => { if (b.value && b.nextElementSibling) b.nextElementSibling.focus(); });
+  boxes.appendChild(b);
+}
+let asked = false;
+function go() {
+  if (!asked) { asked = true; document.getElementById('code').style.display = 'block'; return; }
+  const code = [...boxes.querySelectorAll('input')].map(b => b.value).join('');
+  if (code === 'AB12CD34') { document.getElementById('app').style.display = 'none'; document.getElementById('thanks').style.display = 'block'; }
+}
+</script></body></html>

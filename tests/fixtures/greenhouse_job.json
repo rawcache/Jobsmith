@@ -1,0 +1,32 @@
+{
+  "title": "Software Engineering Intern - Summer 2027",
+  "company_name": "Acme Robotics",
+  "location": {"name": "Boston, MA"},
+  "content": "&lt;p&gt;Build perception pipelines in Python and C++ on embedded NVIDIA Jetson hardware. Experience with YOLO, OpenCV and AWS a plus.&lt;/p&gt;",
+  "education": "education_optional",
+  "questions": [
+    {"label": "First Name", "required": true, "fields": [{"name": "first_name", "type": "input_text", "values": []}]},
+    {"label": "Last Name", "required": true, "fields": [{"name": "last_name", "type": "input_text", "values": []}]},
+    {"label": "Email", "required": true, "fields": [{"name": "email", "type": "input_text", "values": []}]},
+    {"label": "Phone", "required": false, "fields": [{"name": "phone", "type": "input_text", "values": []}]},
+    {"label": "Resume/CV", "required": true, "fields": [{"name": "resume", "type": "input_file", "values": []}, {"name": "resume_text", "type": "textarea", "values": []}]},
+    {"label": "Cover Letter", "required": false, "fields": [{"name": "cover_letter", "type": "input_file", "values": []}, {"name": "cover_letter_text", "type": "textarea", "values": []}]},
+    {"label": "LinkedIn Profile", "required": false, "fields": [{"name": "question_1001", "type": "input_text", "values": []}]},
+    {"label": "What is your cumulative GPA?", "required": true, "fields": [{"name": "question_1002", "type": "multi_value_single_select", "values": [{"label": "Below 3.0", "value": 1}, {"label": "3.0 - 3.49", "value": 2}, {"label": "3.5 - 3.79", "value": 3}, {"label": "3.8 - 4.0", "value": 4}]}]},
+    {"label": "Will you now or in the future require visa sponsorship?", "required": true, "fields": [{"name": "question_1003", "type": "multi_value_single_select", "values": [{"label": "Yes", "value": 1}, {"label": "No", "value": 0}]}]},
+    {"label": "Why do you want to work at Acme Robotics? (max 1000 characters)", "required": true, "fields": [{"name": "question_1004", "type": "textarea", "values": []}]},
+    {"label": "Do you have any outstanding offers with deadlines?", "required": true, "fields": [{"name": "question_1005", "type": "multi_value_single_select", "values": [{"label": "Yes", "value": 1}, {"label": "No", "value": 0}]}]}
+  ],
+  "location_questions": [
+    {"label": "Location (City)", "required": true, "fields": [{"name": "location", "type": "input_text", "values": []}, {"name": "latitude", "type": "input_hidden"}, {"name": "longitude", "type": "input_hidden"}]}
+  ],
+  "compliance": [
+    {"type": "eeoc", "questions": [
+      {"label": "Gender", "required": false, "fields": [{"name": "gender", "type": "multi_value_single_select", "values": [{"label": "Male", "value": 1}, {"label": "Female", "value": 2}, {"label": "Decline To Self Identify", "value": 3}]}]},
+      {"label": "Veteran Status", "required": false, "fields": [{"name": "veteran_status", "type": "multi_value_single_select", "values": [{"label": "I am not a protected veteran", "value": 1}, {"label": "I don't wish to answer", "value": 3}]}]}
+    ]}
+  ],
+  "demographic_questions": {"header": "Survey", "questions": [
+    {"id": 4028769003, "label": "How do you identify? (race/ethnicity)", "required": false, "type": "multi_value_multi_select",
+     "answer_options": [{"id": 1, "label": "East Asian"}, {"id": 2, "label": "South Asian"}, {"id": 3, "label": "White"}, {"id": 4, "label": "I prefer not to say"}]}]}
+}
