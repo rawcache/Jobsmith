@@ -6,7 +6,8 @@ import ConnectClaude from "../components/ConnectClaude";
 
 type Section = { heading: string; kind: string; items: string[] };
 type Resp = { job: Job; drafts: Draft[]; runs: Run[]; readiness: { ready: boolean; blockers: string[] } | null;
-  busy?: string; can_fill: boolean; usage: Usage; match: Match; connections: Person[]; sections: Section[] };
+  busy?: string; can_fill: boolean; usage: Usage; match: Match; connections: Person[]; sections: Section[];
+  eligibility: { ok: boolean; reasons: string[]; notes: string[] } };
 
 const SOURCE: Record<string, string> = {
   answer_bank: "from your profile", learned: "reused from an answer you approved", generated: "written by AI", file: "file",
@@ -144,7 +145,8 @@ export default function JobPage({ id, embedded = false }: { id: string; embedded
   if (err) return <div className="jobview"><p>{err}</p></div>;
   if (!r) return <div className="jobview"><p className="muted"><Dots />Loading</p></div>;
 
-  const { job, drafts, runs, readiness, usage, match, connections, sections } = r;
+  const { job, drafts, runs, readiness, usage, match, connections, sections, eligibility } = r;
+  const unsure = eligibility && !eligibility.ok;
   const res = job.research ?? {};
   const act = async (path: string, body?: object) => { await api.post(`/api/jobs/${id}/${path}`, body); refresh(); load(); };
   const autopilot = () => api.post("/api/jobs/batch", { action: "autopilot", ids: [id] }).then(() => { refresh(); load(); });
@@ -182,13 +184,15 @@ export default function JobPage({ id, embedded = false }: { id: string; embedded
         {applied ? <p className="ok-text strong"><Icon name="check" size={16} /> Applied{job.outcome ? `. ${OUTCOME_LABEL[job.outcome]}.` : ""}</p>
           : r.busy ? <p className="strong accent-text"><Dots />{r.busy === "drafting" ? "Researching and drafting answers" : "Autopilot is applying"}</p>
           : (<>
-            <button className="btn primary" onClick={autopilot}>Apply with autopilot</button>
+            <button className="btn primary" onClick={autopilot}>{unsure || job.status === "skipped" ? "Apply anyway" : "Apply with autopilot"}</button>
             {drafts.length > 0 && r.can_fill && <button className="btn" onClick={() => act("fill", { submit: false })}>Fill it, I'll submit</button>}
             {(job.status === "filled" || !r.can_fill) && <button className="link" onClick={() => act("submitted")}>I submitted it myself</button>}
           </>)}
       </div>
       {status && !status.llm.ok && <div className="note warn"><p>No AI is connected, so only answers from your profile get filled.</p><ConnectClaude compact /></div>}
-      {job.hold_reason && job.status === "filled" && <p className="note warn">Autopilot held this for you: {job.hold_reason}</p>}
+      {unsure && !applied && <div className="note warn"><p><strong>You may not qualify.</strong> {eligibility.reasons.join(" ")}</p>
+        <p className="small">Autopilot skips roles like this on its own. You can still apply: it's your call.</p></div>}
+      {job.hold_reason && job.status === "filled" && <p className="note warn">Autopilot held this for you: {job.hold_reason}. Check it in the browser below and submit, or click Submit there.</p>}
       {job.error && !/connect/i.test(job.error) && <p className="note warn">{job.error}</p>}
 
       <LivePeek id={id} company={job.company} />

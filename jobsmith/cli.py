@@ -39,7 +39,12 @@ def main() -> None:
         if not getattr(args, "no_open", False):
             import threading
             threading.Timer(1.5, webbrowser.open, args=(f"http://127.0.0.1:{port}",)).start()
-        uvicorn.run("jobsmith.api:app", host="127.0.0.1", port=port, log_level="warning")
+        # If the engine ever dies from a crash in native code, leave the traceback in server.log.
+        import faulthandler
+        from .config import DATA_DIR
+        faulthandler.enable(open(DATA_DIR / "crash.log", "a"), all_threads=True)
+        # Plain asyncio rather than uvloop: a little slower, nothing native to crash on new Pythons.
+        uvicorn.run("jobsmith.api:app", host="127.0.0.1", port=port, log_level="warning", loop="asyncio", http="h11")
     elif args.cmd == "sync":
         from . import db, match, sources
         db.conn()

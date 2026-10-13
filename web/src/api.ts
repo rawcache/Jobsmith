@@ -6,6 +6,7 @@ export type Job = {
   description?: string; research?: Research; questions?: unknown[];
   referral_name?: string | null; referral_url?: string | null; outcome?: string | null; tokens?: number;
   match?: number | null; match_hits?: number; match_total?: number; connections?: number; hold_reason?: string | null;
+  eligibility?: { ok?: boolean; reasons?: string[]; notes?: string[] };
 };
 export type Research = {
   summary?: string; what_the_team_builds?: string; tech_stack?: string[];

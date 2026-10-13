@@ -39,6 +39,7 @@ UPLOADS_DIR = DATA_DIR / "uploads"
 RUNS_DIR = DATA_DIR / "runs"            # screenshots + snapshots of what was submitted
 BROWSER_PROFILE = DATA_DIR / "browser-profile"
 LLM_WORKDIR = DATA_DIR / "llm"          # cwd for `claude -p` so no project CLAUDE.md leaks in
+EXTENSION_DIR = PKG / "extension" if (PKG / "extension" / "manifest.json").exists() else ROOT / "extension"
 WEB_DIST = PKG / "web_dist" if (PKG / "web_dist" / "index.html").exists() else ROOT / "web" / "dist"
 
 for _d in (DATA_DIR, UPLOADS_DIR, RUNS_DIR, BROWSER_PROFILE, LLM_WORKDIR):
@@ -62,6 +63,9 @@ DEFAULT_SETTINGS: dict = {
     "ollama_model": "",                # blank = pick the best installed model
     "onboarded": False,
     "goal": "",
+    "goals": [],                       # internship | newgrad | targeted (several allowed)
+    "target_companies": [],            # for "targeted": companies you named
+    "setup_step": "",                  # where first-run setup is (the terminal hands "profile" to the website)
     "claude_path": "claude",
     "claude_oauth_token": "",          # set by "Connect Claude" in the dashboard
     "attachment_name": "",             # file name employers see; default First_Last_resume.pdf
@@ -74,8 +78,8 @@ DEFAULT_SETTINGS: dict = {
     "exclude_companies": [],
     "min_fit_score": 40,
     # --- Limits -----------------------------------------------------------
-    "max_applications_per_day": 25,
-    "max_applications_per_company": 3,
+    "max_applications_per_day": 0,      # 0 = no limit (you can set one in Settings)
+    "max_applications_per_company": 0,
     "concurrency": 2,                  # parallel browser fills
     "llm_concurrency": 3,              # parallel drafting calls
     # --- Autonomy ---------------------------------------------------------
@@ -93,7 +97,7 @@ DEFAULT_SETTINGS: dict = {
     # --- Unattended mode --------------------------------------------------
     "auto_run": True,                  # sync lists + start best new matches on a schedule
     "auto_interval_hours": 6,
-    "auto_max_per_run": 10,
+    "auto_max_per_run": 25,
     "auto_last_run": 0,
     "notifications": True,
     # --- Outcome tracking (Gmail, read-only via IMAP app password) ---------

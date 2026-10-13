@@ -43,7 +43,7 @@ export default function Home() {
         {d && (
           <p>
             {on ? <>Sent {plural(d.applied_today, "application")} today, {d.applied_week} this week. {d.queued} good matches are waiting
-              {d.next_run ? `, and the next check is at ${clock(d.next_run)}` : ""}. It stops at {d.daily_cap} a day and holds anything it isn't sure about for you.</>
+              {d.next_run ? `, and the next check is at ${clock(d.next_run)}` : ""}{d.daily_cap ? `. It stops at ${d.daily_cap} a day` : ""}. Anything it isn't sure about waits for you.</>
               : <>When it's on, Jobsmith checks your job lists every few hours and applies to roles with a fit of {d.min_fit} or more, under your name, without you at the screen. {d.queued} matches are ready now.</>}
             {status ? <> AI used today: {tok(status.tokens_today)} tokens.</> : null}
           </p>

@@ -26,9 +26,12 @@ from . import db, llm
 from .config import DATA_DIR
 
 # Biggest model that runs comfortably in this much RAM (GB). Sizes are the download.
+# The model has to share memory with Chrome and everything else you have open, so it gets about half.
 MODELS = [  # (min RAM, model, download GB)
+    (31.0, "qwen3:30b-a3b-instruct-2507-q4_K_M", 19.0),   # mixture-of-experts: big-model writing, small-model speed
+    (20.0, "qwen3:14b", 9.3),
     (15.0, "qwen3:8b", 5.2),
-    (7.0, "qwen3:4b", 2.5),
+    (7.0, "qwen3:4b-instruct-2507-q4_K_M", 2.5),
     (0.0, "qwen3:1.7b", 1.4),
 ]
 ENGINE_GB = {"Darwin": 0.2, "Windows": 1.0, "Linux-x86_64": 1.5, "Linux-aarch64": 1.0}   # roughly; includes GPU support
@@ -276,3 +279,30 @@ async def wake() -> None:
     s = db.get_settings()
     if s.get("llm_backend") in ("ollama", "auto") and not remote() and find_ollama() and not await running():
         await start()
+
+
+SAMPLE = {
+    "system": "You write answers for a job application. Use only the facts given. Be specific and concise. Reply with JSON.",
+    "prompt": ("Facts about the applicant:\n"
+               "- Built a RISC-V pipeline simulator in TypeScript used by 300 students in a computer architecture course\n"
+               "- Data engineering internship: moved nightly batch jobs to Spark Structured Streaming, cutting latency from 6 hours to 4 minutes\n"
+               "- Hackathon winner: wildfire smoke detection on a Jetson Nano with a LoRa mesh\n\n"
+               "Company: a payments company building real-time fraud detection.\n"
+               "Question: Why are you interested in this role? (80 to 120 words)\n"
+               'Reply as {"answer": "...", "facts_used": [numbers of the facts you used]}'),
+}
+
+
+async def selftest(model: str = "") -> dict:
+    """One realistic application answer, timed, so you can judge smith's writing on your own machine."""
+    b = llm.OllamaLocal(model or db.get_settings().get("ollama_model") or "")
+    t0 = time.time()
+    try:
+        out = await b.complete_json(SAMPLE["system"], SAMPLE["prompt"], timeout=300)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e)}
+    secs = time.time() - t0
+    answer = (out or {}).get("answer", "") if isinstance(out, dict) else ""
+    words = len(answer.split())
+    return {"ok": bool(answer), "model": b.model, "seconds": round(secs, 1), "answer": answer, "words": words,
+            "tokens": b.last_usage, "grade": "good" if answer and 60 <= words <= 160 and secs < 90 else "check"}

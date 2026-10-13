@@ -3,7 +3,7 @@ name = "jobsmith"
 version = "0.1.0"
 description = "Applies to jobs and internships for you, from your real resume, and never makes anything up."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"   # 3.14: native deps (uvloop, greenlet) not yet reliable
 license = { text = "MIT" }
 dependencies = [
   "fastapi>=0.115",
@@ -14,6 +14,7 @@ dependencies = [
   "python-multipart>=0.0.9",
   "beautifulsoup4>=4.12",
   "rich>=15.0.0",
+  "questionary>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -31,6 +32,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["jobsmith"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"extension" = "jobsmith/extension"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

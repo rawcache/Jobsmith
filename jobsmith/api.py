@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import shutil
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -14,6 +15,22 @@ from . import (ats, claude_login, commands, db, eligibility, onboarding, outcome
 from .config import UPLOADS_DIR, WEB_DIST
 
 app = FastAPI(title="Jobsmith", docs_url="/api/docs")
+
+LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
+
+
+@app.middleware("http")
+async def only_local_callers(request, call_next):
+    """The engine only talks to this computer: its own dashboard, the terminal, and the Chrome extension.
+    A website you visit can't make it do anything (Origin check), and neither can a DNS-rebinding trick (Host check)."""
+    host = (request.headers.get("host") or "").rsplit(":", 1)[0]
+    origin = request.headers.get("origin") or ""
+    o_host = origin.split("://", 1)[-1].rsplit(":", 1)[0] if origin else ""
+    if host not in LOCAL_HOSTS and host != "testserver":
+        return JSONResponse({"detail": "Jobsmith only answers on this computer."}, status_code=403)
+    if origin and not origin.startswith("chrome-extension://") and o_host not in LOCAL_HOSTS:
+        return JSONResponse({"detail": "Not allowed from a website."}, status_code=403)
+    return await call_next(request)
 
 
 @app.on_event("startup")
@@ -83,6 +100,7 @@ async def status():
             "needs_you": db.q1("SELECT COUNT(*) n FROM jobs WHERE status IN ('filled','error')")["n"],
             "tokens_today": _usage_rows("at > ?", (db.now() - 86400,))["tokens"],
             "onboarded": bool(s_.get("onboarded")) or bool(db.q1("SELECT 1 FROM runs WHERE kind='submit' LIMIT 1")),
+            "setup_step": s_.get("setup_step") or "",
             "live": len(runner.live_list())}
 
 
@@ -124,13 +142,15 @@ async def onboarding_state():
 
 
 class GoalIn(BaseModel):
-    goal: str
+    goal: str = ""
+    goals: list[str] = []
     categories: list[str] = []
+    companies: list[str] = []
 
 
 @app.post("/api/onboarding/goal")
 async def onboarding_goal(g: GoalIn):
-    patch = onboarding.set_goal(g.goal, g.categories)
+    patch = onboarding.set_goal(g.goals or g.goal or "internship", g.categories, g.companies)
     spawn_sync()
     return patch
 
@@ -150,12 +170,41 @@ async def onboarding_ai(a: AiIn):
 
 class FinishIn(BaseModel):
     autonomy: str = "autopilot"
+    start_now: bool = False
 
 
 @app.post("/api/onboarding/finish")
 def onboarding_finish(f: FinishIn):
-    onboarding.finish(f.autonomy)
+    onboarding.finish(f.autonomy, f.start_now)
     return {"ok": True}
+
+
+_start_task = None
+
+
+@app.post("/api/onboarding/start")
+async def onboarding_start():
+    """Setup's last step: go. Applies to the companies you named and starts autopilot's first run now."""
+    import asyncio
+    global _start_task
+    s_ = db.get_settings()
+    if not s_.get("onboarded"):
+        onboarding.finish(s_.get("autonomy") or "autopilot", start_now=True)
+    companies = s_.get("target_companies") or []
+
+    async def go():
+        for c in companies:
+            try:
+                await commands.run(f"apply to {c}")
+            except Exception:   # one company failing shouldn't stop the rest
+                pass
+        if scheduler.enabled(db.get_settings()):
+            db.set_settings({"auto_last_run": time.time()})
+            await scheduler.run_once("first")
+    if _start_task is None or _start_task.done():
+        _start_task = asyncio.create_task(go())
+    db.set_settings({"setup_step": "started"})
+    return {"ok": True, "companies": companies, "autopilot": scheduler.enabled(db.get_settings())}
 
 
 @app.post("/api/onboarding/first-run")
@@ -192,6 +241,11 @@ class SmithIn(BaseModel):
 @app.post("/api/smith/setup")
 async def smith_setup(b: SmithIn):
     return smith.spawn_setup(b.model, b.allow_install)
+
+
+@app.post("/api/smith/test")
+async def smith_test():
+    return await smith.selftest()
 
 
 @app.get("/api/ai")
@@ -752,7 +806,8 @@ async def live_shot(job_id: str):
 
 @app.post("/api/live/{job_id}/show")
 async def live_show(job_id: str):
-    return {"ok": await runner.live_show(job_id)}
+    r = await runner.live_show(job_id)
+    return {"ok": bool(r), "pending": r == "pending"}
 
 
 @app.post("/api/live/hide")
@@ -777,6 +832,72 @@ async def live_close(job_id: str):
         await page.close()
     runner.live_drop(job_id)
     return {"ok": True}
+
+
+# --------------------------------------------------------------------------- Chrome extension
+class ExtFill(BaseModel):
+    url: str
+    title: str = ""
+    company: str = ""
+    site_name: str = ""
+    fields: list[dict] = []
+
+
+class ExtSave(BaseModel):
+    url: str
+    title: str = ""
+    company: str = ""
+    site_name: str = ""
+    apply: bool = False
+
+
+@app.get("/api/ext/install")
+def ext_install():
+    from .config import EXTENSION_DIR
+    return {"path": str(EXTENSION_DIR), "exists": (EXTENSION_DIR / "manifest.json").exists()}
+
+
+@app.get("/api/ext/ping")
+async def ext_ping():
+    s_ = db.get_settings()
+    ok, msg = await llm.available_cached(role="write")
+    pdf = profile.attachment_file()
+    return {"ok": True, "name": "Jobsmith", "onboarded": bool(s_.get("onboarded")), "ai": llm.label(llm.backend("write")),
+            "ai_ok": ok, "resume": pdf.name if pdf else None, "autonomy": s_.get("autonomy")}
+
+
+@app.post("/api/ext/answers")
+async def ext_answers(b: ExtFill):
+    from . import extension
+    with llm.usage_for(None, "answers"):
+        return await extension.answers(b.url, b.fields, b.title, b.company, b.site_name)
+
+
+@app.get("/api/ext/file/{kind}")
+def ext_file(kind: str, job_id: str = ""):
+    from . import extension
+    f = extension.file_for(kind, job_id)
+    if f is None:
+        raise HTTPException(404, "No file for that yet. Add your resume PDF in Profile.")
+    if isinstance(f, str):     # a cover letter's text
+        return Response(f.encode(), media_type="text/plain", headers={"X-Filename": "Cover letter.txt"})
+    return FileResponse(f, media_type="application/pdf", headers={"X-Filename": f.name})
+
+
+@app.post("/api/ext/save")
+async def ext_save(b: ExtSave):
+    """'Send to Jobsmith' from a posting: add it, read it, score it, and (if asked) apply with autopilot."""
+    from . import extension, jobdetail
+    jid = extension.find_or_add(b.url, b.title, b.company or extension.company_guess(b.url, b.site_name))
+    try:
+        await jobdetail.fetch_job(jid)
+    except Exception as e:
+        db.x("UPDATE jobs SET error=? WHERE id=?", (str(e)[:300], jid))
+    match.rescore([jid])
+    started = runner.spawn(jid, "autopilot", runner.autopilot([jid], force=True)) if b.apply else False
+    j = job_or_404(jid)
+    return {"job_id": jid, "company": j["company"], "title": j["title"], "fit": j.get("fit_score"),
+            "eligibility": eligibility.check(j), "started": bool(started)}
 
 
 # --------------------------------------------------------------------------- dashboard

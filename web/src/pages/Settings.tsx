@@ -54,11 +54,13 @@ export default function Settings() {
           {status?.auto.last_summary && <span className="small muted">Last run: {status.auto.last_summary}</span>}</div>
       </section>
 
+      <ExtensionCard />
+
       <section className="card">
         <h2>Limits</h2>
         <div className="grid-2 tight">
-          <label className="field">Applications per day<input type="number" min={1} value={s.max_applications_per_day} onChange={num("max_applications_per_day")} /></label>
-          <label className="field">Per company<input type="number" min={1} value={s.max_applications_per_company} onChange={num("max_applications_per_company")} /></label>
+          <label className="field">Applications per day<input type="number" min={0} placeholder="No limit" value={s.max_applications_per_day || ""} onChange={num("max_applications_per_day")} /></label>
+          <label className="field">Per company<input type="number" min={0} placeholder="No limit" value={s.max_applications_per_company || ""} onChange={num("max_applications_per_company")} /></label>
           <label className="field">Forms filled at once<input type="number" min={1} max={6} value={s.concurrency} onChange={num("concurrency")} /></label>
           <label className="field">AI calls at once<input type="number" min={1} max={8} value={s.llm_concurrency} onChange={num("llm_concurrency")} /></label>
         </div>
@@ -170,5 +172,22 @@ export default function Settings() {
           .then(r => setSaved(r.error ?? `Checked ${r.checked} emails, ${r.new_outcomes} new replies matched`))}>Check now</button>
       </section>
     </div>
+  );
+}
+
+function ExtensionCard() {
+  const [x, setX] = useState<{ path: string; exists: boolean } | null>(null);
+  useEffect(() => { api.get<{ path: string; exists: boolean }>("/api/ext/install").then(setX).catch(() => {}); }, []);
+  if (!x?.exists) return null;
+  return (
+    <section className="card">
+      <h2>Chrome extension</h2>
+      <p>Fill any application you're looking at from your profile (Alt+J), and send postings to autopilot with one click. It never submits.</p>
+      <ol className="small">
+        <li>Open <code>chrome://extensions</code> and turn on Developer mode.</li>
+        <li>Click Load unpacked and choose <code className="path">{x.path}</code></li>
+        <li>Pin Jobsmith from the puzzle-piece menu.</li>
+      </ol>
+    </section>
   );
 }

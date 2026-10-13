@@ -31,7 +31,8 @@ def _remaining_today() -> int:
     s = db.get_settings()
     day_ago = time.time() - 86400
     done = db.q1("SELECT COUNT(*) n FROM runs WHERE kind='submit' AND status='done' AND finished_at>?", (day_ago,))["n"]
-    return max(0, int(s["max_applications_per_day"]) - done)
+    cap = int(s.get("max_applications_per_day") or 0)
+    return 10**6 if cap <= 0 else max(0, cap - done)
 
 
 def queue(job_ids: list[str], force: bool = False, mode: str | None = None) -> list[str]:

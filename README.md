@@ -29,7 +29,7 @@ powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/raw
 jobsmith
 ```
 
-The first run asks four questions (your goal, which AI, your resume, autopilot or copilot), then fills your first application in front of you without submitting it. If you don't have an AI key, it sets up **smith** for you (below) while you answer the rest.
+The first run asks what you're applying for and which AI to use (arrow keys, pick as many as you like), then opens the dashboard for your resume and details. The terminal shows each one as it arrives. Then autopilot starts, and you can watch any application being filled in a real browser window.
 
 ## Two ways to use it
 
@@ -41,45 +41,41 @@ The first run asks four questions (your goal, which AI, your resume, autopilot o
 | `jobsmith "apply to ramp"` | one request, then watch it |
 | `jobsmith --autopilot "..."` | submit whatever it's confident about without asking, this run only |
 | `jobsmith status` / `watch` / `review` | what's running, follow along, go through held answers |
+| `jobsmith watch` | live view; press a row's number to watch that form fill in the browser |
 | `jobsmith smith` | set up smith, the free AI that runs on your computer |
+| `jobsmith extension` | add Jobsmith to Chrome |
 | `jobsmith web` | open the dashboard |
 
 **Dashboard** at http://127.0.0.1:8765: matches with resume fit and who you know at each company, a live view of every application being filled (take over any time), a tracker, your documents, and your profile.
 
-## AI: smith, or bring your own
+**Chrome extension** (`extension/`): on any job site, fill the application you're looking at from your profile (Alt+J), or send the posting to autopilot. It never submits. See [extension/README.md](extension/README.md).
 
-**smith** is Jobsmith's own AI: a small open model (Qwen3) that runs on your computer through [Ollama](https://ollama.com). It's free, and what you write never leaves your machine. You don't install anything yourself: pick smith during setup (or run `jobsmith smith`) and Jobsmith
-1. finds Ollama, or installs it into your user folder (no admin rights),
-2. starts it,
-3. downloads the model that fits your memory, with a progress bar:
+## AI
+
+Setup recommends **Gemini's free tier**: it writes well, can research companies on the web, and a key takes a minute at [aistudio.google.com/apikey](https://aistudio.google.com/apikey). On the free tier Google may use your prompts to improve its models; a paid key or smith avoids that. If the free daily limit runs out, Jobsmith switches to smith for the rest of the day when smith is installed.
+
+**smith** is Jobsmith's own AI, fully private: an open model (Qwen3) running on your computer through [Ollama](https://ollama.com). Pick it during setup (or run `jobsmith smith`) and Jobsmith installs Ollama into your user folder (no admin), starts it, downloads the model that fits your memory, and writes a sample answer so you can judge it:
 
 | Memory | Model | Download |
 |---|---|---|
-| 16 GB or more | qwen3:8b | 5.2 GB |
-| 8 GB | qwen3:4b | 2.5 GB (works, slower) |
-| less | qwen3:1.7b | 1.4 GB |
+| 32 GB or more | qwen3:30b-a3b (instruct) | 19 GB |
+| 24 GB | qwen3:14b | 9.3 GB |
+| 16 GB | qwen3:8b | 5.2 GB |
+| 8 GB | qwen3:4b (instruct) | 2.5 GB (works, slower) |
 
-You keep using Jobsmith while it downloads. To run smith on another computer, like a Mac mini, set `OLLAMA_HOST=http://mac-mini.local:11434` and Jobsmith uses that one instead. smith can't search the web, so company research uses the posting itself unless you add a key for research.
+smith can't search the web, so research uses the posting itself. To run it on another computer, like a Mac mini, set `OLLAMA_HOST=http://mac-mini.local:11434`.
 
-Or use your own key:
-
-| Option | Cost | Notes |
-|---|---|---|
-| Anthropic API key | pay per use | `ANTHROPIC_API_KEY` is picked up automatically |
-| OpenAI API key | pay per use | `OPENAI_API_KEY`; separate from a ChatGPT subscription |
-| Gemini API key (Google AI Studio) | free tier | `GEMINI_API_KEY` |
-
-Jobsmith uses the first one it finds (an API key, then smith), and you can pick separately for writing and for research. The Stats page shows exactly how many tokens each application used.
+Also supported: an Anthropic or OpenAI API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY` are picked up automatically). You can use one AI for writing and another for research. The Stats page shows the tokens each application used.
 
 ## What it won't do
 
 - **Make things up.** Every written answer cites facts from your resume and profile. Contact details, work authorization and demographics only ever come from what you entered.
-- **Apply where you don't qualify.** Required citizenship or clearance, sponsorship, degree level, graduation window and years of experience are checked first.
+- **Apply where you don't qualify, unless you say so.** Required citizenship or clearance, sponsorship, degree level, graduation window and years of experience are checked first; autopilot skips those, and "Apply anyway" overrides it.
 - **Message anyone.** It shows people you know at a company (from your LinkedIn connections export) so you can ask for a referral yourself.
 - **Automate LinkedIn Easy Apply** or type your passwords. Sign-ins, CAPTCHAs and emailed codes come to you.
 - **Leave your computer.** Your data lives in `~/.jobsmith` (or `./data` in a source checkout). The only things sent anywhere are your applications, to the employers, and prompts to the AI you chose.
 
-You're responsible for what's submitted in your name. Daily and per-company limits are on by default.
+You're responsible for what's submitted in your name. There are no daily or per-company caps unless you set them in Settings.
 
 ## How it applies
 

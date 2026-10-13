@@ -131,6 +131,10 @@ def _derived(canon: str, ans: dict, job: dict | None = None) -> tuple[str, bool]
     if canon == "us_person":
         cit = v("us_citizen").lower()
         return ("Yes" if cit == "yes" else ""), c("us_citizen")
+    if canon == "country" and not v("country"):
+        # A US citizen, or someone with a US state in their location, lives in the United States.
+        if v("us_citizen").lower() == "yes" or state_from_location(v("location")):
+            return "United States", c("us_citizen") or c("location")
     if canon == "city" and not v("city"):
         return v("location").split(",")[0].strip(), c("location")
     if canon == "other_links":
@@ -161,9 +165,24 @@ EDU_DATE_FIELDS = {"start-month--0": ("enrollment_start", 0), "start-year--0": (
                    "end-month--0": ("graduation_date", 0), "end-year--0": ("graduation_date", 1)}
 
 
-def deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | None:
+EDU_DATE_LABEL = re.compile(r"^(start|end|graduation|expected graduation|enrollment)\s*(date)?\s*(month|year)$", re.I)
+
+
+def _edu_date(field: dict) -> tuple[str, int] | None:
+    """Greenhouse's education date pickers, by field name or (on other sites, or via the extension) by label."""
     if field["field"] in EDU_DATE_FIELDS:
-        key, idx = EDU_DATE_FIELDS[field["field"]]
+        return EDU_DATE_FIELDS[field["field"]]
+    m = EDU_DATE_LABEL.match(field.get("label", "").strip())
+    if m:
+        return ("enrollment_start" if m.group(1).lower() in ("start", "enrollment") else "graduation_date",
+                0 if m.group(3).lower() == "month" else 1)
+    return None
+
+
+def deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | None:
+    edu = _edu_date(field)
+    if edu:
+        key, idx = edu
         row = ans.get(key) or {}
         val = _month_year(row.get("value", ""))[idx]
         issues = [] if val else [f"Add '{row.get('label', key)}' on the Profile page"]

@@ -15,7 +15,8 @@ function stateLine(j: Job, busy?: string) {
   if (j.status === "submitted") return <span className="ok-text">Applied{j.outcome ? `, ${OUTCOME_LABEL[j.outcome].toLowerCase()}` : ""}</span>;
   if (j.status === "filled") return <span className="warn-text">Needs one click</span>;
   if (j.status === "error") return <span className="warn-text">Needs you</span>;
-  if (j.status === "skipped") return <span className="muted">Skipped</span>;
+  if (j.status === "skipped") return <span className="muted" title={j.hold_reason ?? ""}>Skipped{j.eligibility && j.eligibility.ok === false ? ": may not qualify" : ""}</span>;
+  if (j.eligibility && j.eligibility.ok === false) return <span className="muted" title={(j.eligibility.reasons ?? []).join(" ")}>May not qualify</span>;
   return null;
 }
 

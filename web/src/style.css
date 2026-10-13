@@ -420,3 +420,13 @@ details > summary { cursor: pointer; color: var(--accent); }
 .meter span { display: block; height: 100%; background: var(--accent); transition: width .5s ease; }
 .smith-line { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line-2); }
 .smith-line .meter { margin-bottom: 0; }
+.checklist { list-style: none; padding: 0; margin: 14px 0; border: 1px solid var(--line); border-radius: 8px; }
+.checklist li { display: grid; grid-template-columns: 18px 1fr auto; gap: 10px; padding: 8px 12px; border-top: 1px solid var(--line-2); font-size: 14px; }
+.checklist li:first-child { border-top: 0; }
+.checklist .mark { color: var(--muted); font-weight: 600; }
+.checklist li.done .mark { color: var(--ok, #1a7f37); }
+.checklist li.need .mark { color: var(--warn, #9a6700); }
+.checklist .val { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ask-missing .field { margin: 8px 0; }
+@media (max-width: 560px) { .checklist li { grid-template-columns: 18px 1fr; } .checklist .val { grid-column: 2; max-width: none; } }
+code.path { word-break: break-all; }

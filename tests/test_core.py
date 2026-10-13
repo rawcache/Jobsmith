@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import pytest
@@ -274,7 +275,7 @@ async def test_profile_json_import_and_attachment_name(tmp_path, monkeypatch):
     import json as j
     pj = tmp_path / "profile.json"
     pj.write_text(j.dumps({
-        "answers": {"email": "alex@gmail.com", "state_province": "GA", "us_citizen": "Yes"},
+        "answers": {"email": "alex@example.com", "state_province": "GA", "us_citizen": "Yes"},
         "experience": [{"title": "Data Engineer", "company": "Acme Data", "start": "2024-01", "end": "present"}],
         "facts": [{"category": "award", "text": "CURO Research Award"}],
         "attachment_name": "Alex Rivera resume.pdf",
@@ -284,7 +285,7 @@ async def test_profile_json_import_and_attachment_name(tmp_path, monkeypatch):
     assert res["answers"] == 3 and res["facts"] == 1
     assert await profile.import_profile_json() is None                     # unchanged file isn't re-imported
     a = profile.answers()
-    assert a["email"]["value"] == "alex@gmail.com" and a["email"]["confirmed"] == 1
+    assert a["email"]["value"] == "alex@example.com" and a["email"]["confirmed"] == 1
     assert any(f["text"] == "CURO Research Award" for f in profile.facts())
     from jobsmith.draft import deterministic
     st = deterministic({"field": "q", "label": "Which state do you reside in?", "qtype": "text", "options": [],
@@ -594,9 +595,10 @@ def test_scheduler_waits_for_setup():
 
 def test_smith_picks_a_model_that_fits_memory():
     from jobsmith import smith
-    assert smith.recommended(32)["model"] == "qwen3:8b"
+    assert smith.recommended(64)["model"].startswith("qwen3:30b-a3b-instruct")
+    assert smith.recommended(24)["model"] == "qwen3:14b"
     assert smith.recommended(16)["model"] == "qwen3:8b"
-    assert smith.recommended(8)["model"] == "qwen3:4b" and smith.recommended(8)["slow"]
+    assert smith.recommended(8)["model"].startswith("qwen3:4b-instruct") and smith.recommended(8)["slow"]
     assert smith.recommended(4)["model"] == "qwen3:1.7b"
 
 
@@ -650,3 +652,148 @@ def test_old_wyzard_data_is_carried_over(tmp_path):
     new = tmp_path / ".jobsmith"
     _migrate_from_wyzard(new)
     assert (new / "jobsmith.db").read_text() == "x" and not old.exists()
+
+
+def test_moved_project_folder_keeps_uploaded_files(tmp_path):
+    """Paths saved under an old folder (wyzard/data/...) are found again under today's data folder."""
+    from jobsmith import config
+    from jobsmith.db import _rehome
+    f = config.DATA_DIR / "uploads" / "rehome-test.pdf"
+    f.write_bytes(b"%PDF")
+    try:
+        assert _rehome("/Users/someone/wyzard/data/uploads/rehome-test.pdf") == str(f)
+        assert _rehome("/Users/someone/wyzard/data/uploads/missing.pdf") is None
+        assert _rehome(str(f)) is None
+    finally:
+        f.unlink()
+
+
+def test_autopilot_waits_for_the_first_supervised_run():
+    import time
+    from jobsmith import db, onboarding, scheduler
+    before = db.get_settings()
+    try:
+        db.set_settings({"onboarded": False, "auto_last_run": 0})
+        onboarding.finish("autopilot")
+        s = db.get_settings()
+        interval = float(s.get("auto_interval_hours") or 6) * 3600
+        starts_in = s["auto_last_run"] + interval - time.time()
+        assert scheduler.enabled(s) and 15 * 60 < starts_in <= 20 * 60 + 5
+    finally:
+        db.set_settings({k: before.get(k) for k in ("onboarded", "auto_last_run", "autonomy", "auto_run")})
+
+
+def test_setup_goals_are_multi_select(monkeypatch):
+    from jobsmith import db, onboarding, sources
+    added = []
+    monkeypatch.setattr(sources, "add_source", lambda url: added.append(url))
+    before = db.get_settings()
+    try:
+        p = onboarding.set_goal(["internship", "newgrad", "targeted"], ["Software"], ["NVIDIA", " Ramp ", ""])
+        assert p["goals"] == ["internship", "newgrad", "targeted"]
+        assert set(p["target_terms"]) == {"Summer 2027", "New Grad"} and p["target_companies"] == ["NVIDIA", "Ramp"]
+        assert len(added) == 2
+        assert onboarding.goals_of({"goal": "both"}) == ["internship", "newgrad"]      # older installs
+    finally:
+        db.set_settings({k: before.get(k) for k in ("goal", "goals", "target_terms", "target_categories",
+                                                     "target_companies", "min_fit_score")})
+
+
+def test_setup_checklist_says_what_autopilot_still_needs():
+    from jobsmith import onboarding
+    items = {c["key"]: c for c in onboarding.checklist()}
+    assert {"resume", "pdf", "name", "email", "work_authorized_us", "needs_sponsorship"} <= {k for k, c in items.items() if c["required"]}
+    assert onboarding.profile_ready() == all(c["done"] for c in items.values() if c["required"])
+
+
+def test_no_application_caps_by_default():
+    from jobsmith import commands, config, runner
+    assert config.DEFAULT_SETTINGS["max_applications_per_day"] == 0
+    assert commands._remaining_today() > 1000
+    assert runner.limit_check({"id": "x", "company": "Anything"}) is None
+
+
+async def test_watching_an_application_before_its_form_opens():
+    """Press a number in the terminal while it's still researching: the window comes up when the form opens."""
+    from jobsmith import runner
+    shown = []
+
+    async def fake_set_window(page, state):
+        shown.append(state)
+        return True
+
+    class Page:
+        def is_closed(self):
+            return False
+
+    orig = runner.browser.set_window
+    runner.browser.set_window = fake_set_window
+    try:
+        assert await runner.live_show("job-early") == "pending" and "job-early" in runner.WATCH
+        runner.live_set("job-early", Page(), phase="opening")
+        await asyncio.sleep(0.05)
+        assert shown == ["normal"] and "job-early" not in runner.WATCH and runner.browser.shown
+    finally:
+        runner.browser.set_window = orig
+        runner.browser.shown = False
+        runner.browser.focus_job = None
+        runner.live_drop("job-early")
+
+
+async def test_gemini_free_quota_falls_back_to_smith(monkeypatch):
+    import httpx
+    from jobsmith import llm
+    calls = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls.append(req.url.host)
+        if "googleapis" in req.url.host:
+            return httpx.Response(429, text='{"error": {"details": [{"quotaId": "GenerateRequestsPerDayPerProject"}]}}')
+        if req.url.path == "/api/tags":
+            return httpx.Response(200, json={"models": [{"name": "qwen3:8b"}]})
+        return httpx.Response(200, json={"message": {"content": '{"answer": "from smith"}'},
+                                         "prompt_eval_count": 5, "eval_count": 3})
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **k: real(*a, transport=httpx.MockTransport(handler),
+                                                                 **{x: y for x, y in k.items() if x != "transport"}))
+    llm.set_backend_override(None)
+    monkeypatch.setattr(llm, "backend", lambda role="write": llm.GeminiAPI("k"))
+    out = await llm.complete_json("sys", "q")
+    assert out == {"answer": "from smith"} and calls.count("generativelanguage.googleapis.com") == 1
+
+
+async def test_gemini_bad_key_is_explained(monkeypatch):
+    import httpx
+    from jobsmith import llm
+    real = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **k: real(*a, transport=httpx.MockTransport(
+        lambda r: httpx.Response(400, text='{"error": {"message": "API key not valid. Please pass a valid API key."}}')),
+        **{x: y for x, y in k.items() if x != "transport"}))
+    with pytest.raises(llm.LLMError, match="isn't valid"):
+        await llm.GeminiAPI("bad").complete_json("s", "p")
+
+
+def test_engine_refuses_websites_but_serves_the_extension():
+    from fastapi.testclient import TestClient
+    from jobsmith.api import app
+    c = TestClient(app)
+    assert c.get("/api/ext/ping", headers={"Origin": "https://evil.example"}).status_code == 403
+    assert c.get("/api/ext/ping", headers={"Host": "attacker.example"}).status_code == 403
+    ok = c.get("/api/ext/ping", headers={"Origin": "chrome-extension://abcdefghijklmnop"})
+    assert ok.status_code == 200 and ok.json()["name"] == "Jobsmith"
+
+
+async def test_extension_answers_fields_from_the_profile():
+    from jobsmith import extension, profile
+    profile.set_answer("email", "alex@example.com", True)
+    profile.set_answer("graduation_date", "May 2027", True)
+    r = await extension.answers("https://job-boards.greenhouse.io/acme/jobs/123/apply",
+                                [{"id": "js1", "label": "Email", "type": "text", "required": True},
+                                 {"id": "js2", "label": "End date year", "type": "text"},
+                                 {"id": "js3", "label": "Resume/CV", "type": "file"}], title="Intern")
+    by = {a["id"]: a for a in r["answers"]}
+    assert r["company"] == "Acme" and by["js1"]["value"] == "alex@example.com"
+    assert by["js2"]["value"] == "2027" and by["js3"]["file"] == "resume"
+    # the same posting again finds the same job
+    assert extension.find_or_add("https://job-boards.greenhouse.io/acme/jobs/123") == r["job_id"]

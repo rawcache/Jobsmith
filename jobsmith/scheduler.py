@@ -53,7 +53,8 @@ def pick_new_jobs(limit: int) -> list[str]:
     # fillable sites first; multi-step sites only get drafted
     rows.sort(key=lambda r: (not runner.can_fill(r["ats"]), -(r["fit_score"] or 0)))
     for r in rows:
-        if per_company.get(r["company"], 0) >= int(s["max_applications_per_company"]):
+        cap = int(s.get("max_applications_per_company") or 0)
+        if cap > 0 and per_company.get(r["company"], 0) >= cap:
             continue
         out.append(r["id"])
         per_company[r["company"]] = per_company.get(r["company"], 0) + 1

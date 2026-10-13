@@ -24,6 +24,10 @@ class LLMError(RuntimeError):
     pass
 
 
+class QuotaError(LLMError):
+    """A free tier's limit ran out. Jobsmith falls back to smith when it's installed."""
+
+
 # Which application (and what for) the current AI call belongs to; set by callers with `usage_for`.
 _usage_ctx: contextvars.ContextVar[tuple[str | None, str]] = contextvars.ContextVar("usage_ctx", default=(None, "other"))
 
@@ -319,9 +323,24 @@ class GeminiAPI(Backend):
             body["tools"] = [{"google_search": {}}]   # can't be combined with JSON mode
         else:
             body["generationConfig"]["responseMimeType"] = "application/json"
-        async with httpx.AsyncClient(timeout=timeout) as c:
-            r = await c.post(f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent",
-                             json=body, headers={"x-goog-api-key": self.key})
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
+        for attempt in range(4):
+            try:
+                async with httpx.AsyncClient(timeout=timeout) as c:
+                    r = await c.post(url, json=body, headers={"x-goog-api-key": self.key})
+            except httpx.HTTPError as e:
+                raise LLMError(f"Couldn't reach Gemini: {e.__class__.__name__}")
+            if r.status_code not in (429, 500, 503) or attempt == 3:
+                break
+            if r.status_code == 429 and "PerDay" in r.text:
+                break                                     # waiting won't help today
+            m = re.search(r'"retryDelay":\s*"(\d+)', r.text)
+            await asyncio.sleep(min(60, int(m.group(1)) + 1) if m else 2 ** attempt * 3)
+        if r.status_code == 429:
+            raise QuotaError("Gemini's free tier limit is used up for now"
+                             + (" (daily limit; it resets tomorrow)." if "PerDay" in r.text else "."))
+        if r.status_code in (400, 403) and ("API_KEY_INVALID" in r.text or "API key not valid" in r.text):
+            raise LLMError("That Gemini key isn't valid. Copy it again from aistudio.google.com/apikey.")
         if r.status_code != 200:
             raise LLMError(f"Gemini API {r.status_code}: {r.text[:200]}")
         data = r.json()
@@ -407,7 +426,7 @@ class OllamaLocal(Backend):
         body = {"model": model, "stream": False, "format": schema or "json",
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": _schema_hint(prompt, schema)}],
                 "options": {"temperature": 0.3, "num_ctx": 16384}}
-        if model.startswith(("qwen3", "deepseek-r1")):
+        if model.startswith(("qwen3", "deepseek-r1")) and "instruct" not in model:
             body["think"] = False     # thinking models: answer directly, much faster
         try:
             async with httpx.AsyncClient(timeout=timeout) as c:
@@ -545,6 +564,12 @@ async def complete_json(system: str, prompt: str, schema: dict | None = None, we
         b = backend(role or ("research" if web else "write"))
         t0 = time.time()
         try:
+            return await b.complete_json(system, prompt, schema=schema, web=web)
+        except QuotaError:
+            if isinstance(b, OllamaLocal) or not await ollama_models():
+                raise
+            b = OllamaLocal(get_settings().get("ollama_model") or "")   # out of free quota: smith takes over
+            t0 = time.time()
             return await b.complete_json(system, prompt, schema=schema, web=web)
         finally:
             _record_usage(b, time.time() - t0)

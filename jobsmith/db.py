@@ -163,7 +163,38 @@ def conn() -> sqlite3.Connection:
         if "model" not in dcols:
             c.execute("ALTER TABLE drafts ADD COLUMN model TEXT")
         _conn = c
+        _rehome_paths(c)
     return _conn
+
+
+def _rehome(p: str | None) -> str | None:
+    """A file saved under an old data folder (the project folder was moved or renamed): find it in today's."""
+    if not p:
+        return None
+    from pathlib import Path
+    from .config import DATA_DIR
+    path = Path(p)
+    if path.exists() or not path.is_absolute():
+        return None
+    parts = path.parts
+    for i in range(len(parts) - 1, -1, -1):
+        if parts[i] in ("uploads", "runs", "attach", "documents"):
+            cand = DATA_DIR.joinpath(*parts[i:])
+            if cand.exists():
+                return str(cand)
+    return None
+
+
+def _rehome_paths(c: sqlite3.Connection) -> None:
+    for table, col in (("documents", "path"), ("runs", "screenshot"), ("runs", "snapshot")):
+        try:
+            rows = c.execute(f"SELECT id, {col} FROM {table} WHERE {col} IS NOT NULL AND {col} != ''").fetchall()
+        except sqlite3.Error:
+            continue
+        for r in rows:
+            new = _rehome(r[1])
+            if new:
+                c.execute(f"UPDATE {table} SET {col}=? WHERE id=?", (new, r[0]))
 
 
 def reset_for_tests(path) -> None:

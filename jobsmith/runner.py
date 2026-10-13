@@ -99,9 +99,18 @@ class Browser:
         page = await ctx.new_page()
         if db.get_setting("browser_window") != "visible" and not self.shown and not db.get_setting("headless"):
             await self.set_window(page, "minimized")
+        elif self.shown:
+            # You're watching one application: a new tab opening for another one shouldn't steal the view.
+            watched = (LIVE.get(self.focus_job) or {}).get("page") if self.focus_job else None
+            if watched is not None and not watched.is_closed():
+                try:
+                    await watched.bring_to_front()
+                except Exception:
+                    pass
         return page
 
-    shown = False   # True after you click Show, until you click Hide
+    shown = False            # True after you click Show, until you click Hide
+    focus_job: str | None = None   # the application you asked to watch
 
     async def close(self):
         # On Ctrl+C the terminal also stops Chrome, so it may already be gone.
@@ -125,10 +134,19 @@ PHASES = {"opening": "opening the form", "filling": "filling", "review": "ready 
           "error": "stopped"}
 
 
+WATCH: set[str] = set()   # applications you asked to see that hadn't opened a tab yet
+
+
 def live_set(job_id: str, page=None, **kw) -> None:
     cur = LIVE.setdefault(job_id, {"since": time.time(), "needs_code": False, "note": ""})
     if page is not None:
         cur["page"] = page
+        if job_id in WATCH:           # you asked to watch this one before its tab existed: show it now
+            WATCH.discard(job_id)
+            try:
+                asyncio.get_running_loop().create_task(live_show(job_id))
+            except RuntimeError:
+                pass
     cur.update(kw)
 
 
@@ -171,14 +189,21 @@ async def live_shot(job_id: str) -> bytes | None:
     return v.get("shot")
 
 
-async def live_show(job_id: str | None) -> bool:
+async def live_show(job_id: str | None) -> bool | str:
+    """Bring the browser window up on this application. If it's still being researched (no tab yet),
+    remember it and show it the moment its form opens. Returns 'pending' in that case."""
     page = (LIVE.get(job_id) or {}).get("page") if job_id else None
+    if (page is None or page.is_closed()) and job_id:
+        WATCH.add(job_id)
+        browser.focus_job = job_id
+        return "pending"
     if page is None or page.is_closed():
         ctx = browser.ctx
         page = ctx.pages[0] if ctx and ctx.pages else None
     if page is None:
         return False
     browser.shown = True
+    browser.focus_job = job_id
     return await browser.set_window(page, "normal")
 
 
@@ -187,6 +212,8 @@ async def live_hide() -> bool:
     if not ctx or not ctx.pages:
         return False
     browser.shown = False
+    browser.focus_job = None
+    WATCH.clear()
     return await browser.set_window(ctx.pages[0], "minimized")
 
 
@@ -264,11 +291,11 @@ def limit_check(job: dict) -> str | None:
     s = db.get_settings()
     day_ago = time.time() - 86400
     today = db.q1("SELECT COUNT(*) n FROM runs WHERE kind='submit' AND status='done' AND finished_at>?", (day_ago,))["n"]
-    if today >= int(s["max_applications_per_day"]):
+    if 0 < int(s.get("max_applications_per_day") or 0) <= today:
         return f"Daily limit reached ({today}/{s['max_applications_per_day']})"
     same = db.q1("SELECT COUNT(*) n FROM jobs WHERE company=? AND status='submitted' AND id!=?",
                  (job["company"], job["id"]))["n"]
-    if same >= int(s["max_applications_per_company"]):
+    if 0 < int(s.get("max_applications_per_company") or 0) <= same:
         return f"Already applied to {same} roles at {job['company']} (limit {s['max_applications_per_company']})"
     return None
 

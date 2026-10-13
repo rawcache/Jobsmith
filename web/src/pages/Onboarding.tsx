@@ -6,23 +6,48 @@ import Smith, { SmithLine } from "../components/Smith";
 
 type Goal = { label: string; terms: string[]; sources: string[] };
 type Detected = { kind: string; label: string; models?: string[] };
-type Resume = { has_resume: boolean; pdf: string | null; name: string; email: string; school: string; degree: string;
-  major: string; graduation: string; links: Record<string, string>; facts: number; to_confirm: number };
-type State = { onboarded: boolean; goal: string; goals: Record<string, Goal>; fields: string[]; categories: string[];
-  ai: { detected: Detected[]; ok: boolean; message: string; using: string; backend: string }; resume: Resume; autonomy: string };
+type Check = { key: string; label: string; required: boolean; value: string; done: boolean };
+type State = {
+  onboarded: boolean; goals_set: string[]; companies: string[]; goals: Record<string, Goal>; fields: string[];
+  categories: string[]; checklist: Check[]; profile_ready: boolean; setup_step: string; autonomy: string;
+  ai: { detected: Detected[]; ok: boolean; message: string; using: string; backend: string };
+  smith: { has_model: boolean; model: string };
+};
 
-const MANUAL: [string, string, string][] = [
+const KEYS: [string, string, string][] = [
+  ["gemini_api", "Gemini", "Free, writes well, and can research companies on the web. Takes a minute: sign in with Google and create a key."],
   ["anthropic_api", "Claude, with an Anthropic API key", "From console.anthropic.com. Billed per use."],
   ["openai_api", "ChatGPT, with an OpenAI API key", "From platform.openai.com. A ChatGPT subscription doesn't include this."],
-  ["gemini_api", "Gemini, with a Google AI Studio key", "From aistudio.google.com. Has a free tier."],
 ];
-const STEPS = ["Your goal", "AI", "Resume", "How it applies", "First application"];
+const KEY_URL: Record<string, string> = { gemini_api: "https://aistudio.google.com/apikey",
+  anthropic_api: "https://console.anthropic.com/settings/keys", openai_api: "https://platform.openai.com/api-keys" };
+const STEPS = ["What you're applying for", "AI", "Resume and details", "How it applies", "Start"];
+
+/** Fields the resume often misses, asked inline so autopilot has everything. */
+const ASK: Record<string, { key: string; label: string; choices?: string[]; placeholder?: string }[]> = {
+  name: [{ key: "first_name", label: "Legal first name" }, { key: "last_name", label: "Legal last name" }],
+  email: [{ key: "email", label: "Email for applications" }],
+  phone: [{ key: "phone", label: "Phone" }],
+  links: [{ key: "linkedin", label: "LinkedIn", placeholder: "https://linkedin.com/in/…" },
+          { key: "github", label: "GitHub", placeholder: "https://github.com/…" },
+          { key: "website", label: "Website or portfolio" }],
+  work_authorized_us: [{ key: "work_authorized_us", label: "Authorized to work in the US?", choices: ["Yes", "No"] }],
+  needs_sponsorship: [{ key: "needs_sponsorship", label: "Need visa sponsorship now or later?", choices: ["Yes", "No"] }],
+  graduation_date: [{ key: "graduation_date", label: "Graduation", placeholder: "May 2027" }],
+};
+
+function firstStep(s: State): number {
+  if (s.setup_step === "profile") return 2;          // the terminal already asked the first questions
+  if (!s.goals_set.length) return 0;
+  return s.ai.ok ? 2 : 1;
+}
 
 export default function Onboarding({ onDone }: { onDone: () => void }) {
-  const { status, refresh } = useContext(StatusCtx);
+  const { refresh } = useContext(StatusCtx);
   const [st, setSt] = useState<State | null>(null);
-  const [step, setStep] = useState(0);
-  const [goal, setGoal] = useState("internship");
+  const [step, setStep] = useState<number | null>(null);
+  const [goals, setGoals] = useState<string[]>(["internship"]);
+  const [companies, setCompanies] = useState("");
   const [cats, setCats] = useState<string[]>(["Software", "AI/ML/Data", "Hardware"]);
   const [ai, setAi] = useState("");
   const [key, setKey] = useState("");
@@ -30,21 +55,35 @@ export default function Onboarding({ onDone }: { onDone: () => void }) {
   const [mode, setMode] = useState("autopilot");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [vals, setVals] = useState<Record<string, string>>({});
+
   const load = () => api.get<State>("/api/onboarding").then(s => {
     setSt(s);
-    if (s.goal) setGoal(s.goal);
-    if (s.categories.length) setCats(s.categories);
-    setAi(a => a || s.ai.detected.find(d => d.kind !== "ollama")?.kind || "ollama");
+    setStep(cur => cur ?? firstStep(s));
+    return s;
   });
-  useEffect(() => { load(); }, []);
-  if (!st) return <div className="onb"><p className="muted"><Dots />Loading</p></div>;
+  useEffect(() => {
+    load().then(s => {
+      if (s.goals_set.length) setGoals(s.goals_set);
+      if (s.companies.length) setCompanies(s.companies.join(", "));
+      if (s.categories.length) setCats(s.categories);
+      const found = s.ai.detected.find(d => d.kind !== "ollama")?.kind;
+      setAi(found || (s.smith.has_model ? "ollama" : "gemini_api"));
+    });
+  }, []);
+  // The resume step updates as files are read (and as the terminal changes things).
+  useEffect(() => { if (step !== 2) return; const t = setInterval(load, 2000); return () => clearInterval(t); }, [step]);
+  if (!st || step == null) return <div className="onb"><p className="muted"><Dots />Loading</p></div>;
 
-  const next = () => { setMsg(""); setStep(s => s + 1); };
-  const saveGoal = async () => { setBusy(true); await api.post("/api/onboarding/goal", { goal, categories: cats }); setBusy(false); next(); };
+  const next = () => { setMsg(""); setStep(s => (s ?? 0) + 1); };
+  const toggle = (list: string[], v: string, on: boolean) => on ? [...new Set([...list, v])] : list.filter(x => x !== v);
+  const saveGoal = async () => {
+    setBusy(true);
+    await api.post("/api/onboarding/goal", { goals, categories: cats, companies: companies.split(",").map(c => c.trim()).filter(Boolean) });
+    setBusy(false); next();
+  };
   const saveAi = async () => {
-    if (ai === "ollama") {           // smith: setup runs in the background while you keep going
-      await api.post("/api/smith/setup", {}); refresh(); next(); return;
-    }
+    if (ai === "ollama") { await api.post("/api/smith/setup", {}); refresh(); next(); return; }
     setBusy(true);
     const r = await api.post<{ ok: boolean; message: string }>("/api/onboarding/ai", { kind: ai, key });
     setAiMsg(r); setBusy(false); refresh();
@@ -53,22 +92,35 @@ export default function Onboarding({ onDone }: { onDone: () => void }) {
   const upload = async (files: FileList | null) => {
     if (!files?.length) return;
     setBusy(true); setMsg("");
-    const f = files[0];
-    for (const slot of f.name.toLowerCase().endsWith(".pdf") ? ["resume", "resume_pdf"] : ["resume"]) {
-      const fd = new FormData(); fd.append("file", f); fd.append("slot", slot);
-      try { await api.post("/api/profile/upload", fd); } catch (e) { setMsg((e as Error).message); }
+    const list = Array.from(files);
+    const isPdf = (f: File) => f.name.toLowerCase().endsWith(".pdf");
+    // A .tex or .docx alongside the PDF is the better source to read; the PDF is then only what gets attached.
+    const hasSource = list.some(f => !isPdf(f));
+    for (const f of [...list.filter(f => !isPdf(f)), ...list.filter(isPdf)]) {
+      for (const slot of isPdf(f) ? (hasSource ? ["resume_pdf"] : ["resume", "resume_pdf"]) : ["resume"]) {
+        const fd = new FormData(); fd.append("file", f); fd.append("slot", slot);
+        try { await api.post("/api/profile/upload", fd); } catch (e) { setMsg((e as Error).message); }
+      }
     }
     await load(); setBusy(false); refresh();
   };
+  const saveVals = async () => {
+    for (const [k, v] of Object.entries(vals)) if (v.trim()) await api.put(`/api/answers/${k}`, { value: v.trim(), confirmed: true });
+    await api.post("/api/answers/confirm-all");
+    setVals({});
+    await load();
+  };
   const finish = async () => { setBusy(true); await api.post("/api/onboarding/finish", { autonomy: mode }); setBusy(false); refresh(); next(); };
+  const start = async () => { setBusy(true); await api.post("/api/onboarding/start"); setBusy(false); refresh(); onDone(); location.hash = "#/"; };
   const firstRun = async () => {
     setBusy(true);
     const r = await api.post<{ ok: boolean; message?: string; job_id?: string }>("/api/onboarding/first-run");
     setBusy(false);
     if (r.ok && r.job_id) { onDone(); location.hash = `#/matches/${r.job_id}`; } else setMsg(r.message ?? "Nothing to try yet.");
   };
-  const skip = async () => { await api.post("/api/onboarding/finish", { autonomy: status?.autonomy ?? "copilot" }); refresh(); onDone(); };
-  const r = st.resume;
+  const skip = async () => { await api.post("/api/onboarding/finish", { autonomy: "autopilot" }); refresh(); onDone(); };
+  const missing = st.checklist.filter(c => !c.done);
+  const pdfMissing = !st.checklist.find(c => c.key === "pdf")?.done;
 
   return (
     <div className="onb">
@@ -76,72 +128,92 @@ export default function Onboarding({ onDone }: { onDone: () => void }) {
         <p className="onb-step">Step {step + 1} of {STEPS.length}: {STEPS[step]}</p>
 
         {step === 0 && (<>
-          <h1>What's your goal with Jobsmith?</h1>
-          <p className="muted">It picks your job lists and how picky to be from this. You can change it later.</p>
+          <h1>What are you applying for?</h1>
+          <p className="muted">Pick as many as you like. You can change this later.</p>
           {Object.entries(st.goals).map(([k, g]) => (
-            <label key={k} className={`choice ${goal === k ? "on" : ""}`}>
-              <input type="radio" name="goal" checked={goal === k} onChange={() => setGoal(k)} />
-              <div><strong>{g.label}</strong></div>
+            <label key={k} className={`choice ${goals.includes(k) ? "on" : ""}`}>
+              <input type="checkbox" checked={goals.includes(k)} onChange={e => setGoals(toggle(goals, k, e.target.checked))} />
+              <div><strong>{g.label}</strong>
+                {k === "targeted" && goals.includes(k) && (
+                  <input className="onb-key" placeholder="Companies, separated by commas (e.g. NVIDIA, Ramp, Jane Street)"
+                    value={companies} onChange={e => setCompanies(e.target.value)} onClick={e => e.preventDefault()} />)}</div>
             </label>
           ))}
           <h3 className="onb-sub">Which fields?</h3>
           <div className="checks">{st.fields.map(f => (
             <label key={f} className="check"><input type="checkbox" checked={cats.includes(f)}
-              onChange={e => setCats(e.target.checked ? [...cats, f] : cats.filter(x => x !== f))} />{f}</label>))}</div>
-          <div className="onb-act"><button className="btn primary" onClick={saveGoal} disabled={busy || !cats.length}>Continue</button></div>
+              onChange={e => setCats(toggle(cats, f, e.target.checked))} />{f}</label>))}</div>
+          <div className="onb-act"><button className="btn primary" onClick={saveGoal} disabled={busy || !cats.length || !goals.length}>Continue</button></div>
         </>)}
 
         {step === 1 && (<>
           <h1>Which AI should write your answers?</h1>
-          <p className="muted">It only writes the open-ended answers. Contact details, work authorization and demographics always come straight from your profile.</p>
+          <p className="muted">It writes the open-ended answers. Contact details, work authorization and demographics always come straight from your profile.</p>
           {st.ai.detected.filter(d => d.kind !== "ollama").map(d => (
             <label key={d.kind} className={`choice ${ai === d.kind ? "on" : ""}`}>
               <input type="radio" name="ai" checked={ai === d.kind} onChange={() => setAi(d.kind)} />
-              <div><strong>{d.label}</strong><p>Found on this computer, ready to use.</p></div>
+              <div><strong>{d.label}</strong><p>Already set up on this computer.</p></div>
+            </label>
+          ))}
+          {KEYS.filter(([k]) => !st.ai.detected.some(d => d.kind === k)).map(([k, label, hint]) => (
+            <label key={k} className={`choice ${ai === k ? "on" : ""}`}>
+              <input type="radio" name="ai" checked={ai === k} onChange={() => { setAi(k); setKey(""); setAiMsg(null); }} />
+              <div><strong>{label}</strong>{k === "gemini_api" && <span className="muted"> (free, recommended)</span>}<p>{hint}</p>
+                {ai === k && <>
+                  <a className="small" href={KEY_URL[k]} target="_blank" rel="noreferrer">Get a key</a>
+                  <input type="password" className="onb-key" placeholder="Paste the key" value={key} onChange={e => setKey(e.target.value)} />
+                </>}</div>
             </label>
           ))}
           <label className={`choice ${ai === "ollama" ? "on" : ""}`}>
             <input type="radio" name="ai" checked={ai === "ollama"} onChange={() => { setAi("ollama"); setAiMsg(null); }} />
-            <div><strong>smith</strong> <span className="muted">(free, recommended)</span>
-              <p>Jobsmith's own AI. Runs on this computer, so nothing you write leaves it.</p>
+            <div><strong>smith</strong> <span className="muted">(free, fully private)</span>
+              <p>Jobsmith's own AI. Runs on this computer, so nothing you write leaves it. Can't search the web.</p>
               {ai === "ollama" && <Smith compact noButton />}</div>
           </label>
-          {MANUAL.filter(([k]) => !st.ai.detected.some(d => d.kind === k)).map(([k, label, hint]) => (
-            <label key={k} className={`choice ${ai === k ? "on" : ""}`}>
-              <input type="radio" name="ai" checked={ai === k} onChange={() => { setAi(k); setKey(""); setAiMsg(null); }} />
-              <div><strong>{label}</strong><p>{hint}</p>
-                {ai === k && k !== "ollama" && <input type="password" className="onb-key" placeholder="Paste the key" value={key} onChange={e => setKey(e.target.value)} />}</div>
-            </label>
-          ))}
           {aiMsg && <p className={aiMsg.ok ? "ok-text" : "warn-text"}>{aiMsg.message}</p>}
           <div className="onb-act">
-            <button className="btn primary" onClick={saveAi} disabled={busy}>{busy ? <Dots /> : ai === "ollama" ? "Continue" : "Connect"}</button>
+            <button className="btn primary" onClick={saveAi} disabled={busy || (ai !== "ollama" && !key && !st.ai.detected.some(d => d.kind === ai))}>
+              {busy ? <Dots /> : ai === "ollama" ? "Continue" : "Connect"}</button>
             <button className="link" onClick={next}>Skip for now</button>
           </div>
         </>)}
 
         {step === 2 && (<>
-          <h1>Add your resume</h1>
-          <p className="muted">Everything else fills itself in from it: your details, links, experience and skills. A LaTeX .tex is read most exactly; a PDF also becomes the file employers get.</p>
+          <h1>Your resume and details</h1>
+          <p className="muted">Everything fills itself in from your resume. A LaTeX .tex is read most exactly; the PDF is what employers get, so add both if you have them.</p>
           <label className="drop">
-            <input type="file" accept=".tex,.pdf,.docx,.txt,.md" onChange={e => { upload(e.target.files); e.target.value = ""; }} />
-            {busy ? <span><Dots />Reading your resume</span> : <span><strong>Choose a file</strong> or drop it here</span>}
+            <input type="file" multiple accept=".tex,.pdf,.docx,.txt,.md" onChange={e => { upload(e.target.files); e.target.value = ""; }} />
+            {busy ? <span><Dots />Reading your resume</span> : <span><strong>Choose files</strong> or drop them here</span>}
           </label>
           {msg && <p className="warn-text">{msg}</p>}
-          {r.has_resume && (
-            <div className="found">
-              <p><strong>{r.name || "Your name"}</strong>{r.email ? `, ${r.email}` : ""}</p>
-              <p>{[r.degree, r.major].filter(Boolean).join(" in ")}{r.school ? `, ${r.school}` : ""}{r.graduation ? `, graduating ${r.graduation}` : ""}</p>
-              {Object.entries(r.links).map(([k, v]) => <p key={k}><span className="muted">{k}:</span> {v}</p>)}
-              <p>{r.facts} facts about your experience, projects and skills.</p>
-              {!r.pdf && <p className="warn-text">Employers get a PDF. Add the PDF version too when you have it.</p>}
+          <ul className="checklist">
+            {st.checklist.map(c => (
+              <li key={c.key} className={c.done ? "done" : c.required ? "need" : ""}>
+                <span className="mark">{c.done ? "✓" : "·"}</span>
+                <span className="lbl">{c.label}{!c.required && !c.done && <span className="muted"> (optional)</span>}</span>
+                <span className="val muted">{c.value}</span>
+              </li>))}
+          </ul>
+          {missing.some(c => ASK[c.key]) && (
+            <div className="ask-missing">
+              <h3 className="onb-sub">Fill in what's missing</h3>
+              {missing.flatMap(c => ASK[c.key] ?? []).map(f => (
+                <label key={f.key} className="field">{f.label}
+                  {f.choices ? (
+                    <select value={vals[f.key] ?? ""} onChange={e => setVals({ ...vals, [f.key]: e.target.value })}>
+                      <option value="">Choose</option>{f.choices.map(o => <option key={o}>{o}</option>)}</select>
+                  ) : <input value={vals[f.key] ?? ""} placeholder={f.placeholder} onChange={e => setVals({ ...vals, [f.key]: e.target.value })} />}
+                </label>))}
+              {Object.values(vals).some(v => v.trim()) && <button className="btn sm" onClick={saveVals}>Save</button>}
             </div>
           )}
+          {pdfMissing && st.checklist[0].done && <p className="warn-text small">Employers get a PDF. Add the PDF version too.</p>}
           <div className="onb-act">
-            {r.has_resume && r.to_confirm > 0 && (
-              <button className="btn primary" onClick={() => api.post("/api/answers/confirm-all").then(() => { load(); next(); })}>Looks right, continue</button>)}
-            {r.has_resume && r.to_confirm === 0 && <button className="btn primary" onClick={next}>Continue</button>}
-            <a className="link" href="#/profile" onClick={onDone}>Fix details in Profile</a>
+            <button className="btn primary" disabled={!st.profile_ready}
+              onClick={() => api.post("/api/answers/confirm-all").then(() => { load(); next(); })}>
+              {st.profile_ready ? "Looks right, continue" : "Add the items marked · to continue"}</button>
+            <a className="link" href="#/profile" onClick={onDone}>Edit everything in Profile</a>
           </div>
         </>)}
 
@@ -150,7 +222,7 @@ export default function Onboarding({ onDone }: { onDone: () => void }) {
           <label className={`choice ${mode === "autopilot" ? "on" : ""}`}>
             <input type="radio" checked={mode === "autopilot"} onChange={() => setMode("autopilot")} />
             <div><strong>Autopilot</strong> <span className="muted">(recommended)</span>
-              <p>Checks your job lists every few hours, applies to good fits you qualify for, and holds anything it isn't sure about for one click from you. Stops at 25 a day.</p></div>
+              <p>Checks your job lists every few hours, applies to good fits on its own, and holds anything it isn't sure about for one click from you.</p></div>
           </label>
           <label className={`choice ${mode === "copilot" ? "on" : ""}`}>
             <input type="radio" checked={mode === "copilot"} onChange={() => setMode("copilot")} />
@@ -161,12 +233,17 @@ export default function Onboarding({ onDone }: { onDone: () => void }) {
         </>)}
 
         {step === 4 && (<>
-          <h1>Watch it fill your first application</h1>
-          <p className="muted">Jobsmith picks your best match and fills it in a browser window in front of you. It won't submit this one, so you can check every box first.</p>
+          <h1>{mode === "copilot" ? "Ready to fill your first application" : "Ready to start applying"}</h1>
+          <p className="muted">{mode === "copilot"
+            ? "Jobsmith fills your best match in a browser window and stops before Submit."
+            : "Autopilot applies to your best matches now and keeps going every few hours. You can watch any application being filled, and turn it off anytime."}</p>
           {msg && <p className="warn-text">{msg} Your job lists may still be syncing; try again in a minute.</p>}
           <div className="onb-act">
-            <button className="btn primary" onClick={firstRun} disabled={busy}>{busy ? <Dots /> : "Fill my first application"}</button>
-            <button className="link" onClick={onDone}>Go to Jobsmith</button>
+            {mode === "copilot"
+              ? <button className="btn primary" onClick={firstRun} disabled={busy}>{busy ? <Dots /> : "Fill my best match"}</button>
+              : <button className="btn primary" onClick={start} disabled={busy}>{busy ? <Dots /> : "Start autopilot"}</button>}
+            {mode !== "copilot" && <button className="link" onClick={firstRun} disabled={busy}>Watch one first, without submitting</button>}
+            <button className="link" onClick={onDone}>Not now</button>
           </div>
         </>)}
 

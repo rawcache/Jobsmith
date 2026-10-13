@@ -5,4 +5,6 @@ __pycache__/
 web/node_modules/
 .DS_Store
 .pytest_cache/
+web/dist/
+*.tsbuildinfo
 _to_delete/

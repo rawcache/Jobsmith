@@ -20,7 +20,7 @@ export type Status = {
          writing: { label: string; ok: boolean; message: string }; research: { label: string; ok: boolean; message: string } };
   auto: { on: boolean; next_run: number | null; last_summary: string }; needs_you: number;
   counts: Record<string, number>; active: Record<string, string>;
-  has_resume: boolean; facts: number; autonomy: string; tokens_today: number; live: number; onboarded: boolean;
+  has_resume: boolean; facts: number; autonomy: string; tokens_today: number; live: number; onboarded: boolean; setup_step: string;
   setup: { key: string; label: string; done: boolean; detail: string }[];
 };
 
@@ -50,8 +50,9 @@ const NAV: [string, string][] = [["", "Autopilot"], ["matches", "Matches"], ["tr
 function App() {
   const route = useHash();
   const [status, setStatus] = useState<Status | null>(null);
-  const [setupDone, setSetupDone] = useState(false);
-  const refresh = () => api.get<Status>("/api/status").then(setStatus).catch(() => {});
+  // Setup shows on a fresh install and stays up until you finish it, even after the server marks you onboarded.
+  const [setup, setSetup] = useState<boolean | null>(null);
+  const refresh = () => api.get<Status>("/api/status").then(s => { setStatus(s); setSetup(v => v ?? (!s.onboarded || s.setup_step === "profile")); }).catch(() => {});
   useEffect(() => { refresh(); const t = setInterval(refresh, 4000); return () => clearInterval(t); }, []);
 
   const [view, ...rest] = route.split("/").filter(Boolean);
@@ -62,7 +63,7 @@ function App() {
 
   return (
     <StatusCtx.Provider value={{ status, refresh }}>
-      {status && !status.onboarded && !setupDone ? (
+      {setup ? (
         <header className="nav"><span className="brand">Jobsmith</span></header>
       ) : <header className="nav">
         <a href="#/" className="brand" aria-label="Jobsmith home">
@@ -90,7 +91,7 @@ Jobsmith
           <a href="#/settings" className="icon-btn" aria-label="Settings" aria-current={cur === "settings" ? "page" : undefined}><Icon name="gear" size={18} /></a>
         </div>
       </header>}
-      {status && !status.onboarded && !setupDone ? <Onboarding onDone={() => { setSetupDone(true); refresh(); }} /> :
+      {setup ? <Onboarding onDone={() => { setSetup(false); refresh(); }} /> :
       <main className="wrap">
         {view === "matches" ? <Matches selected={arg} /> :
          view === "job" && arg ? <JobPage id={arg} /> :
