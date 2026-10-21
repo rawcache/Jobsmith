@@ -2,6 +2,8 @@
 browser; filling maps each API field name onto the form."""
 from __future__ import annotations
 
+import re
+
 from playwright.async_api import Page, TimeoutError as PWTimeout
 
 from .. import ats
@@ -87,7 +89,8 @@ async def fill(page: Page, drafts: list[dict], files: dict[str, str], extras: di
             sel = await selector_for(page, d["alt_field"])
             d = dict(d, qtype="textarea")
         if not sel:
-            if d["required"]:
+            # Greenhouse's API lists education fields some live forms don't show: not a problem then.
+            if d["required"] and not re.match(r"(school|degree|discipline|start-month|start-year|end-month|end-year)--\d", d["field"]):
                 failed.append((d["label"], "field not found on page"))
             continue
         try:

@@ -27,6 +27,11 @@ SCAN_JS = r"""
     }
     return clean(el.placeholder || el.name || el.id);
   };
+  // the section each field sits in ("Employment", "Education"), from the nearest heading above it
+  const heads = [...document.querySelectorAll('h1, h2, h3, h4, legend, [role="heading"]')].filter(h => clean(h.innerText));
+  const groupFor = el => { let g = ''; for (const h of heads) { if (h.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) g = clean(h.innerText); else break; } return g.slice(0, 60); };
+  const starred = el => { const l = el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+    return /\*\s*$/.test(((l || el.closest('label') || {}).innerText || '').trim()); };
   const out = []; const seenGroups = new Set();
   for (const el of document.querySelectorAll('input, textarea, select')) {
     const type = (el.type || el.tagName).toLowerCase();
@@ -45,15 +50,19 @@ SCAN_JS = r"""
       const opts = group.map(x => labelFor(x));
       out.push({ field: el.name ? `[name="${el.name}"]` : key, label: label || opts[0], value: group.some(x => x.checked) ? 'set' : '',
                  qtype: group.length > 1 ? (type === 'radio' ? 'radio' : 'multiselect') : 'checkbox',
-                 required: group.some(x => x.required), options: group.length > 1 ? opts : [], description: '' });
+                 required: group.some(x => x.required), options: group.length > 1 ? opts : [], description: '', group: groupFor(el) });
       continue;
     }
     const role = el.getAttribute('role');
-    out.push({ field: key, label: labelFor(el), value: type === 'file' ? (el.files && el.files.length ? 'file' : '') : (el.value || ''),
+    // a react-select shows its choice beside the input (which is empty): read what it shows
+    const comboValue = () => { const c = el.closest('[class*=control]'); let t = c ? c.innerText : '';
+      if (!c && el.parentElement) { const sv = el.parentElement.querySelector('[class*="single-value"], [class*="singleValue"]'); t = sv ? sv.innerText : ''; }
+      t = clean(t); return /^select\b/i.test(t) ? '' : t; };
+    out.push({ field: key, label: labelFor(el), value: type === 'file' ? (el.files && el.files.length ? 'file' : '') : (el.value || (role === 'combobox' ? comboValue() : '')),
       qtype: type === 'file' ? 'file' : el.tagName === 'SELECT' ? 'select' : el.tagName === 'TEXTAREA' ? 'textarea' : role === 'combobox' ? 'select' : 'text',
-      required: el.required || el.getAttribute('aria-required') === 'true',
+      required: el.required || el.getAttribute('aria-required') === 'true' || starred(el),
       options: el.tagName === 'SELECT' ? [...el.options].map(o => clean(o.text)).filter(t => t && !/^select|^--|^please/i.test(t)) : [],
-      description: '' });
+      description: '', group: groupFor(el) });
   }
   // custom dropdowns (Workday and others): <button aria-haspopup="listbox">Select One</button>
   for (const el of document.querySelectorAll('button[aria-haspopup="listbox"], [role="button"][aria-haspopup="listbox"]')) {
@@ -63,7 +72,7 @@ SCAN_JS = r"""
     if (!key) continue;
     const txt = clean(el.innerText);
     out.push({ field: key, label: labelFor(el), qtype: 'listbox', value: /^select/i.test(txt) ? '' : txt,
-               required: el.getAttribute('aria-required') === 'true' || /\*/.test(labelFor(el)), options: [], description: '' });
+               required: el.getAttribute('aria-required') === 'true' || /\*/.test(labelFor(el)), options: [], description: '', group: groupFor(el) });
   }
   return out;
 }
