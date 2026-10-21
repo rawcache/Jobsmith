@@ -86,12 +86,12 @@ def _text_of(msg: email.message.Message) -> str:
     return " ".join(" ".join(parts).split())
 
 
-def _fetch(address: str, password: str, days: int) -> list[dict]:
+def _fetch(days: int) -> list[dict]:
+    from . import mail
     since = (datetime.now() - timedelta(days=days)).strftime("%d-%b-%Y")
+    address = db.get_setting("gmail_address") or ""
     out = []
-    with imaplib.IMAP4_SSL("imap.gmail.com") as m:
-        m.login(address, password.replace(" ", ""))
-        m.select("INBOX", readonly=True)
+    with mail.connect() as m:
         _, data = m.search(None, "SINCE", since)
         ids = data[0].split()[-400:]
         for i in ids:
@@ -109,14 +109,16 @@ def _fetch(address: str, password: str, days: int) -> list[dict]:
 
 
 async def check_inbox(days: int = 45) -> dict:
+    from .config import DEMO
+    if DEMO:
+        return {"checked": 0, "new_outcomes": 0}
     _ensure()
-    s = db.get_settings()
-    if not (s.get("gmail_address") and s.get("gmail_app_password")):
-        return {"error": "Add your Gmail address and an app password in Settings."}
+    if not email_ready():
+        return {"error": "Connect your email in Settings first."}
     try:
-        messages = await asyncio.to_thread(_fetch, s["gmail_address"], s["gmail_app_password"], days)
+        messages = await asyncio.to_thread(_fetch, days)
     except Exception as e:
-        return {"error": f"Couldn't read Gmail: {e}"}
+        return {"error": f"Couldn't read your email: {e}"}
     jobs = db.q("SELECT id, company, updated_at FROM jobs WHERE status='submitted'")
     found = 0
     for msg in messages:
@@ -136,3 +138,102 @@ def funnel() -> dict:
     for r in rows:
         out[r["outcome"] or "no_reply"] = r["n"]
     return out
+
+
+# --------------------------------------------------------------------------- emailed verification codes
+# Some application forms (Greenhouse, most often) email a code after you press Submit. With Gmail connected,
+# Jobsmith reads only the last few minutes of your inbox, read-only, for that code and types it in for you.
+CODE_NEAR = re.compile(r"(security|verification|confirmation|one[- ]time|access)?\s*(code|passcode|pin)\b", re.I)
+TOKEN = re.compile(r"\b([A-Za-z0-9]{4,10})\b")
+NOT_CODES = {"security", "verification", "application", "applying", "password", "passcode", "greenhouse"}
+
+
+def _looks_like_code(t: str) -> bool:
+    if t.lower() in NOT_CODES:
+        return False
+    if t.isdigit():
+        return 4 <= len(t) <= 8
+    has_digit = any(c.isdigit() for c in t)
+    mixed = any(c.isupper() for c in t[1:]) and any(c.islower() for c in t)
+    return len(t) >= 6 and (has_digit or mixed or t.isupper())
+
+
+def extract_code(subject: str, body: str) -> str | None:
+    """The code in a verification email: the first code-shaped token after the word 'code'."""
+    text = f"{subject}\n{body[:5000]}"
+    for m in CODE_NEAR.finditer(text):
+        for t in TOKEN.finditer(text[m.end():m.end() + 220]):
+            if _looks_like_code(t.group(1)):
+                return t.group(1)
+    return None
+
+
+def _recent(since: float) -> list[dict]:
+    from . import mail
+    day = datetime.fromtimestamp(since - 86400).strftime("%d-%b-%Y")
+    out = []
+    with mail.connect() as m:
+        _, data = m.search(None, "SINCE", day)
+        for i in reversed(data[0].split()[-25:]):
+            _, msg_data = m.fetch(i, "(BODY.PEEK[])")
+            msg = email.message_from_bytes(msg_data[0][1])
+            try:
+                when = parsedate_to_datetime(msg.get("Date")).timestamp()
+            except Exception:
+                continue
+            if when < since - 120:
+                continue
+            out.append({"from": str(make_header(decode_header(msg.get("From", "")))),
+                        "subject": str(make_header(decode_header(msg.get("Subject", "")))),
+                        "when": when, "body": _text_of(msg)})
+    return out
+
+
+def pick_code(messages: list[dict], company: str) -> str | None:
+    key = _norm(company)
+    for msg in sorted(messages, key=lambda m: -m["when"]):
+        hay = _norm(f"{msg['from']} {msg['subject']} {msg['body'][:1500]}")
+        if (len(key) >= 3 and key in hay) or "greenhouse" in hay:
+            code = extract_code(msg["subject"], msg["body"])
+            if code:
+                return code
+    return None
+
+
+def email_ready() -> bool:
+    from . import mail
+    from .config import DEMO
+    return False if DEMO else mail.ready()
+
+
+async def find_code(company: str, since: float) -> str | None:
+    """A verification code emailed by this company since `since`, or None. Never raises."""
+    s = db.get_settings()
+    if not email_ready() or s.get("gmail_codes") is False:
+        return None
+    try:
+        msgs = await asyncio.to_thread(_recent, since)
+    except Exception:
+        return None
+    return pick_code(msgs, company)
+
+
+async def test_connection() -> dict:
+    from . import mail
+    s = db.get_settings()
+    if not email_ready():
+        return {"ok": False, "message": "Finish connecting your email first."}
+
+    def _try():
+        with mail.connect(s):
+            pass
+    try:
+        await asyncio.to_thread(_try)
+        return {"ok": True, "message": f"Connected to {s['gmail_address']} (read-only)."}
+    except imaplib.IMAP4.error as e:
+        p = mail.provider(s)
+        if p == "gmail":
+            return {"ok": False, "message": "Gmail didn't accept that. Use an app password (not your normal password), and check IMAP is on."}
+        return {"ok": False, "message": str(e)[:300] or "The mail server didn't accept the sign-in."}
+    except Exception as e:
+        return {"ok": False, "message": f"Couldn't reach your mail server: {e.__class__.__name__}"}
