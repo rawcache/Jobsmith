@@ -196,3 +196,25 @@ async def test_live_tab_code_flow(page):
     assert await page_confirms_submission(page)
     assert await runner.live_shot("j1")                     # peek works
     runner.live_drop("j1")
+
+
+async def test_second_pass_fills_employment_section_the_api_missed(page):
+    """Greenhouse's newer forms add an Employment section the job-board API doesn't list."""
+    from jobsmith.fill.sweep import sweep
+    profile.save_entry("experience", {"title": "Data Engineer Intern", "company": "Rooms To Go", "start": "2025-05",
+                                      "end": "Aug 2025", "location": "Atlanta, GA"})
+    jid = sources.add_job_url("https://job-boards.greenhouse.io/acme/jobs/777", "Acme", "Intern")
+    job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,)))
+    await page.set_content("""<form><h3>Employment</h3>
+      <label for="co">Company name*</label><input id="co">
+      <label for="ti">Title*</label><input id="ti">
+      <label for="sm">Start date month*</label><select id="sm"><option></option><option>April</option><option>May</option></select>
+      <label for="sy">Start date year*</label><input id="sy">
+      <h3>Education</h3><label for="ey">End date year*</label><input id="ey"></form>""")
+    profile.set_answer("graduation_date", "May 2027", True)
+    r = await sweep(page, job)
+    vals = await page.evaluate("() => Object.fromEntries([...document.querySelectorAll('input,select')].map(e => [e.id, e.value]))")
+    assert vals["co"] == "Rooms To Go" and vals["ti"] == "Data Engineer Intern"
+    assert vals["sm"] == "May" and vals["sy"] == "2025"
+    assert vals["ey"] == "2027"                     # same label, Education section: your graduation
+    assert not r["failed"]
