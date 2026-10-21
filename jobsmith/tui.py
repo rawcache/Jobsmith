@@ -26,6 +26,7 @@ from rich.live import Live
 from rich.table import Table
 from rich.text import Text
 
+from . import prompts as P
 from .config import DATA_DIR
 
 console = Console(highlight=False)
@@ -50,7 +51,29 @@ class Engine:
 
     def ensure(self) -> None:
         if self.up():
-            return
+            from .config import BUILD
+            try:
+                running = self.http.get("/api/status", timeout=5).json().get("build")
+            except (httpx.HTTPError, ValueError):
+                running = None
+            if running == BUILD:
+                return
+            # An engine from before you updated Jobsmith is still running: swap it for this version.
+            with console.status("Restarting Jobsmith's engine with the new version…", spinner="dots"):
+                try:
+                    self.http.post("/api/shutdown", timeout=5)
+                except httpx.HTTPError:
+                    pass
+                for _ in range(40):
+                    time.sleep(0.25)
+                    if not self.up():
+                        break
+                else:
+                    _stop_old_engine(PORT)     # too old to know /api/shutdown
+                    for _ in range(40):
+                        time.sleep(0.25)
+                        if not self.up():
+                            break
         log = open(DATA_DIR / "server.log", "a")
         args = [sys.executable, "-m", "jobsmith", "serve", "--no-open", "--port", str(PORT)]
         kw: dict = {"stdout": log, "stderr": log, "stdin": subprocess.DEVNULL}
@@ -101,6 +124,35 @@ class Engine:
         r = self._send("PUT", path, json=body)
         r.raise_for_status()
         return r.json()
+
+
+def _stop_old_engine(port: int) -> None:
+    """Stop whatever Jobsmith (or wyzard) engine is listening on our port. Never touches other programs."""
+    import signal
+    pids: list[int] = []
+    try:
+        if os.name == "nt":
+            out = subprocess.run(["powershell", "-NoProfile", "-Command",
+                                  f"(Get-NetTCPConnection -LocalPort {port} -State Listen).OwningProcess"],
+                                 capture_output=True, text=True, timeout=10).stdout
+        else:
+            out = subprocess.run(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
+                                 capture_output=True, text=True, timeout=10).stdout
+        pids = [int(x) for x in out.split() if x.strip().isdigit()]
+    except (OSError, subprocess.SubprocessError):
+        return
+    for pid in pids:
+        try:
+            if os.name == "nt":
+                cmd = subprocess.run(["powershell", "-NoProfile", "-Command",
+                                      f"(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine"],
+                                     capture_output=True, text=True, timeout=10).stdout
+            else:
+                cmd = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, timeout=5).stdout
+            if re.search(r"jobsmith|wyzard", cmd, re.I):
+                os.kill(pid, signal.SIGTERM)
+        except (OSError, subprocess.SubprocessError):
+            pass
 
 
 # --------------------------------------------------------------------------- small helpers
@@ -163,57 +215,18 @@ def ask(prompt: str, default: str = "") -> str:
 
 
 def yes(prompt: str, default: bool = True) -> bool:
+    if P.interactive():
+        return P.confirm(prompt, default)
     v = ask(prompt + (" \\[Y/n]" if default else " \\[y/N]")).lower()
     return default if not v else v.startswith("y")
 
 
-def _tty() -> bool:
-    return sys.stdin.isatty() and sys.stdout.isatty()
+def select(prompt: str, options: list[tuple], default=None):
+    return P.select(prompt, options, default)
 
 
-Q_STYLE = None
-
-
-def _qstyle():
-    global Q_STYLE
-    if Q_STYLE is None:
-        import questionary
-        Q_STYLE = questionary.Style([("qmark", f"fg:{ACCENT} bold"), ("pointer", f"fg:{ACCENT} bold"),
-                                     ("highlighted", f"fg:{ACCENT} bold"), ("selected", "fg:#3fb950"),
-                                     ("answer", f"fg:{ACCENT}"), ("instruction", "fg:#8b949e")])
-    return Q_STYLE
-
-
-def select(prompt: str, options: list[tuple[str, str]], default: str | None = None) -> str | None:
-    """Arrow keys and Enter. options are (label, value). Falls back to numbers without a terminal."""
-    if _tty():
-        import questionary
-        choices = [questionary.Choice(label, value=v) for label, v in options]
-        r = questionary.select(prompt, choices=choices, default=next((c for c in choices if c.value == default), None),
-                               style=_qstyle(), qmark="›", instruction="(↑↓ then Enter)").ask()
-        if r is None:
-            raise KeyboardInterrupt
-        return r
-    i = choose(prompt, [l for l, _ in options], next((n for n, (_, v) in enumerate(options, 1) if v == default), 1))
-    return options[i][1]
-
-
-def checkbox(prompt: str, options: list[tuple[str, str]], checked: list[str]) -> list[str]:
-    """Space to tick, Enter to confirm. Falls back to comma-separated numbers without a terminal."""
-    if _tty():
-        import questionary
-        r = questionary.checkbox(prompt, choices=[questionary.Choice(l, value=v, checked=v in checked) for l, v in options],
-                                 style=_qstyle(), qmark="›", instruction="(↑↓ move, space to tick, Enter when done)",
-                                 validate=lambda xs: bool(xs) or "Pick at least one.").ask()
-        if r is None:
-            raise KeyboardInterrupt
-        return r
-    for i, (l, _) in enumerate(options, 1):
-        console.print(f"  [{ACCENT}]{i}[/] {l}")
-    dflt = ",".join(str(i) for i, (_, v) in enumerate(options, 1) if v in checked) or "1"
-    picked = ask(prompt + " (numbers, commas)", dflt)
-    out = [options[int(x) - 1][1] for x in re.findall(r"\d+", picked) if 0 < int(x) <= len(options)]
-    return out or [v for _, v in options if v in checked] or [options[0][1]]
+def checkbox(prompt: str, options: list[tuple], checked: list) -> list:
+    return P.multiselect(prompt, options, checked)
 
 
 def choose(prompt: str, options: list[str], default: int = 1) -> int:
@@ -227,16 +240,29 @@ def choose(prompt: str, options: list[str], default: int = 1) -> int:
 
 
 def header(e: Engine) -> None:
+    """A small card at the top: what's writing, whether autopilot is on, today's numbers, anything urgent."""
+    from rich import box
+    from rich.panel import Panel
     s = e.get("/api/status")
     h = e.get("/api/home")
-    mode = "autopilot" if s["autonomy"] != "copilot" and s["auto"]["on"] else s["autonomy"]
+    on = s["autonomy"] != "copilot" and s["auto"]["on"]
     ai = s["llm"]["writing"]
-    console.print(Text.assemble(("Jobsmith", f"bold {ACCENT}"), "  ",
-                                (ai["label"] if ai["ok"] else "no AI connected", "green" if ai["ok"] else "yellow"), "  ",
-                                (f"{mode}", "bold"), "  ",
-                                (f"{h['applied_today']}{'/' + str(h['daily_cap']) if h['daily_cap'] else ''} sent today", ""), "  ",
-                                (f"{s['needs_you']} need you" if s["needs_you"] else "", "yellow"), "  ",
-                                (f"{tok(s.get('tokens_today'))} tokens today", "dim")))
+    q = s.get("quota")
+    line1 = Text.assemble(("● " if ai["ok"] else "○ ", "green" if ai["ok"] else "yellow"),
+                          (ai["label"] if ai["ok"] else "No AI connected (/smith, or add a key with /web)", ""),
+                          ("   autopilot " + ("on" if on else "off"), f"bold {'green' if on else 'yellow'}"),
+                          ("   battery saver" if (s.get("power") or {}).get("saver") else "", "green"))
+    bits = [f"{h['applied_today']} sent today", f"{h['applied_week']} this week", f"{h['queued']} good matches waiting"]
+    if q:
+        bits.append(f"{q['name']} {q['used']}{'/' + str(q['limit']) if q['limit'] else ''} today")
+    line2 = Text("  ·  ".join(bits), style="dim")
+    lines = [line1, line2]
+    if s["needs_you"]:
+        lines.append(Text(f"{s['needs_you']} need you: /review", style="yellow"))
+    for a in s.get("attention") or []:
+        lines.append(Text(f"! {a['message']} (/watch)", style="bold yellow"))
+    console.print(Panel(Text("\n").join(lines), title=f"[bold {ACCENT}]Jobsmith[/]", title_align="left",
+                        box=box.ROUNDED, border_style="grey37", padding=(0, 1), expand=False))
 
 
 # --------------------------------------------------------------------------- views
@@ -275,6 +301,7 @@ def watch(e: Engine, until_idle: bool = True) -> None:
     frame = 0
     rows: list[str] = []
     msg = ""
+    taking = False
 
     def render():
         nonlocal frame, rows
@@ -303,12 +330,17 @@ def watch(e: Engine, until_idle: bool = True) -> None:
                                                      "filling": "filling the form"}.get(phase, phase)
             mark = ("[green]✓[/]" if phase == "submitted" else "[yellow]![/]" if phase in ("code", "review", "error")
                     else f"[{ACCENT}]{SPIN[frame % len(SPIN)]}[/]")
+            pr = (s.get("progress") or {}).get(jid)
+            if pr:
+                bar = "".join(f"[{ACCENT}]▰[/]" if i < pr["step"] or pr["step"] == pr["total"] else
+                              ("[yellow]▰[/]" if i == pr["step"] else "[dim]▱[/]") for i in range(pr["total"] + 1))
+                label = f"{bar} {pr['label']}"
             t.add_row(str(n), mark, f"[bold]{company}[/] {title}", label + (f". {tab['note']}" if tab and tab.get("note") else ""))
         if not rows:
             t.add_row("", "", "[dim]Nothing running right now.[/]", "")
         foot = Text.assemble((f"\n{h['applied_today']} sent today", "bold"), f", {h['applied_week']} this week",
                              (f", {len(h['review'])} need you" if h["review"] else "", "yellow"))
-        keys = Text("1-9 watch it fill in the browser · h hide the browser · d dashboard · q back", style="dim")
+        keys = Text("1-9 watch it live · t take over · d dashboard · x stop everything · q back", style="dim")
         group = Table.grid()
         group.add_row(t)
         group.add_row(foot)
@@ -330,7 +362,7 @@ def watch(e: Engine, until_idle: bool = True) -> None:
                         break
                 else:
                     idle_since = None
-                k = kb.get(1.0)
+                k = kb.get(2.0)
                 if not k:
                     continue
                 k = k.lower()
@@ -338,16 +370,28 @@ def watch(e: Engine, until_idle: bool = True) -> None:
                     break
                 if k.isdigit() and 0 < int(k) <= len(rows):
                     jid = rows[int(k) - 1]
-                    r = e.post(f"/api/live/{jid}/show")
-                    msg = ("Showing it in the browser window." if r.get("ok") and not r.get("pending")
-                           else "It's still being researched; the browser window opens when its form does."
-                           if r.get("pending") else "Couldn't bring the browser up.")
+                    if taking:
+                        r = e.post(f"/api/live/{jid}/show")
+                        msg = ("Opening it in a window for you to finish." if r.get("ok") else
+                               "Its form isn't open yet; try again once it's filling.")
+                        taking = False
+                    else:
+                        # Watching happens in your own browser, in a tab you choose to look at:
+                        # nothing jumps in front of what you're doing.
+                        webbrowser.open(f"{BASE}/#/watch/{jid}")
+                        msg = "Watching it live in your browser."
+                elif k == "t":
+                    taking = True
+                    msg = "Take over which one? Press its number."
                 elif k == "h":
                     e.post("/api/live/hide")
                     msg = "Browser back in the background."
                 elif k == "d":
                     webbrowser.open(BASE + "/#/")
                     msg = "Opened the dashboard."
+                elif k == "x":
+                    r = e.post("/api/stop", {"everything": True})
+                    msg = f"Stopped everything ({r['stopped']} cancelled). Autopilot is off."
     except KeyboardInterrupt:
         pass
     console.print()
@@ -409,6 +453,19 @@ def review(e: Engine) -> None:
             e.post(f"/api/live/{j['id']}/show")
 
 
+def pick_jobs(e: Engine, q: str = "") -> list[str]:
+    """Tick several of your best matches and apply to them all at once."""
+    rows = e.get("/api/jobs", status="new,fetched,drafted", limit=20, q=q)["jobs"]
+    if not rows:
+        console.print("[dim]No matches waiting. Try /sync, or type a company to apply to.[/]")
+        return []
+    opts = []
+    for j in rows:
+        hint = ", ".join(x for x in ((j.get("locations") or [""])[0], f"fit {round(j['fit_score'] or 0)}") if x)
+        opts.append((f"{j['company']}: {j['title']}", j["id"], hint))
+    return P.multiselect("Which ones? They fill in parallel", opts, [o[1] for o in opts[:5]])
+
+
 def run_request(e: Engine, text: str, mode: str | None = None, follow: bool = True) -> None:
     with console.status("Finding postings. A web search for a company can take a minute.", spinner="dots"):
         try:
@@ -440,18 +497,52 @@ def jobs(e: Engine, q: str = "") -> list[dict]:
     return rows
 
 
-HELP = """[bold]Type what to apply to[/]: a company ("apply to AMD hardware internships"), job links, or a GitHub job list.
+COMMANDS: list[tuple[str, list[tuple[str, str]]]] = [
+    ("Apply", [
+        ("apply to <company or role>", "find matching roles and apply, e.g. apply to NVIDIA hardware internships"),
+        ("<job link or GitHub list>", "paste it to apply, or to add the list to what autopilot checks"),
+        ("/apply", "tick several of your best matches and apply to them in parallel"),
+        ("/jobs [search]", "your best matches; then /apply 1,3"),
+    ]),
+    ("Watch and review", [
+        ("/watch", "live view; press a number to watch that form fill in your browser"),
+        ("/review", "go through the answers autopilot held for you"),
+        ("/status", "what's running, what needs you, what got sent"),
+        ("/web", "open the dashboard"),
+    ]),
+    ("Control", [
+        ("/autopilot on|off", "apply on its own, or stop (off also stops anything in progress)"),
+        ("/stop", "stop everything now: applications, the browser and smith"),
+        ("/activity", "what Jobsmith is using on this computer: processor, memory, battery"),
+        ("/sync", "check your job lists for new roles now"),
+    ]),
+    ("Set up", [
+        ("/smith", "set up smith, the free AI that runs on this computer"),
+        ("/extension", "add Jobsmith to Chrome"),
+        ("jobsmith setup", "run setup again from step 1 (add --web for the website)"),
+    ]),
+    ("Try changes safely", [
+        ("jobsmith demo", "a practice copy with a made-up person and jobs; nothing real is opened or sent"),
+        ("jobsmith demo --setup", "the practice copy, starting the website setup from step 1"),
+        ("jobsmith dev", "practice copy with live reload while you edit (source checkout)"),
+        ("jobsmith check", "tests, dashboard build, and screenshots of every page (source checkout)"),
+        ("/help  /commands  /quit", ""),
+    ]),
+]
 
-  /status          what's running, what needs you, what got sent
-  /watch           live view of applications in progress
-  /review          go through answers autopilot held for you
-  /jobs [search]   your best matches; then /apply 1,3
-  /autopilot on|off   apply on its own, or stop before every submit
-  /sync            check your job lists for new roles now
-  /smith           set up smith, the free AI that runs on this computer
-  /extension       add Jobsmith to Chrome (fill any application, send jobs here)
-  /web             open the dashboard in your browser
-  /help  /quit"""
+
+def show_help() -> None:
+    console.print(f"\n[bold]Type what you want[/], or a command. [dim]In your shell, the same commands work as `jobsmith <command>`.[/]")
+    for section, rows in COMMANDS:
+        t = Table.grid(padding=(0, 3))
+        t.add_column(style=ACCENT, no_wrap=True, min_width=26)
+        t.add_column(style="dim")
+        from rich.markup import escape
+        for c, d in rows:
+            t.add_row(escape(c), escape(d))
+        console.print(f"\n[bold]{section}[/]")
+        console.print(t)
+    console.print()
 
 
 def repl(e: Engine, mode: str | None = None) -> None:
@@ -470,8 +561,8 @@ def repl(e: Engine, mode: str | None = None) -> None:
         try:
             if cmd in ("/quit", "/exit", "q", "exit"):
                 return
-            elif cmd == "/help":
-                console.print(HELP)
+            elif cmd in ("/help", "/commands", "/?", "help"):
+                show_help()
             elif cmd == "/status":
                 status(e)
             elif cmd == "/watch":
@@ -483,14 +574,17 @@ def repl(e: Engine, mode: str | None = None) -> None:
             elif cmd == "/apply":
                 ids = [last[int(x) - 1]["id"] for x in re.findall(r"\d+", arg) if 0 < int(x) <= len(last)]
                 if not ids:
-                    console.print("[dim]Run /jobs first, then /apply 1 or /apply 1,3.[/]")
+                    ids = pick_jobs(e, arg)
+                if not ids:
                     continue
                 r = e.post("/api/jobs/batch", {"action": "autopilot", "ids": ids})
                 console.print(f"Applying to {r['started']}.")
                 watch(e)
             elif cmd == "/autopilot":
                 on = arg.strip().lower() not in ("off", "no", "false", "0")
-                e.http.put("/api/settings", json={"autonomy": "autopilot" if on else "copilot", "auto_run": on})
+                r = e.post("/api/autopilot", {"on": on})
+                if r.get("stopped"):
+                    console.print(f"Stopped {r['stopped']} application{'s' if r['stopped'] != 1 else ''} in progress.")
                 console.print("Autopilot is on: it applies on its own and holds anything it isn't sure about."
                               if on else "Autopilot is off: Jobsmith fills forms and stops before submitting.")
             elif cmd == "/sync":
@@ -498,6 +592,10 @@ def repl(e: Engine, mode: str | None = None) -> None:
                     r = e.post("/api/sources/sync")
                 for x in r["results"]:
                     console.print(f"  {x.get('source', '')}: " + (x["error"] if x.get("error") else f"{x.get('added', 0)} new"))
+            elif cmd == "/stop":
+                stop_everything(e)
+            elif cmd == "/activity":
+                activity(e)
             elif cmd == "/smith":
                 smith_setup(e)
             elif cmd == "/extension":
@@ -512,73 +610,107 @@ def repl(e: Engine, mode: str | None = None) -> None:
             console.print(f"[red]{ex}[/]")
 
 
+def stop_everything(e: Engine) -> None:
+    r = e.post("/api/stop", {"everything": True})
+    console.print(f"[bold]Stopped.[/] {r['stopped']} application{'s' if r['stopped'] != 1 else ''} cancelled, browser closed"
+                  + (", smith unloaded" if r.get("unloaded") else "") + ". Autopilot is off; /autopilot on starts it again.")
+
+
+def activity(e: Engine) -> None:
+    p = e.get("/api/power")
+    b = p.get("battery")
+    console.print(f"[bold]{ {'low': 'Light', 'medium': 'Moderate', 'high': 'Heavy'}.get(p['usage']['level'], '?') }[/] "
+                  f"[dim]{p['usage']['cpu']}% of your processor, {p['working']} in progress, {p['tabs']} tabs[/]")
+    for part in p["usage"]["parts"]:
+        console.print(f"  {part['name']:<24} {part['cpu']:>5}%  {part['memory_mb']:>6} MB")
+    if b:
+        console.print(f"  Battery {b['percent']}%" + (", plugged in" if b["plugged"] else ", on battery")
+                      + (" [yellow](draining while plugged in)[/]" if b["draining_plugged"] else ""))
+    if p["saver"]:
+        console.print("  [green]Battery saver is on:[/] one application at a time, smith stays off.")
+    for m in p["local_models"]:
+        console.print(f"  smith is holding {m['name']} ({m['vram_mb']} MB). /stop unloads it.")
+
+
 def extension_help() -> None:
     from .config import EXTENSION_DIR
-    console.print(f"""[bold]Jobsmith for Chrome[/]: fill any application from your profile, and send postings to autopilot.
+    from . import extension as ext
+    opened = ext.open_install()
+    console.print(f"""[bold]Jobsmith for Chrome[/]: a panel on job postings (autofill, resume match, who you know, cover letter).
 
-  1. Open [bold]chrome://extensions[/] and turn on [bold]Developer mode[/] (top right)
-  2. Click [bold]Load unpacked[/] and choose this folder:
+  1. In [bold]chrome://extensions[/], turn on [bold]Developer mode[/] (top right).{"  [dim](opened it for you)[/]" if opened.get("chrome") else ""}
+  2. Click [bold]Load unpacked[/] and choose this folder{" (it's open in Finder, and the path is copied)" if opened.get("folder") else ""}:
      [{ACCENT}]{EXTENSION_DIR}[/]
-  3. Pin Jobsmith from the puzzle-piece menu. On an application, click Fill (or press Alt+J).
+  3. Pin Jobsmith from the puzzle-piece menu, then open any job posting.
 
-[dim]It works while Jobsmith is running, and never submits anything.[/]""")
+[dim]After you update Jobsmith, click the reload arrow on Jobsmith's card in chrome://extensions.
+It works while Jobsmith is running, and never submits anything.[/]""")
 
 
 # --------------------------------------------------------------------------- smith
 def smith_start(e: Engine, ask_first: bool = True) -> bool:
-    """Kick off smith's setup in the background. Asks before installing anything. False if declined."""
+    """Kick off smith's setup in the background. Asks before downloading anything. False if declined."""
     st = e.get("/api/smith")
     rec = st["recommended"]
     better = rec["model"] if rec["model"] not in st["models"] and st["models"] else ""
     if st["has_model"] and st["running"] and not better:
         if not st["active"]:
             e.post("/api/onboarding/ai", {"kind": "ollama", "model": st["model"]})
-        console.print(f"[green]✓[/] smith is ready ({st['model']}).")
+        P.success(f"smith is ready ({st['model']})")
         return True
     if better and ask_first:
-        if yes(f"A stronger model fits your {rec['ram_gb']} GB of memory: {better} ({rec['download_gb']} GB). Download it?"):
+        if P.confirm(f"A stronger model fits your {rec['ram_gb']} GB of memory: {better} ({rec['download_gb']:g} GB). Download it?"):
             e.post("/api/smith/setup", {"model": better})
             return True
         if st["has_model"]:
             e.post("/api/onboarding/ai", {"kind": "ollama", "model": st["model"]})
             return True
     if st["remote"]:
-        console.print(f"Using Ollama at {st['url']}.")
+        P.info(f"Using Ollama at {st['url']}")
     elif ask_first:
         steps = [] if st["installed"] else [f"Ollama, the free engine smith runs on (about {st['engine_gb']:g} GB, no admin needed)"]
         if not st["has_model"]:
-            steps.append(f"{st['model']}, a {rec['download_gb']} GB model picked for your {rec['ram_gb']} GB of memory")
+            steps.append(f"{st['model']}, a {rec['download_gb']:g} GB model picked for your {rec['ram_gb']} GB of memory")
         if steps:
-            console.print("smith will download, once:\n" + "\n".join(f"  · {s}" for s in steps))
-            if rec["slow"]:
-                console.print("[dim]With this much memory smith is slow. An API key is faster if you have one.[/]")
-            if not yes("Go ahead?"):
+            P.note("\n".join(f"· {s}" for s in steps) + ("\n\nWith this much memory smith is slow; Gemini is faster." if rec["slow"] else ""),
+                   "smith downloads, once")
+            if not P.confirm("Download now? It keeps going in the background while you finish setup."):
                 return False
     e.post("/api/smith/setup", {})
     return True
 
 
+SPIN_FRAMES = "◒◐◓◑"
+
+
 def smith_wait(e: Engine) -> bool:
-    """Progress bar until smith is ready. Ctrl+C leaves it downloading in the background."""
-    from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
-    with Progress(TextColumn("{task.description}"), BarColumn(), TextColumn("{task.percentage:>3.0f}%"),
-                  TimeRemainingColumn(), console=console, transient=True) as bar:
-        task = bar.add_task("Getting smith ready", total=1.0)
-        try:
-            while True:
-                s = e.get("/api/smith")["state"]
-                bar.update(task, description=s.get("message") or "Getting smith ready",
-                           completed=s.get("progress") or 0)
-                if s["phase"] in ("ready", "error", "idle"):
-                    break
-                time.sleep(0.5)
-        except KeyboardInterrupt:
-            console.print("[dim]smith keeps downloading in the background. /smith shows progress.[/]")
-            return False
-    if s["phase"] == "error":
-        console.print(f"[yellow]! smith: {s['message']}[/]")
+    """A progress line until smith is ready. Ctrl+C leaves it downloading in the background."""
+    f = P.Frame()
+    n = 0
+    s: dict = {}
+    try:
+        while True:
+            s = e.get("/api/smith")["state"]
+            if s["phase"] in ("ready", "error", "idle"):
+                break
+            pct = s.get("progress")
+            bar = ""
+            if pct is not None:
+                w = 24
+                full = int(pct * w)
+                bar = "  " + P.cyan("━" * full) + P.gray("━" * (w - full)) + f" {pct * 100:.0f}%"
+            f.draw([f"{P.cyan(SPIN_FRAMES[n % 4])}  {s.get('message') or 'Getting smith ready'}{bar}"])
+            n += 1
+            time.sleep(0.25)
+    except KeyboardInterrupt:
+        f.clear()
+        P.info("smith keeps downloading in the background. `jobsmith smith` shows progress.")
         return False
-    console.print(f"[green]✓[/] {s.get('message') or 'smith is ready'}")
+    f.clear()
+    if s.get("phase") == "error":
+        P.warn(f"smith: {s['message']}")
+        return False
+    P.success(s.get("message") or "smith is ready")
     return True
 
 
@@ -589,15 +721,17 @@ def smith_setup(e: Engine) -> None:
 
 def smith_test(e: Engine) -> None:
     """Write one sample application answer so you can judge smith's quality and speed on this computer."""
-    with console.status("Writing a sample answer to see how smith does on this computer…", spinner="dots"):
-        r = e.post("/api/smith/test")
+    f = P.Frame()
+    f.draw([f"{P.cyan('◒')}  Writing a sample application answer to see how smith does here…"])
+    r = e.post("/api/smith/test")
+    f.clear()
     if not r.get("ok"):
-        console.print(f"[yellow]! smith couldn't write a sample answer: {r.get('error', 'no answer')}[/]")
+        P.warn(f"smith couldn't write a sample answer: {r.get('error', 'no answer')}")
         return
-    console.print(f"\n[dim]Sample answer from {r['model']} in {r['seconds']:g}s ({r['words']} words):[/]")
-    console.print(f"  {r['answer']}\n")
+    import textwrap
+    P.note("\n".join(textwrap.wrap(r["answer"], 72)), f"Sample from {r['model']}, {r['seconds']:g}s, {r['words']} words")
     if r["grade"] != "good":
-        console.print("[yellow]That's slow or off-length for this computer. A Gemini key (free) writes better and faster.[/]")
+        P.warn("That's slow or off-length on this computer. Gemini (free) writes better and faster.")
 
 
 # --------------------------------------------------------------------------- first run
@@ -611,90 +745,98 @@ GEMINI_KEY_URL = "https://aistudio.google.com/apikey"
 
 
 def _pick_ai(e: Engine, st: dict) -> None:
-    """Which AI writes answers. Gemini's free tier is the recommended start: best free writing, and it can search."""
+    """Which AI writes answers. Gemini's free tier is recommended: best free writing, and it can search."""
     sm = st["smith"]
     rec = sm["recommended"]
     found = {d["kind"]: d for d in st["ai"]["detected"]}
-    opts: list[tuple[str, str]] = []
-    if "gemini_api" in found:
-        opts.append(("Gemini: your key is already set up (recommended)", "gemini_api"))
-    else:
-        opts.append(("Gemini: free, writes well, can research companies. Needs a free key, 1 minute (recommended)", "gemini_api"))
+    opts: list[tuple] = []
+    opts.append(("Gemini (recommended)", "gemini_api",
+                 "your key is set up" if "gemini_api" in found else "free, writes well, researches companies; 1-minute key"))
     for kind in ("anthropic_api", "openai_api", "claude_cli"):
         if kind in found:
-            opts.append((f"{found[kind]['label']}: found on this computer", kind))
-    smith_note = (f"already set up ({sm['model']})" if sm["has_model"] else
-                  f"free and fully private, runs on this computer ({rec['download_gb']:g} GB download)")
-    opts.append((f"smith: {smith_note}", "smith"))
-    for kind, label in (("anthropic_api", "Claude, with an Anthropic API key"), ("openai_api", "ChatGPT, with an OpenAI API key")):
+            opts.append((found[kind]["label"], kind, "found on this computer"))
+    opts.append(("smith", "smith", f"already set up, {sm['model']}" if sm["has_model"] else
+                 f"free and fully private, runs on this computer; {rec['download_gb']:g} GB download"))
+    for kind, label, hint in (("anthropic_api", "Claude", "Anthropic API key, pay per use"),
+                              ("openai_api", "ChatGPT", "OpenAI API key, pay per use")):
         if kind not in found:
-            opts.append((label, kind))
-    opts.append(("Skip for now (answers from your profile still fill in)", "skip"))
+            opts.append((label, kind, hint))
+    opts.append(("Skip for now", "skip", "answers from your profile still fill in"))
     while True:
-        kind = select("Which AI should write your answers?", opts, opts[0][1])
+        kind = P.select("Which AI should write your answers?", opts, opts[0][1])
         if kind == "skip":
             return
         if kind == "smith":
             if smith_start(e):
-                console.print("[green]✓[/] smith is getting ready in the background. Keep going.")
+                P.info("smith is getting ready in the background. Keep going.")
                 return
             continue
         key = ""
         if kind not in found:
             if kind == "gemini_api":
-                console.print(f"Opening {GEMINI_KEY_URL}. Sign in with Google, click [bold]Create API key[/], and copy it.")
+                P.note(f"Opening {GEMINI_KEY_URL}\nSign in with Google, click Create API key, and copy it.", "Gemini key")
                 webbrowser.open(GEMINI_KEY_URL)
-            import getpass
-            key = getpass.getpass("Paste the key here (hidden), or press Enter to go back: ").strip()
+            key = P.text("Paste the key (hidden), or press Enter to go back", secret=True)
             if not key:
                 continue
-        with console.status("Checking it…", spinner="dots"):
-            res = e.post("/api/onboarding/ai", {"kind": kind, "key": key})
-        console.print(("[green]✓[/] " if res["ok"] else "[yellow]! [/]") + f"{res['using']}: {res['message']}")
+        f = P.Frame()
+        f.draw([f"{P.cyan('◒')}  Checking it…"])
+        res = e.post("/api/onboarding/ai", {"kind": kind, "key": key})
+        f.clear()
         if res["ok"]:
+            P.success(f"{res['using']}: {res['message']}")
             return
+        P.warn(f"{res['using']}: {res['message']}")
+
+
+def _checklist_lines(st: dict, footer: str) -> list[str]:
+    lines = [f"{P.cyan(P.ACTIVE)}  {P.bold('Your resume and details')}  {P.dim('(on the website)')}"]
+    for c in st["checklist"]:
+        if c["done"]:
+            mark, label = P.green(P.BOX_ON), c["label"]
+        else:
+            mark, label = (P.yellow(P.BOX_OFF) if c["required"] else P.dim(P.BOX_OFF)), P.dim(c["label"] + ("" if c["required"] else " (optional)"))
+        val = P.dim("  " + c["value"][:48]) if c["value"] else ""
+        lines.append(f"{P.cyan(P.BAR)}  {mark} {label}{val}")
+    lines.append(f"{P.cyan(P.END)}  {footer}")
+    return lines
 
 
 def _wait_for_profile(e: Engine) -> dict:
-    """The website takes your resume and details; this mirrors what arrives, live.
-    Enter continues here (or lets you drag a file in), o reopens the page."""
+    """The website takes your resume and details; this ticks each one off as it arrives.
+    Enter continues here instead, o opens the page again."""
     url = BASE + "/#/setup"
     e.put("/api/settings", {"setup_step": "profile"})
-    console.print(f"\n[bold]Next, your resume and details.[/] Opening {url} in your browser.")
-    console.print("[dim]Add them there; they show up here as they arrive. Enter: continue here instead · o: open the page again[/]\n")
+    P.note(f"Opening {url}\nAdd your resume and details there. They tick off here as they arrive.", "Next: your resume")
     webbrowser.open(url)
-    shown: dict[str, str] = {}
-
-    def view(st: dict):
-        g = Table.grid(padding=(0, 2))
-        g.add_column(width=2)
-        g.add_column()
-        g.add_column(style="dim")
-        for c in st["checklist"]:
-            mark = "[green]✓[/]" if c["done"] else ("[yellow]·[/]" if c["required"] else "[dim]·[/]")
-            g.add_row(mark, c["label"] + ("" if c["required"] or c["done"] else " [dim](optional)[/]"),
-                      (c["value"] or "")[:60])
-        tail = ("[green]Everything autopilot needs is here.[/] Finish on the website, or press Enter to continue here."
-                if st["profile_ready"] else "Waiting for the website…")
-        g.add_row("", Text.from_markup(f"\n{tail}"), "")
-        return g
-
     st = e.get("/api/onboarding")
+    if not P.interactive():
+        return st
+    f = P.Frame()
+    tick = 0
     try:
-        with Keys() as kb, Live(view(st), console=console, refresh_per_second=4, transient=True) as live:
+        with P._Raw() as kb:
             while st.get("setup_step") == "profile":
-                k = kb.get(1.0)
-                st = e.get("/api/onboarding")
-                live.update(view(st))
-                if k in ("\r", "\n"):
+                tick += 1
+                foot = (P.green("Everything autopilot needs is here.") + P.dim("  Finish on the website, or press Enter to continue here")
+                        if st["profile_ready"] else
+                        P.dim(f"{SPIN_FRAMES[tick % 4]} waiting for the website · Enter to continue here instead · o to open it again"))
+                f.draw(_checklist_lines(st, foot))
+                k = kb.key(1.0)
+                if k == "enter":
                     break
-                if k and k.lower() == "o":
+                if k == "o":
                     webbrowser.open(url)
+                st = e.get("/api/onboarding")
     except KeyboardInterrupt:
-        pass
-    for c in st["checklist"]:
-        if c["done"] and c["key"] not in shown:
-            console.print(f"[green]✓[/] {c['label']}: {c['value'][:70]}")
+        f.clear()
+        raise
+    f.clear()
+    done = [c for c in st["checklist"] if c["done"]]
+    print(f"{P.green(P.DONE)}  Your resume and details")
+    for c in done:
+        print(f"{P.gray(P.BAR)}  {P.green(P.BOX_ON)} {c['label']}  {P.dim(c['value'][:60])}")
+    print(P.gray(P.BAR))
     return st
 
 
@@ -702,104 +844,145 @@ def _resume_here(e: Engine, st: dict) -> dict:
     """Finishing in the terminal: drag a resume in, answer what's still missing."""
     if not st["checklist"][0]["done"] or not st["checklist"][1]["done"]:
         while True:
-            p = ask("Drag your resume here (.tex, .pdf or .docx) and press Enter, or leave blank to skip:")
+            p = P.text("Drag your resume here (.tex, .pdf or .docx) and press Enter, or leave blank to skip")
             if not p:
                 break
             path = _clean_path(p)
             if not path.exists():
-                console.print(f"[yellow]Can't find {path}.[/]")
+                P.warn(f"Can't find {path}")
                 continue
-            with console.status("Reading it…"):
-                slots = ["resume", "resume_pdf"] if path.suffix.lower() == ".pdf" else ["resume"]
-                for slot in slots:
-                    with open(path, "rb") as fh:
-                        e.post("/api/profile/upload", files={"file": (path.name, fh)}, data={"slot": slot})
+            slots = ["resume", "resume_pdf"] if path.suffix.lower() == ".pdf" else ["resume"]
+            for slot in slots:
+                with open(path, "rb") as fh:
+                    e.post("/api/profile/upload", files={"file": (path.name, fh)}, data={"slot": slot})
             st = e.get("/api/onboarding")
-            if st["checklist"][1]["done"] or not yes("Add the PDF version too (that's what employers get)?"):
+            P.success(f"Read {path.name}: {st['checklist'][0]['value']}")
+            if st["checklist"][1]["done"] or not P.confirm("Add the PDF version too? That's what employers get."):
                 break
     for key, label in (("work_authorized_us", "Authorized to work in the US?"), ("needs_sponsorship", "Need visa sponsorship now or later?")):
         item = next(c for c in st["checklist"] if c["key"] == key)
         if not item["done"]:
-            v = select(label, [("Yes", "Yes"), ("No", "No"), ("Skip", "")])
+            v = P.select(label, [("Yes", "Yes"), ("No", "No"), ("Skip", "")])
             if v:
                 e.put(f"/api/answers/{key}", {"value": v, "confirmed": True})
-    if any(c["value"] for c in st["checklist"]) and yes("Confirm the details read from your resume?"):
+    if any(c["value"] for c in st["checklist"]) and P.confirm("Confirm the details read from your resume?"):
         e.post("/api/answers/confirm-all")
     return e.get("/api/onboarding")
 
 
 def init(e: Engine) -> None:
     st = e.get("/api/onboarding")
-    console.print(f"\n[bold {ACCENT}]Jobsmith[/] applies to jobs for you, from your real resume, and never makes anything up.\n"
-                  "A few questions here, then your resume on the website, then it gets to work.\n")
+    print()
+    P.intro("Jobsmith setup")
+    P.note("Applies to jobs for you, from your real resume, and never makes anything up.\n"
+           "A few questions and your resume, here in the terminal. Then it gets to work.", "Welcome")
 
     # 1. what you're applying for (several allowed)
     goal_opts = [(g["label"], k) for k, g in st["goals"].items()]
-    goals = checkbox("What are you applying for?", goal_opts, st.get("goals_set") or ["internship"])
+    goals = P.multiselect("What are you applying for?", goal_opts, st.get("goals_set") or ["internship"])
     companies: list[str] = []
     if "targeted" in goals:
-        companies = [c.strip() for c in ask("Which companies? Separate them with commas:", ", ".join(st.get("companies") or [])).split(",") if c.strip()]
+        companies = [c.strip() for c in P.text("Which companies? Separate them with commas",
+                                               ", ".join(st.get("companies") or [])).split(",") if c.strip()]
 
     # 2. fields (several allowed)
     fields = st["fields"]
-    cats = checkbox("Which fields?", [(f, f) for f in fields], st.get("categories") or fields[:3])
-    e.post("/api/onboarding/goal", {"goals": goals, "categories": cats, "companies": companies})
-    kinds = [st["goals"][k]["label"] for k in goals if k != "targeted"] + ([", ".join(companies)] if companies else [])
-    console.print(f"[green]✓[/] Looking for {', '.join(cats)} roles: {'; '.join(kinds) or 'the companies you name'}. "
-                  "Job lists are syncing in the background.\n")
+    cats = P.multiselect("Which fields?", [(f, f) for f in fields], st.get("categories") or fields[:3])
+    e.post("/api/onboarding/goal", {"goals": goals, "goal": goals[0], "categories": cats, "companies": companies})
 
-    # 3. AI
+    # 3. preferences
+    places = P.multiselect("Where do you want to work?", [("Anywhere in the US", "any")] +
+                           [(n, n, "remote roles" if n == "Remote" else "outside the US" if n in st.get("international", []) else "")
+                            for n in st["locations"]],
+                           st.get("location_choices") or ["any"], exclusive="any")
+    picky = P.select("How picky should autopilot be?", [
+        ("Good fits (recommended)", "good", "roles that match your fields and resume"),
+        ("Strong fits only", "strong", "fewer applications, closer matches"),
+        ("Anything I qualify for", "any", "the most applications")], st.get("picky") or "good")
+    at_once = P.select("How many applications at once?", [
+        ("3 (recommended)", 3, "fast, and easy to keep an eye on"), ("1", 1, "one at a time, easiest to watch"),
+        ("5", 5, "fastest; uses more memory")], st.get("concurrency") or 3)
+    window = P.select("While it applies, the browser window should be", [
+        ("In the background (recommended)", "background", "watch any application when you want to"),
+        ("On screen", "visible", "see every form as it's filled")], st.get("browser_window") or "background")
+    values = P.multiselect("What do you value most in a role? Pick up to 3", [(v, v) for v in st.get("values_all") or []],
+                           st.get("values") or [], required=False, limit=3) if st.get("values_all") else []
+    e.post("/api/onboarding/prefs", {"locations": [] if "any" in places else places, "picky": picky,
+                                     "concurrency": at_once, "browser_window": window, "values": values})
+    ack = P.select("Forms often ask you to confirm privacy notices, terms, or AI-use policies. Answer those for you?", [
+        ("Yes, agree for me (recommended)", "Yes", "otherwise each one waits for you"),
+        ("No, ask me each time", "No")], "Yes")
+    for key in ("acknowledge_notices", "ai_tools_consent"):
+        e.put(f"/api/answers/{key}", {"value": ack, "confirmed": True})
+    P.info("Job lists are syncing in the background.")
+
+    # 4. AI
     _pick_ai(e, st)
 
-    # 4. resume and details, on the website (mirrored here)
-    st = _wait_for_profile(e)
+    # 4. resume and details: right here by default (drag the file in), or on the website if you'd rather
+    where = P.select("Your resume", [("Add it here (recommended)", "here", "drag the file into this window"),
+                                     ("On the website", "web", "upload it and check what was read, in your browser")], "here") \
+        if P.interactive() else "web"
+    if where == "here":
+        e.put("/api/settings", {"setup_step": "profile"})
+        st = e.get("/api/onboarding")
+    else:
+        st = _wait_for_profile(e)
     if st.get("setup_step") == "profile":       # you continued here instead of on the website
         if not st["profile_ready"]:
             st = _resume_here(e, st)
         # 5. how it applies: autopilot first, since that's what Jobsmith is for
-        mode = select("How should it apply?", [
-            ("Autopilot: applies on its own, holds anything it isn't sure about for you (recommended)", "autopilot"),
-            ("Copilot: fills every form and stops before Submit", "copilot")], "autopilot")
+        mode = P.select("How should it apply?", [
+            ("Autopilot (recommended)", "autopilot", "applies on its own, holds anything it isn't sure about for you"),
+            ("Copilot", "copilot", "fills every form and stops before Submit")], "autopilot")
         e.post("/api/onboarding/finish", {"autonomy": mode})
         st = e.get("/api/onboarding")
+    elif st.get("setup_step") in ("started", "first"):
+        P.success("Finished on the website. " + ("Autopilot is running." if st["setup_step"] == "started"
+                                                 else "Filling your first application."))
+        P.outro("Here's what it's doing.")
+        _handoff(e, until_idle=st["setup_step"] == "first")
+        return
     else:
-        console.print("[green]✓[/] Finished on the website.")
-        if st.get("setup_step") == "started":
-            console.print("[green]✓[/] Autopilot started from the website. Here's what it's doing:")
-            watch(e, until_idle=False)
-            return
+        P.success("Finished on the website.")
     missing = [c["label"] for c in st["checklist"] if c["required"] and not c["done"]]
     if missing:
-        console.print(f"[yellow]Still missing: {', '.join(missing)}.[/] Applications that need these wait for you.")
+        P.warn(f"Still missing: {', '.join(missing)}. Applications that need these wait for you.")
 
     # 6. go
     if st.get("autonomy") == "copilot":
-        go = select("Ready.", [("Fill my best match now (you press Submit)", "first"), ("Not now", "later")], "first")
+        go = P.select("Ready", [("Fill my best match now", "first", "you press Submit"), ("Not now", "later")], "first")
     else:
-        go = select("Ready.", [("Start autopilot now and watch it work (recommended)", "start"),
-                               ("Watch it fill one application first, without submitting", "first"),
-                               ("Not now", "later")], "start")
+        go = P.select("Ready", [("Start autopilot now (recommended)", "start", "and watch it work"),
+                                ("Watch one application first", "first", "fills it without submitting"),
+                                ("Not now", "later")], "start")
     if smith_busy(e):
-        console.print("Waiting for smith to finish downloading (Ctrl+C to do this later).")
+        P.info("Waiting for smith to finish downloading (Ctrl+C to do this later).")
         smith_wait(e)
     if go == "start":
         r = e.post("/api/onboarding/start")
-        console.print("[green]✓[/] Autopilot is on." + (f" Also applying to {', '.join(r['companies'])}." if r.get("companies") else ""))
-        console.print("[dim]Tip: `jobsmith extension` adds Jobsmith to Chrome, to fill any application you're looking at.[/]")
-        watch(e, until_idle=False)
+        P.success("Autopilot is on." + (f" Also applying to {', '.join(r['companies'])}." if r.get("companies") else ""))
+        P.outro("Opening Jobsmith. Ask it anything, or type /help. `jobsmith extension` adds Chrome.")
+        _handoff(e)
     elif go == "first":
         res = e.post("/api/onboarding/first-run")
         if res.get("ok"):
-            console.print(f"Filling {res['company']}, {res['title']}. Press 1 to watch it in the browser.")
-            watch(e)
-            if st.get("autonomy") != "copilot" and yes("Start autopilot now?"):
-                e.post("/api/onboarding/start")
-                watch(e, until_idle=False)
+            P.outro(f"Filling {res['company']}, {res['title']}. Shift+Tab turns autopilot on when you're ready.")
+            _handoff(e)
         else:
-            console.print(f"[yellow]{res.get('message', 'Nothing to try yet.')}[/]")
+            P.outro(res.get("message", "Nothing to try yet. Your job lists may still be syncing."))
     else:
-        console.print("[dim]Autopilot is on: it checks your job lists every few hours. Type /autopilot off to stop it.[/]"
-                      if st.get("autonomy") != "copilot" else "")
+        P.outro("Autopilot is on: it checks your job lists every few hours. Type /autopilot off to stop it."
+                if st.get("autonomy") != "copilot" else "All set. Type what to apply to, or /help.")
+
+
+def _handoff(e: Engine, until_idle: bool = False) -> None:
+    """After setup: the full-screen app when there's a terminal to draw it in, the plain watch view otherwise."""
+    if sys.stdout.isatty() and P.interactive():
+        from . import tuiapp
+        tuiapp.run(BASE, splash=False)
+        raise SystemExit(0)
+    watch(e, until_idle=until_idle)
 
 
 def smith_busy(e: Engine) -> bool:
@@ -809,12 +992,18 @@ def smith_busy(e: Engine) -> bool:
 def main(argv: list[str]) -> None:
     """Entry for everything that isn't `serve`."""
     mode = None
+    plain = "--plain" in argv
+    if plain:
+        argv.remove("--plain")
     if "--autopilot" in argv:
         argv.remove("--autopilot")
         mode = "autopilot"
     if "--copilot" in argv:
         argv.remove("--copilot")
         mode = "copilot"
+    if argv and argv[0] in ("help", "commands", "--help", "-h"):
+        show_help()                     # no engine needed to read the menu
+        return
     e = Engine()
     e.ensure()
     cmd = argv[0] if argv else ""
@@ -823,15 +1012,30 @@ def main(argv: list[str]) -> None:
     elif cmd == "watch":
         watch(e, until_idle=False)
     elif cmd == "review":
-        review(e)
-    elif cmd == "init":
-        init(e)
+        if plain or not sys.stdout.isatty():
+            review(e)
+        else:
+            from . import tuiapp
+            tuiapp.run(BASE, splash=False, start="review")
+    elif cmd in ("init", "setup"):
+        if "--web" in argv:
+            e.post("/api/onboarding/restart", {})
+            webbrowser.open(f"{BASE}/#/setup/1")
+            console.print(f"Setup is open on the website from step 1: {BASE}/#/setup/1")
+        else:
+            init(e)
     elif cmd == "web":
         webbrowser.open(BASE)
     elif cmd == "smith":
         smith_setup(e)
+    elif cmd == "stop":
+        stop_everything(e)
+    elif cmd == "activity":
+        activity(e)
     elif cmd == "extension":
         extension_help()
+    elif cmd in ("help", "commands", "--help", "-h"):
+        show_help()
     elif cmd == "jobs":
         jobs(e, " ".join(argv[1:]))
     elif argv:
@@ -841,4 +1045,8 @@ def main(argv: list[str]) -> None:
             init(e)
         if mode:
             console.print(f"[bold]{mode.capitalize()} for this session.[/]")
-        repl(e, mode)
+        if plain or not sys.stdout.isatty():
+            repl(e, mode)
+        else:
+            from . import tuiapp
+            tuiapp.run(BASE, splash=os.environ.get("JOBSMITH_NO_SPLASH") != "1")
