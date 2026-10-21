@@ -1,0 +1,25 @@
+name: Propose a skill
+description: A new skill for part of the job hunt (prep, offers, sources, anything)
+labels: [skill]
+body:
+  - type: input
+    id: name
+    attributes:
+      label: Skill name
+      placeholder: e.g. Salary research
+    validations: { required: true }
+  - type: textarea
+    id: what
+    attributes:
+      label: What it does for the job seeker
+      description: Who it helps, when they'd use it, what they get.
+    validations: { required: true }
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: The rules
+      options:
+        - label: It never invents facts, sends messages for the user, or gives hidden help in real interviews
+          required: true
+        - label: It works locally and sends data only to the AI the user chose
+          required: true

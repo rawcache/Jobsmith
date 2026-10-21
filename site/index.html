@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jobsmith</title>
+<meta name="description" content="Free, open-source autopilot for internship and new-grad applications. Runs on your computer and fills every application from your real resume.">
+<meta property="og:title" content="Jobsmith">
+<meta property="og:description" content="Apply to internships and new-grad roles on autopilot. Free, open source, runs on your computer.">
+<meta property="og:image" content="screenshot-home.png">
+<meta name="theme-color" content="#f7f8fb" media="(prefers-color-scheme: light)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 52' fill='%23c2410c'%3E%3Crect x='44' y='0' width='3' height='3'/%3E%3Crect x='48' y='0' width='3' height='3'/%3E%3Crect x='40' y='4' width='3' height='3'/%3E%3Crect x='44' y='4' width='3' height='3'/%3E%3Crect x='36' y='8' width='3' height='3'/%3E%3Crect x='40' y='8' width='3' height='3'/%3E%3Crect x='12' y='12' width='3' height='3'/%3E%3Crect x='16' y='12' width='3' height='3'/%3E%3Crect x='20' y='12' width='3' height='3'/%3E%3Crect x='24' y='12' width='3' height='3'/%3E%3Crect x='32' y='12' width='3' height='3'/%3E%3Crect x='36' y='12' width='3' height='3'/%3E%3Crect x='12' y='16' width='3' height='3'/%3E%3Crect x='16' y='16' width='3' height='3'/%3E%3Crect x='20' y='16' width='3' height='3'/%3E%3Crect x='24' y='16' width='3' height='3'/%3E%3Crect x='28' y='16' width='3' height='3'/%3E%3Crect x='32' y='16' width='3' height='3'/%3E%3Crect x='12' y='20' width='3' height='3'/%3E%3Crect x='16' y='20' width='3' height='3'/%3E%3Crect x='20' y='20' width='3' height='3'/%3E%3Crect x='24' y='20' width='3' height='3'/%3E%3Crect x='0' y='24' width='3' height='3'/%3E%3Crect x='4' y='24' width='3' height='3'/%3E%3Crect x='8' y='24' width='3' height='3'/%3E%3Crect x='12' y='24' width='3' height='3'/%3E%3Crect x='16' y='24' width='3' height='3'/%3E%3Crect x='20' y='24' width='3' height='3'/%3E%3Crect x='24' y='24' width='3' height='3'/%3E%3Crect x='28' y='24' width='3' height='3'/%3E%3Crect x='32' y='24' width='3' height='3'/%3E%3Crect x='36' y='24' width='3' height='3'/%3E%3Crect x='40' y='24' width='3' height='3'/%3E%3Crect x='44' y='24' width='3' height='3'/%3E%3Crect x='48' y='24' width='3' height='3'/%3E%3Crect x='52' y='24' width='3' height='3'/%3E%3Crect x='56' y='24' width='3' height='3'/%3E%3Crect x='60' y='24' width='3' height='3'/%3E%3Crect x='4' y='28' width='3' height='3'/%3E%3Crect x='8' y='28' width='3' height='3'/%3E%3Crect x='12' y='28' width='3' height='3'/%3E%3Crect x='16' y='28' width='3' height='3'/%3E%3Crect x='20' y='28' width='3' height='3'/%3E%3Crect x='24' y='28' width='3' height='3'/%3E%3Crect x='28' y='28' width='3' height='3'/%3E%3Crect x='32' y='28' width='3' height='3'/%3E%3Crect x='36' y='28' width='3' height='3'/%3E%3Crect x='40' y='28' width='3' height='3'/%3E%3Crect x='44' y='28' width='3' height='3'/%3E%3Crect x='48' y='28' width='3' height='3'/%3E%3Crect x='52' y='28' width='3' height='3'/%3E%3Crect x='56' y='28' width='3' height='3'/%3E%3Crect x='60' y='28' width='3' height='3'/%3E%3Crect x='8' y='32' width='3' height='3'/%3E%3Crect x='12' y='32' width='3' height='3'/%3E%3Crect x='16' y='32' width='3' height='3'/%3E%3Crect x='20' y='32' width='3' height='3'/%3E%3Crect x='24' y='32' width='3' height='3'/%3E%3Crect x='28' y='32' width='3' height='3'/%3E%3Crect x='32' y='32' width='3' height='3'/%3E%3Crect x='36' y='32' width='3' height='3'/%3E%3Crect x='40' y='32' width='3' height='3'/%3E%3Crect x='44' y='32' width='3' height='3'/%3E%3Crect x='48' y='32' width='3' height='3'/%3E%3Crect x='52' y='32' width='3' height='3'/%3E%3Crect x='56' y='32' width='3' height='3'/%3E%3Crect x='60' y='32' width='3' height='3'/%3E%3Crect x='24' y='36' width='3' height='3'/%3E%3Crect x='28' y='36' width='3' height='3'/%3E%3Crect x='32' y='36' width='3' height='3'/%3E%3Crect x='36' y='36' width='3' height='3'/%3E%3Crect x='40' y='36' width='3' height='3'/%3E%3Crect x='44' y='36' width='3' height='3'/%3E%3Crect x='48' y='36' width='3' height='3'/%3E%3Crect x='52' y='36' width='3' height='3'/%3E%3Crect x='28' y='40' width='3' height='3'/%3E%3Crect x='32' y='40' width='3' height='3'/%3E%3Crect x='36' y='40' width='3' height='3'/%3E%3Crect x='40' y='40' width='3' height='3'/%3E%3Crect x='44' y='40' width='3' height='3'/%3E%3Crect x='48' y='40' width='3' height='3'/%3E%3Crect x='24' y='44' width='3' height='3'/%3E%3Crect x='28' y='44' width='3' height='3'/%3E%3Crect x='32' y='44' width='3' height='3'/%3E%3Crect x='36' y='44' width='3' height='3'/%3E%3Crect x='40' y='44' width='3' height='3'/%3E%3Crect x='44' y='44' width='3' height='3'/%3E%3Crect x='48' y='44' width='3' height='3'/%3E%3Crect x='52' y='44' width='3' height='3'/%3E%3Crect x='16' y='48' width='3' height='3'/%3E%3Crect x='20' y='48' width='3' height='3'/%3E%3Crect x='24' y='48' width='3' height='3'/%3E%3Crect x='28' y='48' width='3' height='3'/%3E%3Crect x='32' y='48' width='3' height='3'/%3E%3Crect x='36' y='48' width='3' height='3'/%3E%3Crect x='40' y='48' width='3' height='3'/%3E%3Crect x='44' y='48' width='3' height='3'/%3E%3Crect x='48' y='48' width='3' height='3'/%3E%3Crect x='52' y='48' width='3' height='3'/%3E%3Crect x='56' y='48' width='3' height='3'/%3E%3Crect x='60' y='48' width='3' height='3'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --paper: #f7f8fb; --card: #ffffff; --ink: #0f172a; --text: #334155; --muted: #64748b; --line: #e6e9f0;
+    --ember: #2f5bea; --ember-hot: #3b6ff5; --term: #0b1220; --term-text: #e8edf7; --term-dim: #8b98b2; --ok: #4ade80; --hold: #fbbf24;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--paper); color: var(--text); font: 15px/1.6 var(--font); -webkit-font-smoothing: antialiased; }
+  a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+  a:hover { text-decoration-color: currentColor; }
+  :focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; border-radius: 4px; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 28px; }
+
+  header.top { display: flex; align-items: center; gap: 24px; height: 68px; }
+  .brand { display: inline-flex; align-items: center; gap: 10px; font: 700 18px var(--font); color: var(--ink); text-decoration: none; letter-spacing: -0.02em; }
+  .mark { color: var(--ember); }
+  header.top nav { margin-left: auto; display: flex; gap: 22px; font: 500 14px var(--font); }
+  header.top nav a { text-decoration: none; color: var(--muted); }
+  header.top nav a:hover { color: var(--ink); }
+
+  .hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 560px); gap: 48px; align-items: center; padding: 48px 0 36px; }
+  h1 { margin: 0; color: var(--ink); font: 700 clamp(34px, 4.6vw, 52px)/1.08 var(--font); letter-spacing: -0.035em; max-width: 13ch; }
+  .lede { margin: 20px 0 26px; font-size: 17px; line-height: 1.5; max-width: 33em; }
+  .smith { margin: 0; font: clamp(5.4px, .92vw, 12px)/1.1 var(--mono); color: var(--ink); white-space: pre; user-select: none; }
+  .js .smith span { opacity: 0; transition: opacity .12s; }
+  .js .smith span.on { opacity: 1; }
+  .smith-cap { font: 13px var(--mono); color: var(--muted); margin: 14px 0 0; }
+
+  .install { border: 1px solid var(--line); background: var(--card); border-radius: 10px; overflow: hidden; max-width: 560px; }
+  .tabs { display: flex; border-bottom: 1px solid var(--line); }
+  .tabs button { font: 500 13px var(--mono); color: var(--muted); background: none; border: 0; padding: 9px 14px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ember); }
+  .cmd { display: flex; align-items: center; gap: 10px; padding: 12px 12px 12px 14px; }
+  .cmd code { flex: 1; min-width: 0; font: 13.5px/1.5 var(--mono); color: var(--ink); overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+  .cmd code::-webkit-scrollbar { display: none; }
+  .cmd code::before { content: "$ "; color: var(--muted); }
+  .copy { flex: none; font: 500 12.5px var(--mono); color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+  .then { margin: 0; padding: 0 14px 12px; font-size: 14px; color: var(--muted); }
+  .then code { font: 13px var(--mono); color: var(--ink); }
+  .release { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 16px 0 0; font: 13px var(--mono); color: var(--muted); }
+  .release strong { color: var(--ink); font-weight: 600; }
+
+  .shot { margin: 8px 0 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--card); }
+  .shot img { display: block; width: 100%; height: auto; }
+  .caption { font: 13px var(--mono); color: var(--muted); margin: 10px 2px 0; }
+
+  section { padding: 80px 0 0; }
+  h2 { color: var(--ink); font: 700 26px var(--font); letter-spacing: -0.025em; margin: 0 0 8px; }
+  .section-lede { margin: 0 0 28px; max-width: 38em; }
+  .three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; }
+  .three h3, .skills h3, .fine h3 { color: var(--ink); font: 600 15px var(--mono); margin: 0 0 6px; }
+  .three h3 { padding-top: 14px; border-top: 2px solid var(--ink); }
+  .three p, .skills p, .fine p { margin: 0; font-size: 16px; }
+  .skills { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+  .skills li { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .skills .soon { color: var(--muted); font: 12px var(--mono); margin-left: 6px; font-weight: 400; }
+  .term { background: var(--term); color: var(--term-text); border-radius: 12px; padding: 18px 20px 20px; font: 13.5px/1.75 var(--mono); overflow-x: auto; }
+  .term p { margin: 0; white-space: pre; }
+  .term .you::before { content: "› "; color: var(--ember-hot); }
+  .term .dim { color: var(--term-dim); } .term .ok { color: var(--ok); } .term .hold { color: var(--hold); } .term .co { color: #fff; }
+  ol.steps { list-style: none; counter-reset: s; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; }
+  ol.steps li { counter-increment: s; }
+  ol.steps li::before { content: counter(s); display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; border: 1.5px solid var(--ink);
+    font: 600 13px var(--mono); color: var(--ink); margin-bottom: 12px; }
+  ol.steps strong { display: block; color: var(--ink); font-family: var(--mono); margin-bottom: 4px; }
+  ol.steps p { margin: 0; font-size: 16px; }
+  code { font-family: var(--mono); }
+  .fine { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 40px; }
+
+  footer { margin: 96px 0 0; padding: 24px 0 40px; border-top: 1px solid var(--line); font: 13px var(--mono); color: var(--muted); display: flex; flex-wrap: wrap; gap: 8px 24px; }
+  footer a { color: var(--muted); }
+
+  @media (max-width: 920px) {
+    .hero { grid-template-columns: minmax(0, 1fr); gap: 28px; padding-top: 24px; }
+    .smith { font-size: 1.32vw; }
+    .three, ol.steps, .fine { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  }
+  @media (max-width: 520px) {
+    .wrap { padding: 0 16px; }
+    header.top nav a.hide-sm { display: none; }
+    .lede { font-size: 17px; }
+    .term { font-size: 11px; padding: 14px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .js .smith span { opacity: 1; transition: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="brand" href="./" aria-label="Jobsmith home"><svg class="mark" width="26" height="21" viewBox="0 0 64 52" fill="currentColor" aria-hidden="true"><rect x="44" y="0" width="3" height="3"/><rect x="48" y="0" width="3" height="3"/><rect x="40" y="4" width="3" height="3"/><rect x="44" y="4" width="3" height="3"/><rect x="36" y="8" width="3" height="3"/><rect x="40" y="8" width="3" height="3"/><rect x="12" y="12" width="3" height="3"/><rect x="16" y="12" width="3" height="3"/><rect x="20" y="12" width="3" height="3"/><rect x="24" y="12" width="3" height="3"/><rect x="32" y="12" width="3" height="3"/><rect x="36" y="12" width="3" height="3"/><rect x="12" y="16" width="3" height="3"/><rect x="16" y="16" width="3" height="3"/><rect x="20" y="16" width="3" height="3"/><rect x="24" y="16" width="3" height="3"/><rect x="28" y="16" width="3" height="3"/><rect x="32" y="16" width="3" height="3"/><rect x="12" y="20" width="3" height="3"/><rect x="16" y="20" width="3" height="3"/><rect x="20" y="20" width="3" height="3"/><rect x="24" y="20" width="3" height="3"/><rect x="0" y="24" width="3" height="3"/><rect x="4" y="24" width="3" height="3"/><rect x="8" y="24" width="3" height="3"/><rect x="12" y="24" width="3" height="3"/><rect x="16" y="24" width="3" height="3"/><rect x="20" y="24" width="3" height="3"/><rect x="24" y="24" width="3" height="3"/><rect x="28" y="24" width="3" height="3"/><rect x="32" y="24" width="3" height="3"/><rect x="36" y="24" width="3" height="3"/><rect x="40" y="24" width="3" height="3"/><rect x="44" y="24" width="3" height="3"/><rect x="48" y="24" width="3" height="3"/><rect x="52" y="24" width="3" height="3"/><rect x="56" y="24" width="3" height="3"/><rect x="60" y="24" width="3" height="3"/><rect x="4" y="28" width="3" height="3"/><rect x="8" y="28" width="3" height="3"/><rect x="12" y="28" width="3" height="3"/><rect x="16" y="28" width="3" height="3"/><rect x="20" y="28" width="3" height="3"/><rect x="24" y="28" width="3" height="3"/><rect x="28" y="28" width="3" height="3"/><rect x="32" y="28" width="3" height="3"/><rect x="36" y="28" width="3" height="3"/><rect x="40" y="28" width="3" height="3"/><rect x="44" y="28" width="3" height="3"/><rect x="48" y="28" width="3" height="3"/><rect x="52" y="28" width="3" height="3"/><rect x="56" y="28" width="3" height="3"/><rect x="60" y="28" width="3" height="3"/><rect x="8" y="32" width="3" height="3"/><rect x="12" y="32" width="3" height="3"/><rect x="16" y="32" width="3" height="3"/><rect x="20" y="32" width="3" height="3"/><rect x="24" y="32" width="3" height="3"/><rect x="28" y="32" width="3" height="3"/><rect x="32" y="32" width="3" height="3"/><rect x="36" y="32" width="3" height="3"/><rect x="40" y="32" width="3" height="3"/><rect x="44" y="32" width="3" height="3"/><rect x="48" y="32" width="3" height="3"/><rect x="52" y="32" width="3" height="3"/><rect x="56" y="32" width="3" height="3"/><rect x="60" y="32" width="3" height="3"/><rect x="24" y="36" width="3" height="3"/><rect x="28" y="36" width="3" height="3"/><rect x="32" y="36" width="3" height="3"/><rect x="36" y="36" width="3" height="3"/><rect x="40" y="36" width="3" height="3"/><rect x="44" y="36" width="3" height="3"/><rect x="48" y="36" width="3" height="3"/><rect x="52" y="36" width="3" height="3"/><rect x="28" y="40" width="3" height="3"/><rect x="32" y="40" width="3" height="3"/><rect x="36" y="40" width="3" height="3"/><rect x="40" y="40" width="3" height="3"/><rect x="44" y="40" width="3" height="3"/><rect x="48" y="40" width="3" height="3"/><rect x="24" y="44" width="3" height="3"/><rect x="28" y="44" width="3" height="3"/><rect x="32" y="44" width="3" height="3"/><rect x="36" y="44" width="3" height="3"/><rect x="40" y="44" width="3" height="3"/><rect x="44" y="44" width="3" height="3"/><rect x="48" y="44" width="3" height="3"/><rect x="52" y="44" width="3" height="3"/><rect x="16" y="48" width="3" height="3"/><rect x="20" y="48" width="3" height="3"/><rect x="24" y="48" width="3" height="3"/><rect x="28" y="48" width="3" height="3"/><rect x="32" y="48" width="3" height="3"/><rect x="36" y="48" width="3" height="3"/><rect x="40" y="48" width="3" height="3"/><rect x="44" y="48" width="3" height="3"/><rect x="48" y="48" width="3" height="3"/><rect x="52" y="48" width="3" height="3"/><rect x="56" y="48" width="3" height="3"/><rect x="60" y="48" width="3" height="3"/></svg>jobsmith</a>
+    <nav>
+      <a class="hide-sm" href="#how">How it works</a>
+      <a class="hide-sm" href="#skills">Skills</a>
+      <a class="hide-sm" href="https://github.com/rawcache/Jobsmith#readme">Docs</a>
+      <a href="https://github.com/rawcache/Jobsmith">GitHub</a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="hero">
+      <div>
+        <h1>Apply to internships on autopilot.</h1>
+        <p class="lede">Jobsmith finds roles you qualify for, fills every application from your real resume, and submits it. Anything it isn't sure about waits for you. Free, open source, and it runs on your computer.</p>
+        <div class="install">
+          <div class="tabs" role="tablist" aria-label="Your system">
+            <button role="tab" id="t-unix" aria-selected="true" aria-controls="p-install">macOS and Linux</button>
+            <button role="tab" id="t-win" aria-selected="false" aria-controls="p-install">Windows</button>
+          </div>
+          <div id="p-install" role="tabpanel">
+            <div class="cmd"><code id="cmd">curl -LsSf https://raw.githubusercontent.com/rawcache/Jobsmith/main/install.sh | sh</code>
+              <button class="copy" id="copy" type="button">Copy</button></div>
+            <p class="then">Paste it into Terminal, then run <code>jobsmith</code>.</p>
+          </div>
+        </div>
+        <p class="release"><span><strong id="ver">v0.3.0</strong> <span id="date">October 2026</span></span>
+          <a href="https://github.com/rawcache/Jobsmith/releases">What's new</a>
+          <a href="https://github.com/rawcache/Jobsmith/archive/refs/heads/main.zip">Download the source</a>
+          <span>MIT license</span></p>
+      </div>
+      <figure style="margin:0">
+        <pre class="smith" role="img" aria-label="smith, an anvil and hammer drawn in ASCII"><span>                                                   ,t|
+</span><span>                                                  ii,
+</span><span>                                                .z|
+</span><span>                       ;                       iz,
+</span><span>                .                            .i!
+</span><span>                                            !t,
+</span><span>                                          .ci
+</span><span>                       :. i             .ic|
+</span><span>                           .     ,UUdU9dzoA99AA.
+</span><span>                           .     :$B8$$BO8$8BOB.
+</span><span>                                 :BOOB8O$$B8OOO,
+</span><span>.::,.....,,.,,,.,.;::,;;,:;:;,:;;;,;;,;;;,;,;;,,,,:;:;::,:::,:.
+</span><span>   .,,;!tojzzoojzoj9dAdAdAUUd99U9A99A9999UUA99UAUA99AAUdU9d9U9;
+</span><span>           .,:;:,:;;cjA8BOOOB$B$$O8$OOB8$$$$88OOOB$OBB8$$O8dVc.
+</span><span>                              c$8B$BO$OB$BO8$8B$O$8Bo
+</span><span>                               i$OOO$8$B8O$BB$BB8$BV
+</span><span>                                zBB$OOBB$$OBB$BO$8V
+</span><span>                                .U8OOOOO$BBOO8$889.
+</span><span>                       ,$$$BB@@@$@88@B88@$$88$$$$B$BB8B$BBB|
+</span><span>                      c8B@$88@B$@$B$8$$B@8B$$@B@@$@@B$8BB88@o
+</span><span>                     tjjzzVoVVVoVVVjVjVVzzzjzVzzVjzzVVzojjojoj
+</span></pre>
+        <figcaption class="smith-cap">smith: Jobsmith's own AI, running on your computer.</figcaption>
+      </figure>
+    </div>
+
+    <figure class="shot" style="margin:0">
+      <img src="screenshot-home.png" width="1440" height="900" alt="The Jobsmith dashboard: a sidebar of pages, autopilot and the bell in the top bar, and applications that need you.">
+    </figure>
+    <p class="caption">The dashboard runs at 127.0.0.1:8765 on your computer. Watch any application being filled, or take over.</p>
+
+    <section aria-labelledby="what">
+      <h2 id="what">What it does</h2>
+      <p class="section-lede">Built for students applying to software, hardware, data and AI roles, where the same twenty questions get asked a hundred times.</p>
+      <div class="three">
+        <div><h3>Applies on its own</h3><p>Point it at SimplifyJobs' internship and new-grad lists, a company, or a link. It checks you qualify, fills the form in a real browser and submits. Turn autopilot off and everything stops.</p></div>
+        <div><h3>Never makes things up</h3><p>Answers come from your resume and profile, and written answers cite the lines they used. When it isn't sure, it holds the application for you instead of guessing.</p></div>
+        <div><h3>Stays on your computer</h3><p>Your resume, answers and keys live in a folder on your machine. Write with Gemini's free tier, or smith, a model that runs locally and never sends anything out.</p></div>
+      </div>
+    </section>
+
+    <section id="skills" aria-labelledby="skills-h">
+      <h2 id="skills-h">Pick the skills you want</h2>
+      <p class="section-lede">Jobsmith is a set of parts. Apply is the core; switch the others on in Skills.</p>
+      <ul class="skills">
+        <li><h3>Apply</h3><p>Autopilot for applications, plus a Chrome side panel: autofill, resume match, and Write with Jobsmith on open questions.</p></li>
+        <li><h3>Your voice</h3><p>Learns how you write from your essays and approved answers, on your computer. Answers in your words with no AI at all, and keeps any AI sounding like you.</p></li>
+        <li><h3>Use it from your agent</h3><p>Claude Code, Codex, Gemini CLI or Cursor can be the brain: <code>jobsmith skills install</code>. Jobsmith checks every answer before it's sent.</p></li>
+        <li><h3>Outreach drafts</h3><p>Referral and recruiter messages to people you know at each company. You send them; Jobsmith never does.</p></li>
+        <li><h3>Inbox and follow-ups</h3><p>Reads replies from Gmail or Outlook (read-only), enters emailed codes, and drafts a follow-up when a company goes quiet.</p></li>
+        <li><h3>Interview notes<span class="soon">next</span></h3><p>Notes, the questions you were asked, and a thank-you draft, transcribed on your computer with everyone's consent.</p></li>
+        <li><h3>Interview prep<span class="soon">next</span></h3><p>Practice questions and STAR stories built from the posting and your resume, before the interview.</p></li>
+        <li><h3>Offers<span class="soon">later</span></h3><p>Compare offers side by side, with talking points for negotiating.</p></li>
+      </ul>
+    </section>
+
+    <section id="how" aria-labelledby="how-h">
+      <h2 id="how-h">How it works</h2>
+      <p class="section-lede">About five minutes from install to your first application.</p>
+      <ol class="steps">
+        <li><strong>Install</strong><p>One command. It sets up Python and a browser for Jobsmith and nothing else.</p></li>
+        <li><strong>Run jobsmith</strong><p>Pick what you're applying for and which AI to use, then drop in your resume. The dashboard opens for anything it couldn't read.</p></li>
+        <li><strong>Turn on autopilot</strong><p>It applies to your best matches every few hours. CAPTCHAs and sign-ins come to you, under the bell.</p></li>
+      </ol>
+      <div class="term" style="margin-top:32px" aria-label="A Jobsmith session in the terminal">
+        <p class="you">apply to nvidia and amd hardware internships</p>
+        <p class="dim">Found 14 roles. 9 fit you; 2 skipped (clearance required).</p>
+        <p>&nbsp;</p>
+        <p><span class="ok">✓</span> <span class="co">NVIDIA</span>  ASIC Design Intern          <span class="ok">submitted</span></p>
+        <p><span class="ok">✓</span> <span class="co">AMD</span>     Silicon Validation Intern   <span class="ok">submitted</span></p>
+        <p><span class="hold">!</span> <span class="co">AMD</span>     GPU Architecture Intern     <span class="hold">held for you</span></p>
+        <p class="dim">  "Why AMD?" needs a look. Open it with /review</p>
+      </div>
+    </section>
+
+    <section aria-labelledby="fine">
+      <h2 id="fine">Good to know</h2>
+      <div class="fine">
+        <div><h3>What it costs</h3><p>Nothing. Gemini's free tier handles most days, and when its daily limit runs out, smith can take over on your own computer. Paid Claude or OpenAI keys work too.</p></div>
+        <div><h3>What it won't do</h3><p>Type your passwords, create accounts, solve CAPTCHAs, send messages for you, or answer questions your profile doesn't cover.</p></div>
+        <div><h3>Where it applies</h3><p>Greenhouse, Lever, Ashby and most single-page forms, end to end. Workday, iCIMS and other multi-page sites are filled page by page and stop at review; you sign in yourself.</p></div>
+        <div><h3>Try it safely</h3><p><code>jobsmith demo</code> opens a practice copy with a made-up person and jobs. Nothing in it opens a real site or sends anything.</p></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>Jobsmith is free and open source under the MIT license.</span>
+    <a href="https://github.com/rawcache/Jobsmith">Source on GitHub</a>
+    <a href="https://github.com/rawcache/Jobsmith/issues">Report a problem</a>
+    <span>Not affiliated with Simplify or any employer.</span>
+  </footer>
+</div>
+
+<script>
+  document.documentElement.classList.add("js");
+  const CMDS = {
+    unix: ["curl -LsSf https://raw.githubusercontent.com/rawcache/Jobsmith/main/install.sh | sh", "Paste it into Terminal, then run "],
+    win: ['powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/rawcache/Jobsmith/main/install.ps1 | iex"', "Paste it into PowerShell, then run "],
+  };
+  const cmd = document.getElementById("cmd"), then = document.querySelector(".then");
+  function pick(os) {
+    document.getElementById("t-unix").setAttribute("aria-selected", os === "unix");
+    document.getElementById("t-win").setAttribute("aria-selected", os === "win");
+    cmd.textContent = CMDS[os][0];
+    then.firstChild.textContent = CMDS[os][1];
+  }
+  document.getElementById("t-unix").onclick = () => pick("unix");
+  document.getElementById("t-win").onclick = () => pick("win");
+  if (/Win/i.test(navigator.platform || navigator.userAgent)) pick("win");
+  document.getElementById("copy").onclick = async (e) => {
+    try { await navigator.clipboard.writeText(cmd.textContent); e.target.textContent = "Copied"; }
+    catch { e.target.textContent = "Select and copy"; }
+    setTimeout(() => (e.target.textContent = "Copy"), 1800);
+  };
+  fetch("https://api.github.com/repos/rawcache/Jobsmith/releases/latest").then(r => r.ok ? r.json() : null).then(r => {
+    if (!r || !r.tag_name) return;
+    document.getElementById("ver").textContent = r.tag_name.startsWith("v") ? r.tag_name : "v" + r.tag_name;
+    document.getElementById("date").textContent = new Date(r.published_at).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  }).catch(() => {});
+  // smith draws itself in once, row by row.
+  const rows = [...document.querySelectorAll(".smith span")];
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  rows.forEach((r, i) => still ? r.classList.add("on") : setTimeout(() => r.classList.add("on"), 200 + i * 55));
+</script>
+</body>
+</html>
