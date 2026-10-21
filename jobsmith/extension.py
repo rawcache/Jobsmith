@@ -84,7 +84,96 @@ def file_for(kind: str, job_id: str = ""):
     if kind == "transcript":
         return profile.transcript_file()
     if kind == "cover_letter" and job_id:
-        d = db.q1("SELECT answer, final_answer FROM drafts WHERE job_id=? AND (field LIKE '%cover%' OR label LIKE '%over letter%')",
-                  (job_id,))
-        return (d or {}).get("final_answer") or (d or {}).get("answer") or None
+        from . import letters
+        return letters.cover_pdf(job_id)
     return profile.attachment_file()
+
+
+# --------------------------------------------------------------------------- the side panel on a posting
+def find(url: str) -> dict | None:
+    """The job this page belongs to, if Jobsmith already knows it (no new rows: just looking)."""
+    clean = posting_url(url)
+    hit = db.q1("SELECT * FROM jobs WHERE url=? OR url=? OR url LIKE ? ORDER BY created_at LIMIT 1",
+                (clean, ats.clean_url(url), clean.rstrip("/") + "%"))
+    return db.decode(hit) if hit else None
+
+
+def context(url: str, title: str = "", site_name: str = "", text: str = "") -> dict:
+    """What the side panel shows: the role, pay, fit, how your resume matches, who you know, and the cover letter."""
+    from . import insights, letters, network, outcomes
+    outcomes._ensure()
+    job = find(url)
+    company = (job or {}).get("company") or company_guess(url, site_name)
+    desc = (job or {}).get("description") or text
+    km = insights.keyword_match({"title": (job or {}).get("title") or title, "description": desc}, insights.resume_text())
+    people = network.at_company(company, 5) if company else []
+    letter = letters.cover_text(job["id"]) if job else ""
+    return {"known": bool(job), "job_id": (job or {}).get("id"), "company": company, "title": (job or {}).get("title") or title,
+            "pay": insights.pay_of(desc), "location": ", ".join(((job or {}).get("locations") or [])[:2]),
+            "fit": (job or {}).get("fit_score"), "status": (job or {}).get("status"), "outcome": (job or {}).get("outcome"),
+            "match": {"score": km["score"], "matched": km["matched"][:12], "missing": km["missing"][:12], "total": km["total"]},
+            "people": [{"name": f"{p['first_name']} {p['last_name']}".strip(), "position": p["position"], "url": p["url"]} for p in people],
+            "people_total": len(network.at_company(company, 200)) if company else 0, "cover_letter": bool(letter)}
+
+
+async def generate(url: str, label: str, title: str = "", site_name: str = "", description: str = "", limit: int = 0) -> dict:
+    """'Write with Jobsmith' beside one question: the same drafting autopilot uses, for just this field."""
+    jid = find_or_add(url, title, company_guess(url, site_name))
+    job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,)))
+    f = {"field": "ext_" + re.sub(r"[^a-z0-9]+", "_", label.lower())[:60], "label": label[:300], "qtype": "textarea",
+         "required": False, "options": [], "description": (description + (f" Limit: {limit} characters." if limit else ""))[:600],
+         "section": "main"}
+    results, err = await draft.answer_fields(job, [f], skip_locked=False)
+    draft.save_results(jid, [f], results)
+    r = results.get(f["field"]) or {}
+    facts = profile.facts_by_id()
+    used = [facts[i]["subject"] or facts[i]["category"] for i in r.get("fact_ids", []) if i in facts]
+    text = r.get("answer", "")
+    if limit and len(text) > limit:
+        text = text[:limit].rsplit(" ", 1)[0]
+    return {"job_id": jid, "text": text, "based_on": list(dict.fromkeys(u.split(" | ")[0] for u in used))[:5],
+            "confidence": r.get("confidence", 0), "error": err if not text else None}
+
+
+def submitted(url: str, title: str = "", site_name: str = "") -> dict:
+    """You pressed Submit on a posting and it said thanks: log it to Applications, and suggest a few similar roles."""
+    from . import runner
+    jid = find_or_add(url, title, company_guess(url, site_name))
+    job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,)))
+    if job["status"] != "submitted":
+        runner.mark_submitted(jid)
+    similar = db.q("""SELECT id, company, title, locations FROM jobs WHERE active=1 AND status IN ('new','fetched','drafted')
+                      AND id != ? AND company != ? AND (category = ? OR ? = '') ORDER BY COALESCE(fit_score,0) DESC LIMIT 3""",
+                   (jid, job["company"], job.get("category") or "", job.get("category") or ""))
+    return {"job_id": jid, "company": job["company"], "title": job["title"],
+            "similar": [dict(db.decode(r)) for r in similar]}
+
+
+def open_install() -> dict:
+    """Make loading the extension one step: open chrome://extensions, show the folder, copy its path."""
+    import platform
+    import shutil
+    import subprocess
+    from .config import EXTENSION_DIR
+    done = {"chrome": False, "folder": False}
+    quiet = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    try:
+        if platform.system() == "Darwin":
+            done["chrome"] = subprocess.run(["open", "-a", "Google Chrome", "chrome://extensions"], **quiet).returncode == 0
+            done["folder"] = subprocess.run(["open", str(EXTENSION_DIR)], **quiet).returncode == 0
+            subprocess.run(["pbcopy"], input=str(EXTENSION_DIR).encode(), stderr=subprocess.DEVNULL)
+        elif platform.system() == "Windows":
+            chrome = shutil.which("chrome") or r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+            done["chrome"] = subprocess.run([chrome, "chrome://extensions"], **quiet).returncode == 0
+            done["folder"] = subprocess.run(["explorer", str(EXTENSION_DIR)], **quiet).returncode in (0, 1)
+        else:
+            for c in ("google-chrome", "chromium", "chromium-browser"):
+                if shutil.which(c):
+                    subprocess.Popen([c, "chrome://extensions"], **quiet)
+                    done["chrome"] = True
+                    break
+            if shutil.which("xdg-open"):
+                done["folder"] = subprocess.run(["xdg-open", str(EXTENSION_DIR)], **quiet).returncode == 0
+    except Exception:
+        pass
+    return done
