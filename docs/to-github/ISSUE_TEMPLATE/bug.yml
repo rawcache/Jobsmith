@@ -1,0 +1,27 @@
+name: Something isn't working
+description: A bug in applying, the terminal, the dashboard or the extension
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations: { required: true }
+  - type: input
+    id: site
+    attributes:
+      label: Job site, if it's about an application
+      placeholder: e.g. Greenhouse, Workday, a company's own site
+  - type: textarea
+    id: log
+    attributes:
+      label: Error or log lines
+      description: Remove your name, email, phone, keys and anything from your resume first.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Version and system
+      placeholder: e.g. 0.4.0 on macOS 15
+    validations: { required: true }

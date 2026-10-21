@@ -1,0 +1,26 @@
+name: Support a job site
+description: Ask for, or offer to build, an adapter for an application system Jobsmith can't fill yet
+labels: [job site]
+body:
+  - type: input
+    id: site
+    attributes:
+      label: Application system
+      placeholder: e.g. SmartRecruiters, Taleo, Workable
+    validations: { required: true }
+  - type: input
+    id: example
+    attributes:
+      label: A public posting that uses it
+      placeholder: https://...
+    validations: { required: true }
+  - type: dropdown
+    id: build
+    attributes:
+      label: Will you build it?
+      options: ["Yes, I'd like to build it", "I can help test it", "Just asking"]
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything unusual about the form
+      description: Multiple pages, sign-in required, file uploads, custom dropdowns...
