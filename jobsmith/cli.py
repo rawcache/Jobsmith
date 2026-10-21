@@ -11,12 +11,20 @@ import asyncio
 import webbrowser
 
 
-ENGINE_CMDS = {"serve", "sync", "ingest", "doctor", "-h", "--help"}
+ENGINE_CMDS = {"serve", "sync", "ingest", "doctor"}
 
 
 def main() -> None:
     import sys
     argv = sys.argv[1:]
+    if argv and argv[0] in ("mcp", "skills", "voice", "site"):
+        from . import clicmds
+        clicmds.main(argv)
+        return
+    if argv and argv[0] in ("demo", "demo-seed", "dev", "check", "shots"):
+        from . import devtools
+        devtools.main(argv)
+        return
     if not argv or argv[0] not in ENGINE_CMDS:
         from . import tui
         tui.main(argv)

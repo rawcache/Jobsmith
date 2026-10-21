@@ -23,11 +23,21 @@ RULES: list[tuple[str, str]] = [
     (r"current (company|employer)|most recent (company|employer)|current organi[sz]ation", "current_company"),
     (r"which (u\.?s\.? )?state|state (or|/) ?(canadian )?province|state of residence|province.*reside|"
      r"state.*(reside|live)|^state$", "state"),
-    (r"u\.?s\.? person|export control|\bitar\b|\bear\b regulations|deemed export", "us_person"),
+    (r"u\.?s\.? person|export control|\bitar\b|\bear\b regulations|deemed export|international traffic in arms", "us_person"),
+    (r"citizenship status|status of (your )?citizenship|^citizenship$|what is your citizenship", "citizenship_status"),
     (r"sponsor|visa", "needs_sponsorship"),
     (r"authori[sz]ed to work|eligible to work|legally (able|permitted|authori)|right to work", "work_authorized_us"),
     (r"u\.?s\.? citizen|citizenship", "us_citizen"),
+    (r"(confirm|acknowledge)( receipt)?.*(notice|polic|agreement|statement|terms)|privacy notice|\bccpa\b|\bgdpr\b|"
+     r"arbitration agreement|i (have read|acknowledge|agree|consent|certify)|acknowledge,? (confirm|and)|"
+     r"(agree|consent) to the (following|above)|by (checking|selecting|submitting)", "acknowledge_notices"),
+    (r"ai[- ]assisted|ai (tools?|note[- ]?tak|transcri)|(record|transcri)\w* (of )?(the |your )?interview|"
+     r"may use ai", "ai_tools_consent"),
     (r"security clearance|clearance level|active clearance|hold a clearance", "security_clearance"),
+    (r"(list|any|relevant|professional)\s+certifications?|certifications? (do you|you) (hold|have)|^certifications?$", "certifications"),
+    (r"professional licen[cs]e|licen[cs]ed (engineer|professional)|\b(pe|eit|fe) licen[cs]e", "licenses"),
+    (r"languages? (do you|you) speak|language proficiency|fluent in|^languages?$", "languages"),
+    (r"how many years of (professional |work |relevant )?experience|years of (professional |work )?experience do you", "years_experience"),
     (r"hispanic|latin[oa]", "hispanic_latino"),
     (r"lgbt|sexual orientation", "lgbtq"),
     (r"first[- ]generation", "first_gen"),
@@ -46,7 +56,10 @@ RULES: list[tuple[str, str]] = [
     (r"graduat", "graduation_date"),
     (r"^(school|university|college)( name)?\b|which (school|university)|what (school|university)|"
      r"currently (attend|enrolled)", "school"),
-    (r"^degree\b|degree (type|level)|highest degree", "degree"),
+    (r"^degree\b|degree (type|level)|highest degree|degree (are you|you are) (currently )?(pursuing|working|obtaining)|"
+     r"highest (level of )?education|level of education|education level", "degree"),
+    (r"^sat\b|\bsat (score|total)", "sat_score"),
+    (r"^act\b|\bact (score|composite)", "act_score"),
     (r"major|discipline|field of study|area of study", "major"),
     (r"relocat", "willing_to_relocate"),
     (r"salary|compensation (expectation|requirement)|desired (pay|compensation|salary)|expected (pay|salary|"
@@ -60,8 +73,10 @@ RULES: list[tuple[str, str]] = [
      "referral_name"),
     (r"how did you (first )?(hear|find|learn|come across)|where did you (first )?(hear|find|learn)|"
      r"referral source|source of application|how .*learn about", "how_heard"),
-    (r"(previously|ever|formerly) (been )?(employed|worked)|former employee|worked (here|for us) before", "previously_employed"),
-    (r"^(street )?address( line)?( 1)?$|street address|mailing address|home address", "address_line1"),
+    (r"(previously|ever|formerly) (been )?(employed|worked)|former employee|worked (here|for us) before|"
+     r"(have you|did you) (ever )?(worked|been employed) (for|at|with)|worked for .{0,60}(in the past|before|previously)", "previously_employed"),
+    (r"(current|legal|full|permanent|residential|home|mailing) address|what is your address|^your address", "full_address"),
+    (r"^(street )?address( line)?( 1)?$|street address", "address_line1"),
     (r"^city$|^city of residence|current city", "city"),
     (r"zip|postal", "postal_code"),
     (r"^country( of residence| or region)?$|country you (live|reside)", "country"),
@@ -128,6 +143,10 @@ def pick_option(answer: str, options: list[str]) -> str | None:
             pos = [o for o in real if not re.search(r"\bnot\b|\bno\b|don.?t|do not", o, re.I)]
             if len(pos) == 1:
                 return pos[0]
+            # acknowledgments: "Confirmed", "I acknowledge", "I agree", "Accept"
+            ack = [o for o in pos if re.search(r"confirm|acknowledg|agree|accept|understand|consent", o, re.I)]
+            if len(ack) >= 1:
+                return ack[0]
     nums = _nums(a)
     if nums:
         v = nums[0]
@@ -146,6 +165,10 @@ def pick_option(answer: str, options: list[str]) -> str | None:
         ol = o.lower()
         if ol.startswith(al) or al.startswith(ol):
             return o
+    if "citizen" in al:                                 # "U.S. Citizen" vs "US Citizen / National", "Citizen"
+        cands = [o for o in options if re.search(r"citizen", o, re.I) and not re.search(r"non-?citizen|not a", o, re.I)]
+        if cands:
+            return min(cands, key=len)
     expanded = al
     for pat, rep in SYNONYMS.items():                    # "Asian (Indian)" -> also "south asian"
         if re.search(pat, al):

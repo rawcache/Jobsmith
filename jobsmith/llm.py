@@ -337,8 +337,12 @@ class GeminiAPI(Backend):
             m = re.search(r'"retryDelay":\s*"(\d+)', r.text)
             await asyncio.sleep(min(60, int(m.group(1)) + 1) if m else 2 ** attempt * 3)
         if r.status_code == 429:
+            daily = "PerDay" in r.text
+            _quota_hit["gemini_api"] = gemini_reset() if daily else time.time() + 60
+            if daily:
+                _learn_limit(gemini_used_today())
             raise QuotaError("Gemini's free tier limit is used up for now"
-                             + (" (daily limit; it resets tomorrow)." if "PerDay" in r.text else "."))
+                             + (f" (daily limit; it resets at {time.strftime('%-I:%M %p', time.localtime(gemini_reset()))})." if daily else "."))
         if r.status_code in (400, 403) and ("API_KEY_INVALID" in r.text or "API key not valid" in r.text):
             raise LLMError("That Gemini key isn't valid. Copy it again from aistudio.google.com/apikey.")
         if r.status_code != 200:
@@ -361,15 +365,94 @@ if not OLLAMA_URL.startswith("http"):
 OLLAMA_PREFERRED = ("qwen3", "qwen2.5", "llama3.3", "llama3.1", "gemma3", "mistral-small", "phi4", "mistral", "llama3")
 
 
+_models_cache: tuple[float, list[str]] = (0.0, [])
+
+
 async def ollama_models(timeout: float = 2.0) -> list[str]:
-    """Models installed in a local Ollama, or [] when Ollama isn't running."""
+    """Models installed in a local Ollama, or [] when Ollama isn't running. Cached for a few seconds:
+    the dashboard asks often, and each answer is a request to Ollama."""
     import httpx
+    global _models_cache
+    if time.time() - _models_cache[0] < 5:
+        return _models_cache[1]
     try:
         async with httpx.AsyncClient(timeout=timeout) as c:
             r = await c.get(f"{OLLAMA_URL}/api/tags")
-        return [m["name"] for m in r.json().get("models", [])] if r.status_code == 200 else []
+        models = [m["name"] for m in r.json().get("models", [])] if r.status_code == 200 else []
     except Exception:
-        return []
+        models = []
+    _models_cache = (time.time(), models)
+    return models
+
+
+# --------------------------------------------------------------------------- free-tier quota
+# Google resets Gemini's free daily limits at midnight Pacific time. It doesn't say how many requests are left,
+# so Jobsmith counts its own, and remembers the count at which the limit last ran out.
+_quota_hit: dict[str, float] = {}      # backend -> time until which it's out of quota
+
+
+def gemini_reset(now: float | None = None) -> float:
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    pt = ZoneInfo("America/Los_Angeles")
+    d = datetime.fromtimestamp(now or time.time(), pt)
+    nxt = (d + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return nxt.timestamp()
+
+
+def gemini_used_today() -> int:
+    from . import db
+    start = gemini_reset() - 86400
+    return (db.q1("SELECT COUNT(*) n FROM usage WHERE backend='gemini_api' AND at>=?", (start,)) or {"n": 0})["n"]
+
+
+def _learn_limit(n: int) -> None:
+    from . import db
+    if n >= 5:
+        db.set_settings({"gemini_daily_seen_limit": n})
+
+
+def _local_ok() -> bool:
+    """smith only stands in for a cloud AI when the power settings allow it (by default: plugged in)."""
+    from . import power
+    return power.local_ai_allowed()
+
+
+def gemini_limited() -> bool:
+    return _quota_hit.get("gemini_api", 0) > time.time()
+
+
+def quota_status() -> dict | None:
+    """For the bar in the dashboard's top right: today's Gemini use and when it resets."""
+    s = get_settings()
+    kinds = {s.get("llm_backend"), s.get("research_backend")}
+    if s.get("llm_backend") == "auto" and _auto_cache:
+        kinds.add(_auto_cache[1])
+    if "gemini_api" not in kinds:
+        return None
+    used = gemini_used_today()
+    limit = int(s.get("gemini_daily_seen_limit") or 0) or None
+    return {"name": "Gemini", "used": used, "limit": limit, "resets_at": gemini_reset(), "limited": gemini_limited(),
+            "fallback": "smith" if _models_cache[1] and _local_ok() else None}
+
+
+async def recheck_gemini() -> dict:
+    """'Check again': forget the remembered limit and ask Gemini directly (one tiny request)."""
+    s = get_settings()
+    key = _key(s, "gemini_api_key", "GEMINI_API_KEY", "GOOGLE_API_KEY")
+    if not key:
+        return {"ok": False, "message": "Add your Gemini API key in Settings first.", "quota": quota_status()}
+    _quota_hit.pop("gemini_api", None)
+    for k in [k for k in _avail_cache if k[0] == "gemini_api"]:
+        _avail_cache.pop(k, None)
+    ok, msg = await GeminiAPI(key, s.get("gemini_model") or "gemini-flash-latest").available()
+    if ok:
+        return {"ok": True, "message": "Gemini is back. Autopilot will use it again.", "quota": quota_status()}
+    if gemini_limited():
+        at = time.strftime("%-I:%M %p", time.localtime(gemini_reset()))
+        return {"ok": False, "message": f"Still at today's free limit. Google resets it at midnight Pacific ({at} your time).",
+                "quota": quota_status()}
+    return {"ok": False, "message": msg, "quota": quota_status()}
 
 
 def pick_ollama_model(models: list[str]) -> str:
@@ -425,7 +508,7 @@ class OllamaLocal(Backend):
                       + prompt)
         body = {"model": model, "stream": False, "format": schema or "json",
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": _schema_hint(prompt, schema)}],
-                "options": {"temperature": 0.3, "num_ctx": 16384}}
+                "options": {"temperature": 0.3, "num_ctx": 8192}, "keep_alive": "3m"}
         if model.startswith(("qwen3", "deepseek-r1")) and "instruct" not in model:
             body["think"] = False     # thinking models: answer directly, much faster
         try:
@@ -507,6 +590,8 @@ def resolve_auto(s: dict) -> str:
 def make_backend(kind: str, s: dict) -> Backend:
     if kind == "auto":
         kind = resolve_auto(s)
+    if kind == "gemini_api" and gemini_limited() and _models_cache[1] and _local_ok():
+        return OllamaLocal(s.get("ollama_model") or "")      # Gemini's free day is used up: smith until it resets
     if kind == "gemini_api":
         return GeminiAPI(_key(s, "gemini_api_key", "GEMINI_API_KEY", "GOOGLE_API_KEY"), s.get("gemini_model") or "gemini-flash-latest")
     if kind == "ollama":
@@ -551,6 +636,7 @@ def label(b: Backend) -> str:
 
 
 _sem: asyncio.Semaphore | None = None
+_local_sem: asyncio.Semaphore | None = None
 
 
 async def complete_json(system: str, prompt: str, schema: dict | None = None, web: bool = False,
@@ -560,13 +646,23 @@ async def complete_json(system: str, prompt: str, schema: dict | None = None, we
     global _sem
     if _sem is None:
         _sem = asyncio.Semaphore(int(get_settings().get("llm_concurrency", 3)))
+    b = backend(role or ("research" if web else "write"))
+    if isinstance(b, OllamaLocal):
+        # One local generation at a time: running several at once on a laptop is slower overall, and hot.
+        global _local_sem
+        _local_sem = _local_sem or asyncio.Semaphore(1)
+        async with _local_sem:
+            t0 = time.time()
+            try:
+                return await b.complete_json(system, prompt, schema=schema, web=web)
+            finally:
+                _record_usage(b, time.time() - t0)
     async with _sem:
-        b = backend(role or ("research" if web else "write"))
         t0 = time.time()
         try:
             return await b.complete_json(system, prompt, schema=schema, web=web)
         except QuotaError:
-            if isinstance(b, OllamaLocal) or not await ollama_models():
+            if isinstance(b, OllamaLocal) or not _local_ok() or not await ollama_models():
                 raise
             b = OllamaLocal(get_settings().get("ollama_model") or "")   # out of free quota: smith takes over
             t0 = time.time()

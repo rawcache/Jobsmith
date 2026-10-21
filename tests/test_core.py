@@ -365,7 +365,8 @@ async def test_command_company_and_links(fake_llm, monkeypatch):
 
 async def test_scheduler_picks_respecting_limits(monkeypatch):
     from jobsmith import scheduler, commands
-    db.set_settings({"max_applications_per_company": 1, "auto_max_per_run": 5, "notifications": False})
+    db.set_settings({"max_applications_per_company": 1, "auto_max_per_run": 5, "notifications": False,
+                     "onboarded": True, "auto_run": True, "power_mode": "full"})
     ids = []
     for co, score in (("A", 90), ("A", 85), ("B", 70), ("C", 20)):
         jid = sources.add_job_url(f"https://job-boards.greenhouse.io/{co}/jobs/{score}", co, f"Intern {score}")
@@ -494,7 +495,7 @@ def test_autopilot_holds_unsure_answers_and_passes_confident_ones():
     r = draft.readiness(jid)
     assert not r["ready"] and len(r["blockers"]) == 1 and r["blockers"][0].startswith("Anything else?")
     db.set_settings({"autonomy": "copilot"})
-    assert len(draft.readiness(jid)["blockers"]) == 2      # copilot still wants learned trust
+    assert len(draft.readiness(jid)["blockers"]) == 1      # same rule either way: only the unsure one waits
 
 
 def test_posting_sections_pull_out_requirements_and_duties():
@@ -757,7 +758,10 @@ async def test_gemini_free_quota_falls_back_to_smith(monkeypatch):
     real = httpx.AsyncClient
     monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **k: real(*a, transport=httpx.MockTransport(handler),
                                                                  **{x: y for x, y in k.items() if x != "transport"}))
+    db.set_settings({"smith_fallback": "always"})   # let smith stand in regardless of battery state
     llm.set_backend_override(None)
+    monkeypatch.setattr(llm, "_models_cache", (0.0, []))
+    monkeypatch.setattr(llm, "_quota_hit", {})
     monkeypatch.setattr(llm, "backend", lambda role="write": llm.GeminiAPI("k"))
     out = await llm.complete_json("sys", "q")
     assert out == {"answer": "from smith"} and calls.count("generativelanguage.googleapis.com") == 1
@@ -797,3 +801,171 @@ async def test_extension_answers_fields_from_the_profile():
     assert by["js2"]["value"] == "2027" and by["js3"]["file"] == "resume"
     # the same posting again finds the same job
     assert extension.find_or_add("https://job-boards.greenhouse.io/acme/jobs/123") == r["job_id"]
+
+
+def test_finished_application_is_not_shown_as_still_working():
+    from jobsmith import db, runner
+    db.x("INSERT OR IGNORE INTO jobs(id, company, title, url, ats, created_at, updated_at) VALUES('busy1','Acme','Intern','https://x','greenhouse',0,0)")
+    db.x("UPDATE jobs SET status='filling' WHERE id='busy1'")
+    runner._active["busy1"] = "autopilot"
+    try:
+        assert runner.active().get("busy1") == "filling"
+        runner.live_set("busy1", phase="review")          # filled in, tab waiting for you
+        assert "busy1" not in runner.active()
+        runner.live_drop("busy1")
+        db.x("UPDATE jobs SET status='submitted' WHERE id='busy1'")
+        assert "busy1" not in runner.active()
+    finally:
+        runner._active.pop("busy1", None)
+
+
+def test_cover_letter_becomes_a_pdf(tmp_path):
+    from jobsmith import db, letters, profile
+    db.x("INSERT OR IGNORE INTO jobs(id, company, title, url, ats, created_at, updated_at) VALUES('cl1','Acme','Intern','https://y','greenhouse',0,0)")
+    db.x("""INSERT OR REPLACE INTO drafts(job_id, field, label, qtype, required, options, kind, answer, fact_ids, rationale,
+            confidence, issues, updated_at) VALUES('cl1','cover_letter','Cover Letter','file',0,'[]','generated',
+            'I build data pipelines — fast ones.\nI would love to do that at Acme.','[]','',0.9,'[]',0)""")
+    profile.set_answer("first_name", "Alex", True)
+    p = letters.cover_pdf("cl1", tmp_path)
+    assert p and p.read_bytes().startswith(b"%PDF") and p.stat().st_size > 800
+    assert letters.cover_text("cl1").startswith("I build")
+
+
+def test_location_choices_match_whole_words():
+    from jobsmith import match, onboarding
+    s = {"target_locations": onboarding.LOCATIONS["SF Bay Area"]}
+    _, sf = match.score_job({"locations": ["San Francisco, CA"], "title": "x"}, s, set(), {})
+    _, other = match.score_job({"locations": ["Sfax Robotics HQ, Chicago, IL"], "title": "x"}, s, set(), {})
+    assert "+ location" in sf and "- location" in other     # "SF" doesn't match inside "Sfax"
+
+
+def test_out_of_gemini_quota_routes_to_smith(monkeypatch):
+    import time
+    from jobsmith import llm
+    db.set_settings({"smith_fallback": "always"})   # let smith stand in regardless of battery state
+    monkeypatch.setattr(llm, "_quota_hit", {"gemini_api": time.time() + 3600})
+    monkeypatch.setattr(llm, "_models_cache", (time.time(), ["qwen3:8b"]))
+    b = llm.make_backend("gemini_api", {"gemini_api_key": "k"})
+    assert isinstance(b, llm.OllamaLocal)
+    r = llm.gemini_reset()
+    assert 0 < r - time.time() <= 86400
+
+
+def test_linkedin_archive_fills_the_profile():
+    import io
+    import zipfile
+    from jobsmith import linkedin, profile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("Basic_LinkedInDataExport/Profile.csv",
+                   "First Name,Last Name,Maiden Name,Address,Birth Date,Headline,Summary,Industry,Zip Code,Geo Location,Twitter Handles,Websites,Instant Messengers\n"
+                   'Sam,Lee,,,,"Hardware engineer, FPGA",Builds things.,,,"Austin, Texas",,"[PORTFOLIO:https://github.com/samlee]",\n')
+        z.writestr("Positions.csv", "Company Name,Title,Description,Location,Started On,Finished On\n"
+                                    "Acme,FPGA Intern,Timing closure on a 400 MHz design,Austin,Jun 2025,Aug 2025\n")
+        z.writestr("Certifications.csv", "Name,Url,Authority,Started On,Finished On,License Number\n"
+                                         "AWS Cloud Practitioner,,Amazon Web Services,Mar 2025,,\n")
+        z.writestr("Languages.csv", "Name,Proficiency\nSpanish,Professional working proficiency\n")
+    r = linkedin.import_archive(buf.getvalue(), "export.zip")
+    a = {k: v["value"] for k, v in profile.answers().items()}
+    assert r["ok"] and a["first_name"] == "Sam" and a["headline"].startswith("Hardware engineer")
+    assert "AWS Cloud Practitioner" in a["certifications"] and a["languages"].startswith("Spanish")
+    assert any(e["company"] == "Acme" for e in profile.entries("experience"))
+    assert any("Certification: AWS" in f["text"] for f in profile.facts())
+
+
+
+async def test_autopilot_off_stops_work_in_progress():
+    """The switch is a kill switch: turning autopilot off cancels applications mid-way."""
+    import asyncio
+    from jobsmith import db, runner
+    db.x("INSERT OR IGNORE INTO jobs(id, company, title, url, ats, created_at, updated_at) VALUES('stop1','Acme','Intern','https://z','greenhouse',0,0)")
+    db.x("UPDATE jobs SET status='filling' WHERE id='stop1'")
+    started = asyncio.Event()
+
+    async def slow():
+        started.set()
+        await asyncio.sleep(60)
+    assert runner.spawn("stop1", "autopilot", slow())
+    await started.wait()
+    r = await runner.stop()
+    assert r["stopped"] == 1 and "stop1" not in runner.active()
+    row = db.q1("SELECT status, hold_reason FROM jobs WHERE id='stop1'")
+    assert row["status"] == "drafted" and row["hold_reason"] == "Stopped by you"
+
+
+def test_battery_saver_rules(monkeypatch):
+    from jobsmith import db, power
+    monkeypatch.setattr(power, "battery", lambda: {"percent": 50, "plugged": False, "draining_plugged": False, "minutes_left": 90})
+    db.set_settings({"power_mode": "auto", "smith_fallback": "plugged", "on_battery": "pause"})
+    assert power.saver() and not power.local_ai_allowed() and power.paused()
+    monkeypatch.setattr(power, "battery", lambda: {"percent": 50, "plugged": True, "draining_plugged": False, "minutes_left": None})
+    assert not power.saver() and power.local_ai_allowed() and not power.paused()
+    db.set_settings({"power_mode": "full", "on_battery": "slow"})
+
+
+# --------------------------------------------------------------------------- email codes, dashboard
+def test_emailed_codes_are_found_and_matched_to_the_company():
+    from jobsmith import outcomes
+    gh = ("Security code for your application to Acme Robotics",
+          "Hi Alex, Copy and paste this code into the security code field on your application: kD8sQw2Z After you enter the code, resubmit.")
+    assert outcomes.extract_code(*gh) == "kD8sQw2Z"
+    assert outcomes.extract_code("Your verification code", "Your one-time code is 482913. It expires in 10 minutes.") == "482913"
+    assert outcomes.extract_code("Thanks for applying", "We received your application for the Software Engineer role.") is None
+    msgs = [{"from": "Other Co <no-reply@other.com>", "subject": "Your code", "body": "Your code is 111222", "when": 5},
+            {"from": "Acme Robotics <no-reply@us.greenhouse-mail.io>", "subject": gh[0], "body": gh[1], "when": 4}]
+    assert outcomes.pick_code(msgs, "Acme Robotics") == "kD8sQw2Z"
+    assert outcomes.pick_code(msgs[:1], "Acme Robotics") is None
+
+
+async def test_dashboard_checklists():
+    from jobsmith import onboarding
+    await _load_profile()
+    st = onboarding.strength()
+    keys = {i["key"]: i for i in st["items"]}
+    assert sum(i["points"] for i in st["items"]) == 100
+    assert keys["contact"]["done"] and keys["skills"]["done"]
+    assert 0 < st["percent"] <= 100
+    started = onboarding.get_started(ai_ok=True)
+    assert len(started) == 6 and next(i for i in started if i["key"] == "ai")["done"]
+    assert not next(i for i in started if i["key"] == "email")["done"]
+    db.set_settings({"gmail_address": "a@gmail.com", "gmail_app_password": "abcd efgh ijkl mnop"})
+    assert next(i for i in onboarding.get_started(ai_ok=False) if i["key"] == "email")["done"]
+    onboarding.set_prefs(picky="good")
+    assert onboarding.prefs_done()
+    assert set(onboarding.stages(set())) == {"working", "paused", "needs", "applied", "interviewing", "offer", "rejected"}
+
+
+async def test_check_again_clears_a_stale_gemini_limit(monkeypatch):
+    from jobsmith import llm
+    db.set_settings({"llm_backend": "gemini_api", "gemini_api_key": "k"})
+    llm._quota_hit["gemini_api"] = llm.gemini_reset()
+
+    async def ok(self):
+        return True, "connected"
+    monkeypatch.setattr(llm.GeminiAPI, "available", ok)
+    r = await llm.recheck_gemini()
+    assert r["ok"] and not llm.gemini_limited()
+
+
+def test_job_facts_row():
+    from jobsmith import insights
+    assert insights.pay_of("Pay: $45 - $55 per hour.") == "$45 - $55/hr"
+    assert insights.pay_of("The base salary range is $140,000 - $180,000 USD annually.") == "$140k - $180k/yr"
+    assert insights.pay_of("You'll get a $5 coffee credit and $1,000 for books.") == ""
+    f = insights.job_facts({"title": "Software Engineering Intern", "terms": ["Summer 2027"], "locations": ["Boston, MA"],
+                            "description": "Hybrid in Boston. We are unable to sponsor visas for this role. $50/hr"})
+    assert f["level"] == "Intern" and f["mode"] == "Hybrid" and f["sponsorship"] == "No visa sponsorship" and f["pay"] == "$50/hr"
+    assert insights.job_facts({"title": "Senior Software Engineer", "locations": ["Remote"]})["level"] == "Senior"
+
+
+def test_values_nudge_ranking_and_reach_the_prompt():
+    from jobsmith import match, onboarding
+    job = {"company": "Tiny Robots", "title": "Founding Engineer Intern", "description": "Seed-stage startup, small team. Return offer for strong interns.",
+           "locations": ["Remote"]}
+    assert not match.value_bonus(job, [])
+    got = dict(match.value_bonus(job, ["Small team, big ownership", "Path to a full-time offer", "Remote or flexible"]))
+    assert set(got) == {"small teams", "a full-time path", "flexibility"}
+    onboarding.set_prefs(values=["Pay", "Not a real value", "Pay2", "Work-life balance", "Hard technical problems", "Impact on real users"])
+    assert db.get_setting("values") == ["Pay", "Work-life balance", "Hard technical problems"]
+    prompt = draft.build_prompt({"title": "Intern", "company": "X", "locations": []}, [])
+    assert "VALUES IN A ROLE" in prompt and "Work-life balance" in prompt

@@ -41,6 +41,8 @@ ANSWER_BANK: list[tuple[str, str, str]] = [
     ("minor", "Minor", "Education"),
     ("concentration", "Concentration / threads", "Education"),
     ("gpa", "GPA", "Education"),
+    ("sat_score", "SAT score (if forms ask)", "Education"),
+    ("act_score", "ACT score (if forms ask)", "Education"),
     ("class_standing", "Class standing (e.g. Senior)", "Education"),
     ("enrollment_start", "Started at this school (e.g. Aug 2023)", "Education"),
     ("graduation_date", "Graduation (e.g. May 2027)", "Education"),
@@ -48,7 +50,14 @@ ANSWER_BANK: list[tuple[str, str, str]] = [
     ("work_authorized_us", "Authorized to work in the US?", "Work authorization"),
     ("needs_sponsorship", "Need visa sponsorship now or later?", "Work authorization"),
     ("us_citizen", "US citizen?", "Work authorization"),
-    ("security_clearance", "Security clearance (e.g. None)", "Work authorization"),
+    ("security_clearance", "Security clearance (e.g. None, Secret, TS/SCI)", "Work authorization"),
+    ("citizenships", "Citizenship(s)", "Work authorization"),
+    ("work_authorized_other", "Also allowed to work in (other countries)", "Work authorization"),
+    ("headline", "Headline (one line about you, like on LinkedIn)", "Credentials"),
+    ("years_experience", "Years of work experience", "Credentials"),
+    ("certifications", "Certifications (e.g. AWS Solutions Architect, 2025)", "Credentials"),
+    ("licenses", "Professional licenses (e.g. EIT, PE)", "Credentials"),
+    ("languages", "Languages you speak", "Credentials"),
     ("current_company", "Current employer (or school)", "Logistics"),
     ("willing_to_relocate", "Willing to relocate?", "Logistics"),
     ("earliest_start", "Earliest start date", "Logistics"),
@@ -58,6 +67,8 @@ ANSWER_BANK: list[tuple[str, str, str]] = [
     ("previously_employed", "Worked at the company before?", "Common questions"),
     ("relatives_at_company", "Relatives working at the company?", "Common questions"),
     ("over_18", "18 or older?", "Common questions"),
+    ("acknowledge_notices", "Agree to privacy notices and terms forms ask you to acknowledge?", "Common questions"),
+    ("ai_tools_consent", "OK with employers using AI tools (e.g. interview notes)?", "Common questions"),
     ("background_check_ok", "OK with a background check?", "Common questions"),
     ("non_compete", "Bound by a non-compete?", "Common questions"),
     ("gender", "Gender", "Demographics (optional)"),
@@ -74,9 +85,10 @@ EEO_KEYS = {"gender", "race", "hispanic_latino", "veteran_status", "disability_s
             "first_gen"}
 
 # Answers that must only ever come from you. Everything else falls back to AI when left blank.
-SENSITIVE_KEYS = {k for k, _, sec in ANSWER_BANK if sec in ("Contact", "Links", "Education", "Work authorization",
+SENSITIVE_KEYS = {k for k, _, sec in ANSWER_BANK if sec in ("Contact", "Links", "Education", "Work authorization", "Credentials",
                                                               "Demographics (optional)")} | {
-    "full_name", "desired_pay", "relatives_at_company", "over_18", "background_check_ok", "non_compete", "us_person"}
+    "full_name", "desired_pay", "relatives_at_company", "over_18", "background_check_ok", "non_compete", "us_person",
+    "citizenship_status", "full_address", "acknowledge_notices", "ai_tools_consent"}
 DEFAULTS = {"previously_employed": "No"}
 
 
@@ -335,7 +347,10 @@ def seed_answers_from_identity(ident: dict, parsed: dict | None = None) -> None:
 # --------------------------------------------------------------------------- PDF / LLM path
 def pdf_text(path: Path) -> str:
     from pypdf import PdfReader
-    return "\n".join((p.extract_text() or "") for p in PdfReader(str(path)).pages)
+    try:
+        return "\n".join((p.extract_text() or "") for p in PdfReader(str(path)).pages)
+    except Exception:          # a damaged or unusual PDF: keep the file (it can still be attached), skip reading it
+        return ""
 
 
 PROFILE_SCHEMA = {

@@ -1,18 +1,21 @@
 """Local HTTP API + dashboard. Binds to 127.0.0.1 only."""
 from __future__ import annotations
 
+import json
 import shutil
 import time
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import (ats, claude_login, commands, db, eligibility, onboarding, outcomes, scheduler, smith, draft, insights, learn, llm, match, network,
+from . import (ats, claude_login, commands, db, eligibility, onboarding, outcomes, power, scheduler, smith, draft, insights, learn, llm, match, network,
                profile, runner, sources)
-from .config import UPLOADS_DIR, WEB_DIST
+from . import __version__
+from .config import BUILD, DEMO, UPLOADS_DIR, WEB_DIST
+from . import skills
 
 app = FastAPI(title="Jobsmith", docs_url="/api/docs")
 
@@ -50,6 +53,20 @@ async def _startup():
     asyncio.create_task(smith.wake())
 
 
+@app.post("/api/shutdown")
+async def shutdown():
+    """The terminal restarts an engine left running by an older version of Jobsmith."""
+    import asyncio
+    import os
+
+    async def bye():
+        await asyncio.sleep(0.2)
+        await runner.browser.close()
+        os._exit(0)
+    asyncio.create_task(bye())
+    return {"ok": True}
+
+
 @app.on_event("shutdown")
 async def _shutdown():
     await runner.browser.close()
@@ -63,6 +80,92 @@ def job_or_404(job_id: str) -> dict:
 
 
 # --------------------------------------------------------------------------- status & settings
+def attention() -> list[dict]:
+    """Things only you can do, right now: emailed codes, CAPTCHAs, sign-ins. Shown as a bar on every page."""
+    out = []
+    for t in runner.live_list():
+        note = (t.get("note") or "").lower()
+        if t["needs_code"]:
+            out.append({"job_id": t["job_id"], "company": t["company"], "kind": "code",
+                        "message": f"{t['company']} emailed you a verification code."})
+        elif "captcha" in note:
+            out.append({"job_id": t["job_id"], "company": t["company"], "kind": "captcha",
+                        "message": f"{t['company']} wants you to solve a CAPTCHA."})
+        elif "sign in" in note or "sign-in" in note:
+            out.append({"job_id": t["job_id"], "company": t["company"], "kind": "signin",
+                        "message": f"{t['company']} wants you to sign in or create an account."})
+    return out
+
+
+@app.get("/api/notifications")
+async def notifications():
+    """Everything for the bell, newest first. Things only you can do come first; unread = newer than your last look."""
+    from .config import DEMO
+    seen = float(db.get_setting("notif_seen") or 0)
+    now = db.now()
+    items: list[dict] = []
+    att = attention()
+    if DEMO and not att:
+        att = [{"job_id": "demo-wayne", "company": "Wayne Enterprises", "kind": "code",
+                "message": "Wayne Enterprises emailed you a verification code."}]
+    for a in att:
+        items.append({"id": f"{a['kind']}:{a['job_id']}", "kind": a["kind"], "job_id": a["job_id"], "company": a["company"],
+                      "title": a["message"], "detail": "" if a["kind"] == "code" else "Open it in a window to finish.",
+                      "at": now, "urgent": True})
+    held = db.q("""SELECT id, company, title, status, hold_reason, error, updated_at FROM jobs
+                   WHERE status IN ('filled','error') ORDER BY updated_at DESC LIMIT 20""")
+    if held:
+        items.append({"id": "held", "kind": "held", "title": f"{len(held)} application{'s' if len(held) != 1 else ''} need you",
+                      "detail": ", ".join(dict.fromkeys(h["company"] for h in held[:4])) + ("…" if len(held) > 4 else ""),
+                      "at": max(h["updated_at"] for h in held), "href": "#/tracker"})
+    outcomes._ensure()
+    for r in db.q("""SELECT o.kind, o.subject, o.received_at, j.id job_id, j.company, j.title FROM outcomes o JOIN jobs j ON j.id=o.job_id
+                     WHERE o.received_at > ? ORDER BY o.received_at DESC LIMIT 10""", (now - 14 * 86400,)):
+        items.append({"id": f"reply:{r['job_id']}:{r['kind']}", "kind": "reply", "job_id": r["job_id"], "company": r["company"],
+                      "title": f"{r['company']}: {OUTCOME_WORD.get(r['kind'], 'replied')}", "detail": r["subject"] or r["title"],
+                      "at": r["received_at"] or now, "href": f"#/job/{r['job_id']}"})
+    q = llm.quota_status()
+    if q and q["limited"]:
+        at = time.strftime("%-I:%M %p", time.localtime(q["resets_at"]))
+        items.append({"id": "quota", "kind": "quota", "title": f"{q['name']}'s free limit is used up until {at}",
+                      "detail": "smith is writing until then." if q.get("fallback") else "Answers wait until it resets.", "at": now})
+    ok, msg = await llm.available_cached(role="write")
+    if not ok:
+        items.append({"id": "ai", "kind": "ai", "title": "No AI connected", "detail": msg, "at": now, "href": "#/settings"})
+    for it in items:      # standing states (no AI, free limit) are listed but don't keep the count up
+        it["unread"] = bool(it.get("urgent")) or (it["kind"] not in ("ai", "quota") and it["at"] > seen)
+    return {"items": items, "unread": sum(1 for it in items if it["unread"])}
+
+
+OUTCOME_WORD = {"received": "got your application", "assessment": "sent an assessment", "interview": "wants to interview",
+                "offer": "made an offer", "rejected": "isn't moving forward"}
+
+
+class AskBody(BaseModel):
+    text: str
+
+
+@app.post("/api/ask")
+def ask_endpoint(b: AskBody):
+    """Answer a question about your job hunt from Jobsmith's own records (no AI), one block per line as it's found."""
+    from . import ask
+    att, act = attention(), runner.active()
+
+    def gen():
+        try:
+            for block in ask.answer(b.text, att, act):
+                yield json.dumps(block, default=str) + "\n"
+        except Exception as e:                       # say so in the answer rather than cutting the stream
+            yield json.dumps({"t": "note", "text": f"Something went wrong reading that: {e.__class__.__name__}: {e}"}) + "\n"
+    return StreamingResponse(gen(), media_type="application/x-ndjson")
+
+
+@app.post("/api/notifications/seen")
+def notifications_seen():
+    db.set_settings({"notif_seen": db.now()})
+    return {"ok": True}
+
+
 @app.get("/api/status")
 async def status():
     ok, msg = await llm.available_cached(role="write")
@@ -92,7 +195,10 @@ async def status():
                     "message": msg if not ok else r_msg,
                     "writing": {"label": llm.label(llm.backend("write")), "ok": ok, "message": msg},
                     "research": {"label": llm.label(llm.backend("research")), "ok": r_ok, "message": r_msg}},
-            "counts": counts, "active": runner.active(), "setup": setup,
+            "counts": counts, "active": runner.active(), "setup": setup, "quota": llm.quota_status(),
+            "power": {"saver": power.saver(), "battery": power.battery(), "paused": power.paused()},
+            "attention": attention(),
+            "progress": {jid: runner.progress(jid) for jid in list(runner._active) + [t["job_id"] for t in runner.live_list()]},
             "has_resume": rs["attached"] is not None,
             "facts": len(profile.facts()), "autonomy": db.get_setting("autonomy"),
             "auto": {"on": bool(db.get_setting("auto_run")), "next_run": scheduler.state["next_run"],
@@ -100,7 +206,12 @@ async def status():
             "needs_you": db.q1("SELECT COUNT(*) n FROM jobs WHERE status IN ('filled','error')")["n"],
             "tokens_today": _usage_rows("at > ?", (db.now() - 86400,))["tokens"],
             "onboarded": bool(s_.get("onboarded")) or bool(db.q1("SELECT 1 FROM runs WHERE kind='submit' LIMIT 1")),
-            "setup_step": s_.get("setup_step") or "",
+            "setup_step": s_.get("setup_step") or "", "build": BUILD, "version": __version__, "demo": DEMO,
+            "skills": [{"key": k["key"], "name": k["name"], "enabled": k["enabled"]} for k in skills.listing()],
+            "me": {"first_name": (ans.get("first_name") or {}).get("value") or "",
+                   "last_name": (ans.get("last_name") or {}).get("value") or ""},
+            "email": {"ready": outcomes.email_ready(), "address": s_.get("gmail_address") or "",
+                      "codes": s_.get("gmail_codes") is not False},
             "live": len(runner.live_list())}
 
 
@@ -155,6 +266,20 @@ async def onboarding_goal(g: GoalIn):
     return patch
 
 
+class PrefsIn(BaseModel):
+    locations: list[str] | None = None
+    picky: str = ""
+    concurrency: int = 0
+    browser_window: str = ""
+    notifications: bool | None = None
+    values: list[str] | None = None
+
+
+@app.post("/api/onboarding/prefs")
+def onboarding_prefs(p: PrefsIn):
+    return onboarding.set_prefs(p.locations, p.picky, p.concurrency, p.browser_window, p.notifications, p.values)
+
+
 class AiIn(BaseModel):
     kind: str
     key: str = ""
@@ -171,11 +296,19 @@ async def onboarding_ai(a: AiIn):
 class FinishIn(BaseModel):
     autonomy: str = "autopilot"
     start_now: bool = False
+    final: bool = True
 
 
 @app.post("/api/onboarding/finish")
 def onboarding_finish(f: FinishIn):
-    onboarding.finish(f.autonomy, f.start_now)
+    onboarding.finish(f.autonomy, f.start_now, f.final)
+    return {"ok": True}
+
+
+@app.post("/api/onboarding/restart")
+def onboarding_restart():
+    """Setup from step 1 again. Everything you already filled in stays; each step shows it."""
+    db.set_settings({"setup_step": "restart"})
     return {"ok": True}
 
 
@@ -209,7 +342,12 @@ async def onboarding_start():
 
 @app.post("/api/onboarding/first-run")
 async def onboarding_first_run():
-    return onboarding.first_run()
+    r = onboarding.first_run()
+    if r.get("ok"):
+        if not db.get_setting("onboarded"):
+            onboarding.finish(db.get_setting("autonomy") or "autopilot")
+        db.set_settings({"setup_step": "first"})
+    return r
 
 
 _sync_task = None
@@ -225,6 +363,167 @@ def spawn_sync() -> None:
         match.rescore()
     if _sync_task is None or _sync_task.done():
         _sync_task = asyncio.create_task(go())
+
+
+class AutopilotIn(BaseModel):
+    on: bool
+
+
+@app.post("/api/quota/recheck")
+async def quota_recheck():
+    return await llm.recheck_gemini()
+
+
+@app.get("/api/skills")
+def skills_list():
+    return skills.listing()
+
+
+class SkillIn(BaseModel):
+    enabled: bool
+
+
+@app.post("/api/skills/{key}")
+def skills_set(key: str, b: SkillIn):
+    try:
+        return skills.set_enabled(key, b.enabled)
+    except KeyError:
+        raise HTTPException(404, "No such skill, or it can't be switched off.")
+
+
+@app.get("/api/voice")
+def voice_summary():
+    from .skills import voice
+    return voice.summary()
+
+
+class VoiceIn(BaseModel):
+    text: str
+    title: str = ""
+
+
+@app.post("/api/voice")
+def voice_add(b: VoiceIn):
+    from .skills import voice
+    return {"added": voice.add(b.text, "pasted", b.title), **voice.summary()}
+
+
+@app.post("/api/voice/upload")
+async def voice_upload(file: UploadFile = File(...)):
+    from .skills import voice
+    dest = UPLOADS_DIR / f"voice-{int(time.time())}-{Path(file.filename or 'writing.txt').name}"
+    dest.write_bytes(await file.read())
+    try:
+        n = voice.add_file(dest)
+    except Exception as e:
+        raise HTTPException(400, f"Couldn't read that file: {e}")
+    return {"added": n, **voice.summary()}
+
+
+@app.delete("/api/voice/{pid}")
+def voice_remove(pid: int):
+    from .skills import voice
+    voice.remove(pid)
+    return voice.summary()
+
+
+class VoiceTry(BaseModel):
+    question: str
+    job_id: str = ""
+
+
+@app.post("/api/voice/try")
+def voice_try(b: VoiceTry):
+    """What Jobsmith would answer from your own writing alone, with no AI."""
+    from .skills import voice
+    job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (b.job_id,))) if b.job_id else None
+    job = job or {"company": "the company", "title": "", "description": ""}
+    field = {"field": "try", "label": b.question, "qtype": "textarea", "options": [], "description": ""}
+    return {"answer": voice.compose(job, field), "matches": voice.search(b.question, job, k=3)}
+
+
+@app.get("/api/outreach")
+def outreach_list():
+    from .skills import outreach
+    return {"companies": outreach.overview(), "kinds": outreach.KINDS, "network": network.summary()["total"]}
+
+
+class DraftIn(BaseModel):
+    job_id: str
+    person: dict
+    kind: str = "referral"
+
+
+@app.post("/api/outreach/draft")
+async def outreach_draft(d: DraftIn):
+    from .skills import outreach
+    try:
+        return await outreach.draft(d.job_id, d.person, d.kind)
+    except KeyError:
+        raise HTTPException(404, "Job not found")
+
+
+class SentIn(BaseModel):
+    sent: bool = True
+
+
+@app.post("/api/outreach/{draft_id}/sent")
+def outreach_sent(draft_id: int, b: SentIn):
+    from .skills import outreach
+    outreach.mark_sent(draft_id, b.sent)
+    return {"ok": True}
+
+
+@app.get("/api/followups")
+def followups_board():
+    from .skills import followups
+    return followups.board()
+
+
+class FollowIn(BaseModel):
+    action: str   # done | snooze | undo
+
+
+@app.post("/api/followups/{job_id}")
+def followups_mark(job_id: str, b: FollowIn):
+    from .skills import followups
+    followups.mark(job_id, b.action)
+    return followups.board()
+
+
+@app.post("/api/autopilot")
+async def autopilot_switch(a: AutopilotIn):
+    """The switch in the top right. Off stops everything in progress right away, not just new starts;
+    applications already filled in and waiting for you stay open."""
+    db.set_settings({"autonomy": "autopilot", "auto_run": True} if a.on else {"autonomy": "copilot", "auto_run": False})
+    stopped = {"stopped": 0}
+    if not a.on:
+        stopped = await runner.stop()
+        await power.unload_local()
+    return {"on": a.on, **stopped}
+
+
+class StopIn(BaseModel):
+    everything: bool = True
+
+
+@app.post("/api/stop")
+async def stop_all(s: StopIn):
+    """Stop everything: every application, the browser, and smith's hold on your GPU. Autopilot goes off."""
+    db.set_settings({"autonomy": "copilot", "auto_run": False})
+    r = await runner.stop(everything=s.everything)
+    r["unloaded"] = await power.unload_local()
+    return r
+
+
+@app.get("/api/power")
+async def power_status():
+    return await power.status()
+
+
+@app.post("/api/power/unload")
+async def power_unload():
+    return {"unloaded": await power.unload_local()}
 
 
 @app.get("/api/smith")
@@ -260,19 +559,22 @@ async def ai_options():
 @app.get("/api/settings")
 def get_settings():
     s = db.get_settings()
-    for k in ("anthropic_api_key", "openai_api_key", "gemini_api_key", "gmail_app_password"):
+    for k in ("anthropic_api_key", "openai_api_key", "gemini_api_key", "gmail_app_password", "imap_password"):
         if s.get(k):
             s[k] = "•••• set"
+    s["ms_signed_in"] = bool(s.pop("ms_refresh_token", ""))
     s["claude_connected_in_app"] = bool(s.pop("claude_oauth_token", ""))
     return s
 
 
 @app.put("/api/settings")
 def put_settings(body: dict):
-    for k in ("anthropic_api_key", "openai_api_key", "gemini_api_key", "gmail_app_password"):
+    for k in ("anthropic_api_key", "openai_api_key", "gemini_api_key", "gmail_app_password", "imap_password"):
         if str(body.get(k, "")).startswith("••••"):
             body.pop(k)
     body.pop("claude_oauth_token", None)
+    body.pop("ms_refresh_token", None)
+    body.pop("ms_signed_in", None)
     db.set_settings(body)
     match.rescore()
     return get_settings()
@@ -431,7 +733,8 @@ async def sync():
 # --------------------------------------------------------------------------- jobs
 @app.get("/api/jobs")
 def list_jobs(status: str = "", category: str = "", ats_name: str = "", min_score: float = 0, q: str = "",
-              term: str = "", include_closed: bool = False, sort: str = "score", limit: int = 200, offset: int = 0):
+              term: str = "", include_closed: bool = False, sort: str = "score", limit: int = 200, offset: int = 0,
+              location: str = ""):
     where, params = ["1=1"], []
     if not include_closed:
         where.append("active=1")
@@ -450,6 +753,9 @@ def list_jobs(status: str = "", category: str = "", ats_name: str = "", min_scor
     if term:
         where.append("terms LIKE ?")
         params.append(f"%{term}%")
+    if location:
+        where.append("locations LIKE ?")
+        params.append(f"%{location}%")
     if q:
         where.append("(company LIKE ? OR title LIKE ?)")
         params += [f"%{q}%", f"%{q}%"]
@@ -459,7 +765,7 @@ def list_jobs(status: str = "", category: str = "", ats_name: str = "", min_scor
     total = db.q1(f"SELECT COUNT(*) n FROM jobs WHERE {w}", params)["n"]
     outcomes._ensure()
     rows = db.q(f"""SELECT id, company, title, url, ats, locations, terms, category, sponsorship, date_posted,
-                    fit_score, fit_reasons, status, verdict, error, outcome, hold_reason, eligibility FROM jobs WHERE {w}
+                    fit_score, fit_reasons, status, verdict, error, outcome, hold_reason, eligibility, updated_at FROM jobs WHERE {w}
                     ORDER BY {order} LIMIT ? OFFSET ?""", params + [limit, offset])
     facets = {
         "ats": db.q(f"SELECT ats, COUNT(*) n FROM jobs WHERE {w} GROUP BY ats ORDER BY n DESC", params),
@@ -473,11 +779,16 @@ def list_jobs(status: str = "", category: str = "", ats_name: str = "", min_scor
     descs = {r["id"]: r["description"] for r in db.q(
         f"SELECT id, title, description FROM jobs WHERE id IN ({','.join('?' * len(ids))})", ids)} if ids else {}
     conns = network.counts_for([r["company"] for r in rows])
+    ai_blocked = {r["job_id"] for r in db.q(
+        f"SELECT DISTINCT job_id FROM drafts WHERE issues LIKE '%Needs your AI%' AND job_id IN ({','.join('?' * len(ids))})",
+        ids)} if ids else set()
     for r in rows:
+        r["ai_blocked"] = r["id"] in ai_blocked
         r["tokens"] = tok.get(r["id"], 0)
         km = insights.keyword_match({"title": r["title"], "description": descs.get(r["id"], "")}, resume)
         r["match"], r["match_hits"], r["match_total"] = km["score"], len(km["matched"]), km["total"]
         r["connections"] = conns.get(r["company"], 0)
+        r["pay"] = insights.pay_of(descs.get(r["id"], ""))
     return {"total": total, "jobs": [db.decode(r) for r in rows], "facets": facets,
             "fillable": sorted(set(ats.SUPPORTED) | {"lever", "ashby", "other", "smartrecruiters", "workable"})}
 
@@ -509,7 +820,7 @@ def get_job(job_id: str):
         d["facts"] = [facts[f] for f in d["fact_ids"] if f in facts]
     return {"job": j, "drafts": drafts, "runs": runner.latest_runs(job_id), "usage": job_usage(job_id),
             "match": insights.keyword_match(j), "connections": network.at_company(j["company"], 8),
-            "sections": insights.posting_sections(j.get("description") or ""),
+            "sections": insights.posting_sections(j.get("description") or ""), "facts": insights.job_facts(j),
             "eligibility": eligibility.check(j),
             "readiness": draft.readiness(job_id) if drafts else None,
             "busy": runner.active().get(job_id), "can_fill": runner.can_fill(j["ats"])}
@@ -631,6 +942,27 @@ async def batch(b: BatchIn):
     return {"started": started}
 
 
+@app.get("/api/jobs/{job_id}/cover-letter.pdf")
+def cover_letter_pdf(job_id: str):
+    from . import letters
+    p = letters.cover_pdf(job_id)
+    if not p:
+        raise HTTPException(404, "No cover letter for this job yet.")
+    return FileResponse(p, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{p.name}"'})
+
+
+@app.post("/api/jobs/{job_id}/cover-letter")
+async def cover_letter_write(job_id: str):
+    from . import letters
+    job_or_404(job_id)
+    try:
+        with llm.usage_for(job_id, "answers"):
+            text = await letters.write_cover(job_id)
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+    return {"text": text}
+
+
 @app.get("/api/runs/{run_id}/screenshot")
 def screenshot(run_id: int):
     p = runner.run_file(run_id, "screenshot")
@@ -666,6 +998,31 @@ def learning():
     return dict(learn.stats(), funnel=outcomes.funnel())
 
 
+@app.post("/api/email/ms/start")
+async def email_ms_start():
+    from . import mail
+    import asyncio as _a
+    return await _a.to_thread(mail.ms_start)
+
+
+@app.post("/api/email/ms/poll")
+async def email_ms_poll():
+    from . import mail
+    import asyncio as _a
+    return await _a.to_thread(mail.ms_poll)
+
+
+@app.post("/api/email/ms/signout")
+def email_ms_signout():
+    db.set_settings({"ms_refresh_token": ""})
+    return {"ok": True}
+
+
+@app.post("/api/email/test")
+async def email_test():
+    return await outcomes.test_connection()
+
+
 @app.post("/api/outcomes/check")
 async def outcomes_check():
     res = await outcomes.check_inbox()
@@ -675,7 +1032,7 @@ async def outcomes_check():
 
 # --------------------------------------------------------------------------- home, network, companies, links, documents
 @app.get("/api/home")
-def home():
+async def home():
     week = db.now() - 7 * 86400
     day = db.now() - 86400
     sub_q = "SELECT COUNT(*) n FROM runs WHERE kind='submit' AND status='done' AND finished_at>?"
@@ -693,7 +1050,11 @@ def home():
             "daily_cap": s["max_applications_per_day"], "remaining_today": commands._remaining_today(),
             "autonomy": s.get("autonomy"), "auto_run": bool(s.get("auto_run")), "next_run": scheduler.state["next_run"],
             "last_summary": scheduler.state["last_summary"], "min_fit": s.get("min_fit_score") or 40,
-            "network": network.summary()["total"]}
+            "network": network.summary()["total"],
+            "first_name": (profile.answers().get("first_name") or {}).get("value") or "",
+            "strength": onboarding.strength(), "started": onboarding.get_started((await llm.available_cached(role="write"))[0]),
+            "stages": onboarding.stages(set(runner.active())), "email": outcomes.email_ready(),
+            "gmail": s.get("gmail_address") or ""}
 
 
 @app.post("/api/connections")
@@ -704,6 +1065,21 @@ async def upload_connections(file: UploadFile = File(...)):
         raise HTTPException(400, str(e))
 
 
+@app.post("/api/linkedin")
+async def upload_linkedin(file: UploadFile = File(...)):
+    """LinkedIn's data export (the whole .zip, or any of its CSVs): profile, history, credentials, connections."""
+    from . import linkedin
+    data = await file.read()
+    try:
+        r = linkedin.import_archive(data, file.filename or "linkedin.zip")
+    except (ValueError, KeyError) as e:
+        raise HTTPException(400, str(e))
+    if not r.get("ok"):
+        raise HTTPException(400, r.get("message"))
+    match.rescore()
+    return r
+
+
 @app.get("/api/connections")
 def connections(company: str = ""):
     return {"summary": network.summary(), "people": network.at_company(company) if company else []}
@@ -711,9 +1087,15 @@ def connections(company: str = ""):
 
 @app.get("/api/companies")
 def companies(q: str = ""):
+    from . import clout
     rows = db.q("""SELECT company, COUNT(*) jobs, SUM(status='submitted') applied, MAX(fit_score) best
                    FROM jobs WHERE active=1 AND (? = '' OR company LIKE ?) GROUP BY company COLLATE NOCASE
-                   ORDER BY applied DESC, best DESC LIMIT 200""", (q, f"%{q}%"))
+                   LIMIT 5000""", (q, f"%{q}%"))
+    # Best-known names first, then everyone else by how many roles they have open.
+    for r in rows:
+        r["rank"] = clout.rank(r["company"])
+    rows.sort(key=lambda r: (r["rank"] is None, r["rank"] or 0, -(r["jobs"] or 0), r["company"].lower()))
+    rows = rows[:200]
     conns = network.counts_for([r["company"] for r in rows])
     for r in rows:
         r["connections"] = conns.get(r["company"], 0)
@@ -807,7 +1189,19 @@ async def live_shot(job_id: str):
 @app.post("/api/live/{job_id}/show")
 async def live_show(job_id: str):
     r = await runner.live_show(job_id)
-    return {"ok": bool(r), "pending": r == "pending"}
+    return {"ok": bool(r), "pending": r == "pending", "takeover": r == "takeover"}
+
+
+@app.get("/api/live/{job_id}/stream")
+async def live_stream(job_id: str):
+    """Live video of the form being filled: an MJPEG stream an <img> tag can show."""
+    from fastapi.responses import StreamingResponse
+
+    async def frames():
+        async for jpg in runner.screencast(job_id):
+            yield b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + str(len(jpg)).encode() + b"\r\n\r\n" + jpg + b"\r\n"
+    return StreamingResponse(frames(), media_type="multipart/x-mixed-replace; boundary=frame",
+                             headers={"Cache-Control": "no-store"})
 
 
 @app.post("/api/live/hide")
@@ -854,12 +1248,21 @@ class ExtSave(BaseModel):
 @app.get("/api/ext/install")
 def ext_install():
     from .config import EXTENSION_DIR
-    return {"path": str(EXTENSION_DIR), "exists": (EXTENSION_DIR / "manifest.json").exists()}
+    seen = float(db.get_setting("ext_seen") or 0)
+    return {"path": str(EXTENSION_DIR), "exists": (EXTENSION_DIR / "manifest.json").exists(), "seen": seen or None}
+
+
+@app.post("/api/ext/open-install")
+def ext_open_install():
+    from . import extension
+    return extension.open_install()
 
 
 @app.get("/api/ext/ping")
 async def ext_ping():
     s_ = db.get_settings()
+    if db.now() - float(s_.get("ext_seen") or 0) > 3600:
+        db.set_settings({"ext_seen": db.now()})
     ok, msg = await llm.available_cached(role="write")
     pdf = profile.attachment_file()
     return {"ok": True, "name": "Jobsmith", "onboarded": bool(s_.get("onboarded")), "ai": llm.label(llm.backend("write")),
@@ -898,6 +1301,41 @@ async def ext_save(b: ExtSave):
     j = job_or_404(jid)
     return {"job_id": jid, "company": j["company"], "title": j["title"], "fit": j.get("fit_score"),
             "eligibility": eligibility.check(j), "started": bool(started)}
+
+
+class ExtContext(BaseModel):
+    url: str
+    title: str = ""
+    site_name: str = ""
+    text: str = ""
+
+
+@app.post("/api/ext/context")
+def ext_context(b: ExtContext):
+    from . import extension
+    return extension.context(b.url, b.title, b.site_name, b.text[:20000])
+
+
+class ExtGenerate(BaseModel):
+    url: str
+    label: str
+    title: str = ""
+    site_name: str = ""
+    description: str = ""
+    limit: int = 0
+
+
+@app.post("/api/ext/generate")
+async def ext_generate(b: ExtGenerate):
+    from . import extension
+    with llm.usage_for(None, "answers"):
+        return await extension.generate(b.url, b.label, b.title, b.site_name, b.description, b.limit)
+
+
+@app.post("/api/ext/submitted")
+def ext_submitted(b: ExtSave):
+    from . import extension
+    return extension.submitted(b.url, b.title, b.site_name)
 
 
 # --------------------------------------------------------------------------- dashboard

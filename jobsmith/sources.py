@@ -128,6 +128,9 @@ async def sync_source(source: dict) -> dict:
 
 
 async def sync_all() -> list[dict]:
+    from .config import DEMO
+    if DEMO:
+        return []
     out = []
     for s in db.q("SELECT * FROM sources WHERE active=1"):
         try:
