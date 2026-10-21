@@ -128,8 +128,8 @@ You're responsible for what's submitted in your name.
 
 **Does it cost anything?** No. Gemini's free tier covers most days; smith and the voice skill cost nothing at all.
 
-**Which sites?** Greenhouse, Lever, Ashby and most single-page forms end to end. Workday, iCIMS and other multi-page
-sites are filled page by page and stop at review; you sign in yourself.
+**Which sites?** Greenhouse end to end; Lever, Ashby and most single-page forms filled generically. Workday, iCIMS
+and other multi-page sites are filled page by page and stop at review; you sign in yourself.
 
 **Will it heat up my laptop?** Only smith does real work on your machine, and only when you're plugged in. Battery
 saver (on by default on battery) fills one application at a time and keeps smith off.
