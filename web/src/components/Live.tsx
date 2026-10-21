@@ -1,13 +1,14 @@
 import { useContext, useEffect, useState } from "react";
 import { api, LiveTab } from "../api";
 import { StatusCtx } from "../main";
-import { Dots, Icon, Logo, Modal, useTick } from "../ui";
+import { Dots, Icon, Logo, Modal, Steps, useTick } from "../ui";
+import { friendly } from "../pages/Tracker";
 
 const WORKING = new Set(["opening", "filling", "submitting"]);
 const PHASE: Record<string, string> = { opening: "Opening the form", filling: "Filling in your answers", review: "Ready for you",
   code: "Needs the emailed code", submitting: "Submitting", submitted: "Submitted", error: "Stopped" };
 
-function CodeBox({ tab, onDone }: { tab: LiveTab; onDone: (m: string) => void }) {
+export function CodeBox({ tab, onDone }: { tab: LiveTab; onDone: (m: string) => void }) {
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const send = async () => {
@@ -44,7 +45,7 @@ function Actions({ tab, onMsg }: { tab: LiveTab; onMsg: (m: string) => void }) {
       {tab.phase === "review" && (
         <button className="btn primary sm" onClick={() => confirm(`Submit the ${tab.company} application now?`) && act("submit", "Submit clicked.")}>Submit</button>
       )}
-      <button className="btn sm" onClick={() => act("show", "Browser window is up.")} title="Bring the browser window up to take over">Take over</button>
+      <button className="btn sm" onClick={() => act("show", "Opening it in a window for you to finish.")} title="Open this application in a browser window and finish it yourself">Take over</button>
       <a className="btn ghost sm" href={`#/job/${tab.job_id}`}>Answers</a>
       <button className="btn ghost sm" onClick={() => act("close", "Tab closed.")} aria-label={`Close the ${tab.company} tab`}><Icon name="x" size={14} /></button>
     </div>
@@ -52,11 +53,11 @@ function Actions({ tab, onMsg }: { tab: LiveTab; onMsg: (m: string) => void }) {
 }
 
 export default function Live({ compact = false }: { compact?: boolean }) {
-  const { refresh } = useContext(StatusCtx);
+  const { refresh, status } = useContext(StatusCtx);
   const [tabs, setTabs] = useState<LiveTab[]>([]);
   const [open, setOpen] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
-  const t = useTick(2000);
+  const t = useTick(3000);
   useEffect(() => { api.get<{ tabs: LiveTab[] }>("/api/live").then(r => setTabs(r.tabs)).catch(() => {}); }, [t]);
   if (!tabs.length) return compact ? null : (
     <p className="muted">Nothing in the browser right now.</p>
@@ -69,10 +70,10 @@ export default function Live({ compact = false }: { compact?: boolean }) {
       <div className="live-grid">
         {tabs.map(tab => (
           <article key={tab.job_id} className={`live ph-${tab.phase} ${tab.needs_code ? "wants" : ""}`}>
-            <button className="shot" onClick={() => setOpen(tab.job_id)} aria-label={`Watch ${tab.company} live`}>
+            <a className="shot" href={`#/watch/${tab.job_id}`} aria-label={`Watch ${tab.company} live`}>
               <img src={`/api/live/${tab.job_id}/shot?t=${t}`} alt="" loading="lazy" />
-              <span className="watch"><Icon name="eye" size={14} /> Watch</span>
-            </button>
+              <span className="watch"><Icon name="eye" size={14} /> Watch live</span>
+            </a>
             <div className="live-meta">
               <Logo name={tab.company} size={28} />
               <div>
@@ -80,7 +81,8 @@ export default function Live({ compact = false }: { compact?: boolean }) {
                 <span className={`phase ph-${tab.phase}`}>{WORKING.has(tab.phase) && <Dots />}{PHASE[tab.phase] ?? tab.phase_label}</span>
               </div>
             </div>
-            {tab.note && tab.phase !== "code" && <p className="muted small clamp1" title={tab.note}>{tab.note}</p>}
+            <Steps p={status?.progress?.[tab.job_id]} />
+            {tab.note && tab.phase !== "code" && <p className="muted small clamp1" title={tab.note}>{tab.phase === "error" ? friendly(tab.note) : tab.note}</p>}
             {tab.needs_code && <CodeBox tab={tab} onDone={say} />}
             <Actions tab={tab} onMsg={say} />
           </article>

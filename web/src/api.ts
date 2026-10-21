@@ -6,7 +6,9 @@ export type Job = {
   description?: string; research?: Research; questions?: unknown[];
   referral_name?: string | null; referral_url?: string | null; outcome?: string | null; tokens?: number;
   match?: number | null; match_hits?: number; match_total?: number; connections?: number; hold_reason?: string | null;
+  pay?: string; updated_at?: number;
   eligibility?: { ok?: boolean; reasons?: string[]; notes?: string[] };
+  ai_blocked?: boolean;
 };
 export type Research = {
   summary?: string; what_the_team_builds?: string; tech_stack?: string[];
@@ -79,3 +81,7 @@ export const OUTCOME_LABEL: Record<string, string> = {
   received: "Received", rejected: "Rejected", assessment: "Assessment", interview: "Interview", offer: "Offer",
 };
 export const companyHref = (c: string) => `#/company/${encodeURIComponent(c)}`;
+
+/** What you value in a role (same list as match.VALUES on the engine). Up to 3. */
+export const VALUES = ["Learning and mentorship", "Hard technical problems", "Impact on real users", "Pay", "Well-known company",
+  "Small team, big ownership", "Path to a full-time offer", "Work-life balance", "A mission I care about", "Remote or flexible"];

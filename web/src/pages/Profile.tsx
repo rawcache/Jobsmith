@@ -97,14 +97,17 @@ function LinksCard() {
   const [l, setL] = useState<Links | null>(null);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
   const load = (refresh = false) => api.get<Links>(`/api/links${refresh ? "?refresh=true" : ""}`).then(setL).catch(() => {});
   useEffect(() => { load(); }, []);
   if (!l) return <section className="card side-card"><h2>Your links</h2><p className="muted small"><Dots /> Loading previews</p></section>;
   const g = l.github, d = l.devpost;
+  if (editing) return <LinksEdit onDone={() => { setEditing(false); load(true); }} />;
   return (
     <section className="card side-card links">
-      <div className="card-h"><h2>Your links</h2><button className="btn ghost sm" onClick={() => load(true)}>Refresh</button></div>
-      
+      <div className="card-h"><h2>Your links</h2>
+        <div className="row tight"><button className="btn ghost sm" onClick={() => setEditing(true)}>Edit</button>
+          <button className="btn ghost sm" onClick={() => load(true)}>Refresh</button></div></div>
 
       <div className="link-block">
         <div className="link-h"><Icon name="linkedin" size={18} className="li" />
@@ -143,7 +146,38 @@ function LinksCard() {
   );
 }
 
-function NetworkCard() {
+const LINK_KEYS: [string, string, string][] = [["linkedin", "LinkedIn", "https://www.linkedin.com/in/you"],
+  ["github", "GitHub", "https://github.com/you"], ["devpost", "Devpost", "https://devpost.com/you"],
+  ["website", "Website or portfolio", "https://you.dev"]];
+
+function LinksEdit({ onDone }: { onDone: () => void }) {
+  const [v, setV] = useState<Record<string, string> | null>(null);
+  useEffect(() => { api.get<{ answers: { key: string; value: string }[] }>("/api/profile")
+    .then(p => setV(Object.fromEntries(LINK_KEYS.map(([k]) => [k, p.answers.find(a => a.key === k)?.value ?? ""])))); }, []);
+  if (!v) return <section className="card side-card"><p className="muted small"><Dots />Loading</p></section>;
+  const fix = (k: string, s: string) => {
+    s = s.trim();
+    if (!s || /^https?:\/\//.test(s)) return s;
+    if (k === "github" && !s.includes(".")) return `https://github.com/${s.replace(/^@/, "")}`;   // just a username
+    if (k === "devpost" && !s.includes(".")) return `https://devpost.com/${s}`;
+    return `https://${s}`;
+  };
+  const save = async () => {
+    for (const [k] of LINK_KEYS) await api.put(`/api/answers/${k}`, { value: fix(k, v[k] ?? ""), confirmed: true });
+    onDone();
+  };
+  return (
+    <section className="card side-card links">
+      <div className="card-h"><h2>Your links</h2></div>
+      {LINK_KEYS.map(([k, label, ph]) => (
+        <label key={k} className="field">{label}<input value={v[k] ?? ""} placeholder={ph} onChange={e => setV({ ...v, [k]: e.target.value })} /></label>))}
+      <p className="small muted">A username works too, like <code>rawcache</code> for GitHub.</p>
+      <div className="row tight"><button className="btn primary sm" onClick={save}>Save</button><button className="link" onClick={onDone}>Cancel</button></div>
+    </section>
+  );
+}
+
+function NetworkCard({ onImported }: { onImported?: () => void }) {
   const [n, setN] = useState<Net | null>(null);
   const [msg, setMsg] = useState("");
   const load = () => api.get<Net>("/api/connections").then(setN).catch(() => {});
@@ -151,25 +185,27 @@ function NetworkCard() {
   const up = async (fl: FileList | null) => {
     if (!fl?.length) return;
     const fd = new FormData(); fd.append("file", fl[0]);
-    try { const r = await api.post<{ imported: number; with_company: number }>("/api/connections", fd);
-      setMsg(`Imported ${r.imported.toLocaleString()} connections.`); load();
+    setMsg("Reading it…");
+    try { const r = await api.post<{ message: string }>("/api/linkedin", fd);
+      setMsg(r.message); load(); onImported?.();
     } catch (e) { setMsg((e as Error).message); }
   };
   return (
     <section className="card side-card">
-      <div className="card-h"><h2>Your network</h2>{n && n.summary.total > 0 && <span className="muted"> ({n.summary.total.toLocaleString()})</span>}</div>
+      <div className="card-h"><h2>From LinkedIn</h2>{n && n.summary.total > 0 && <span className="muted"> ({n.summary.total.toLocaleString()} connections)</span>}</div>
+      <p className="small muted">Your name, headline, work history, education, certifications, languages and skills, plus who you know at each company. LinkedIn doesn't let apps read profiles, but it gives you the file.</p>
       {n && n.summary.total > 0 ? (<>
         
         <ul className="top-cos">{n.summary.top_companies.slice(0, 8).map(c => <li key={c.company}><a href={companyHref(c.company)}>{c.company}</a><span className="muted small">{c.n}</span></li>)}</ul>
       </>) : (
         <ol className="small steps">
-          <li>On LinkedIn, open <strong>Settings, Data privacy, Get a copy of your data</strong>.</li>
-          <li>Pick <strong>Connections</strong> and request the archive. It arrives by email in about 10 minutes.</li>
-          <li>Upload the <strong>Connections.csv</strong> from it here.</li>
+          <li>On LinkedIn, open <a href="https://www.linkedin.com/mypreferences/d/download-my-data" target="_blank" rel="noreferrer">Settings, Data privacy, Get a copy of your data</a>.</li>
+          <li>Tick <strong>Profile</strong> and <strong>Connections</strong> (or take the whole archive) and request it. It arrives by email, usually within the hour.</li>
+          <li>Upload the .zip here as it is.</li>
         </ol>
       )}
-      <label className="btn sm block upload-btn"><input type="file" accept=".csv" onChange={e => { up(e.target.files); e.target.value = ""; }} />
-        <Icon name="upload" size={14} />{n?.summary.total ? "Replace Connections.csv" : "Upload Connections.csv"}</label>
+      <label className="btn sm block upload-btn"><input type="file" accept=".zip,.csv" onChange={e => { up(e.target.files); e.target.value = ""; }} />
+        <Icon name="upload" size={14} />{n?.summary.total ? "Update from a newer LinkedIn file" : "Upload your LinkedIn .zip"}</label>
       {msg && <p className="small">{msg}</p>}
     </section>
   );
@@ -240,7 +276,7 @@ export default function Profile() {
             
           </section>
           <LinksCard />
-          <NetworkCard />
+          <NetworkCard onImported={() => { load(); refresh(); }} />
         </aside>
 
         <div className="col-main">
