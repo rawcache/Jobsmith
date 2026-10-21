@@ -1,23 +1,43 @@
 import { useContext, useEffect, useState } from "react";
 import { api } from "../api";
-import { StatusCtx } from "../main";
+import { setAutopilot, StatusCtx } from "../main";
 import ConnectClaude from "../components/ConnectClaude";
 import Smith from "../components/Smith";
-import { Icon } from "../ui";
+import EmailCard from "../components/EmailCard";
+import { Icon, Switch } from "../ui";
 
 
 type S = Record<string, any>;
 type Source = { id: number; url: string; active: number; last_synced: number | null; last_count: number | null };
-const CATS = ["Software", "AI/ML/Data", "Hardware", "Product", "Quant"];
 
-export default function Settings() {
+export default function Settings({ focus }: { focus?: string }) {
   const { refresh, status } = useContext(StatusCtx);
   const [s, setS] = useState<S | null>(null);
   const [src, setSrc] = useState<Source[]>([]);
   const [newSrc, setNewSrc] = useState("");
   const [saved, setSaved] = useState("");
   const load = () => { api.get<S>("/api/settings").then(setS); api.get<Source[]>("/api/sources").then(setSrc); };
+  const [adding, setAdding] = useState(false);
+  const addSource = async () => {
+    const v = newSrc.trim();
+    setAdding(true);
+    try {
+      if (/github\.com\/[^/]+\/[^/]+/.test(v)) {
+        await api.post("/api/sources", { url: v }); setSaved("List added. Checking it now.");
+      } else {
+        const r = await api.post<{ log: string[] }>("/api/command", { text: /^https?:/.test(v) ? v : `find roles at ${v}` });
+        setSaved(r.log.slice(-1)[0] ?? "Added.");
+      }
+      setNewSrc(""); load(); refresh();
+    } catch (e) { setSaved((e as Error).message); }
+    setAdding(false);
+  };
   useEffect(load, []);
+  useEffect(() => {
+    if (!s || !focus) return;
+    const el = document.getElementById(focus);
+    el?.scrollIntoView({ block: "start" }); el?.classList.add("flash"); setTimeout(() => el?.classList.remove("flash"), 1600);
+  }, [focus, !!s]);
   if (!s) return <div className="page"><p className="muted">Loading…</p></div>;
 
   const save = async (patch: S) => {
@@ -28,166 +48,139 @@ export default function Settings() {
     save({ [k]: e.target.value.split(",").map(x => x.trim()).filter(Boolean) });
   const num = (k: string) => (e: { target: { value: string } }) => save({ [k]: Number(e.target.value) });
 
+  const seg = (k: string, opts: [any, string][], cur: any) => (
+    <div className="seg" role="radiogroup">{opts.map(([v, label]) => (
+      <button key={String(v)} role="radio" aria-checked={cur === v} className={cur === v ? "on" : ""} onClick={() => save({ [k]: v })}>{label}</button>))}</div>
+  );
+  const picky = s.min_fit_score >= 55 ? 60 : s.min_fit_score <= 25 ? 20 : 40;
+  const careful = s.autopilot_min_confidence >= 0.78 ? 0.8 : s.autopilot_min_confidence <= 0.55 ? 0.5 : 0.7;
+  const every = s.auto_interval_hours <= 3 ? 2 : s.auto_interval_hours >= 20 ? 24 : 6;
   return (
     <div className="page narrow settings">
       <div className="page-h"><div><h1>Settings</h1><p className="muted">{saved || "Changes save as you make them."}</p></div></div>
 
       <section className="card">
-        <h2>How Jobsmith applies</h2>
-        <label className={`choice ${s.autonomy !== "copilot" ? "on" : ""}`}>
-          <input type="radio" checked={s.autonomy !== "copilot"} onChange={() => save({ autonomy: "autopilot", auto_run: true })} />
-          <div><strong>Autopilot</strong> <span className="muted">(recommended)</span>
-            <p>Applies on its own: researches the company, answers from your profile, fills the form and submits. Anything it isn't sure about (an AI answer below
-              <input className="tiny" type="number" min={0} max={1} step={0.05} value={s.autopilot_min_confidence} onChange={e => save({ autopilot_min_confidence: Number(e.target.value) })} /> confidence,
-              an empty required field, a field it couldn't fill) waits for one click from you.</p></div>
-        </label>
-        <label className={`choice ${s.autonomy === "copilot" ? "on" : ""}`}>
-          <input type="radio" checked={s.autonomy === "copilot"} onChange={() => save({ autonomy: "copilot" })} />
-          <div><strong>Copilot</strong><p>Fills every form and stops before Submit. You review each tab and click Submit yourself.</p></div>
-        </label>
-        <p className="small muted">You're responsible for what's submitted in your name. CAPTCHAs, sign-ins and emailed codes always come to you.</p>
-        <label className="check"><input type="checkbox" checked={s.auto_run} onChange={e => save({ auto_run: e.target.checked })} />
-          <span>Check my job lists every <input className="tiny" type="number" min={1} value={s.auto_interval_hours} onChange={num("auto_interval_hours")} /> hours
-            and start up to <input className="tiny" type="number" min={1} value={s.auto_max_per_run} onChange={num("auto_max_per_run")} /> of the best new matches. Runs while Jobsmith is open and your Mac is awake.</span></label>
-        <label className="check"><span>Only apply to roles with fit of at least <input className="tiny" type="number" min={0} max={100} value={s.min_fit_score} onChange={num("min_fit_score")} /></span></label>
-        <div className="row"><button className="btn" onClick={() => api.post<{ summary: string }>("/api/auto/run-now").then(r => { setSaved(r.summary); refresh(); })}>Run once now</button>
-          {status?.auto.last_summary && <span className="small muted">Last run: {status.auto.last_summary}</span>}</div>
+        <h2>Applying</h2>
+        <div className="set-row"><div><strong>Autopilot</strong><p>Applies on its own and holds anything it isn't sure about for you. Off means it fills forms and you press Submit.</p></div>
+          <Switch on={s.autonomy !== "copilot" && s.auto_run} label="Autopilot"
+            onChange={v => setAutopilot(v).then(m => { setSaved(m); load(); refresh(); })} /></div>
+        <div className="set-row"><div><strong>How picky</strong><p>Which matches autopilot applies to.</p></div>
+          {seg("min_fit_score", [[60, "Strong fits"], [40, "Good fits"], [20, "Anything I qualify for"]], picky)}</div>
+        <div className="set-row"><div><strong>Applications at once</strong><p>More is faster; each one opens its own tab.</p></div>
+          {seg("concurrency", [[1, "1"], [3, "3"], [5, "5"]], [1, 3, 5].includes(s.concurrency) ? s.concurrency : 3)}</div>
+        <div className="set-row"><div><strong>Check for new roles</strong><p>While Jobsmith is open and your computer is awake.</p></div>
+          {seg("auto_interval_hours", [[2, "Every 2 hours"], [6, "Every 6 hours"], [24, "Daily"]], every)}</div>
+        <div className="set-row"><div><strong>When an answer is unsure</strong><p>How readily autopilot holds an application for you to check.</p></div>
+          {seg("autopilot_min_confidence", [[0.8, "Hold more"], [0.7, "Balanced"], [0.5, "Hold less"]], careful)}</div>
+        <div className="row"><button className="btn" onClick={() => api.post<{ summary: string }>("/api/auto/run-now").then(r => { setSaved(r.summary); refresh(); })}>Look for new roles now</button>
+          {status?.auto.last_summary && <span className="small muted">{status.auto.last_summary}</span>}</div>
+        <p className="small muted">You're responsible for what's sent in your name. CAPTCHAs, sign-ins and emailed codes always come to you.</p>
+      </section>
+
+      <a className="card link-card" href="#/preferences">
+        <div className="grow"><h2>Job preferences</h2><p className="small muted">What, where, and how picky. They have their own page now.</p></div>
+        <Icon name="back" size={16} className="chev" />
+      </a>
+
+      <EmailCard s={s} save={save} onMsg={setSaved} />
+
+      <section className="card">
+        <h2>Your AI</h2>
+        <p>{status ? <>Writing with <strong>{status.llm.writing.label}</strong>{status.llm.writing.ok ? "." : <span className="warn-text">: {status.llm.writing.message}</span>}</> : null}</p>
+        <div className="ai-pick">
+          {([["gemini_api", "Gemini", "Free. Writes well and researches companies."], ["ollama", "smith", "Free and private, on this computer."],
+             ["anthropic_api", "Claude", "API key, pay per use."], ["openai_api", "ChatGPT", "API key, pay per use."]] as [string, string, string][]).map(([k, label, hint]) => (
+            <label key={k} className={`choice ${s.llm_backend === k ? "on" : ""}`}>
+              <input type="radio" name="ai" checked={s.llm_backend === k} onChange={() => save({ llm_backend: k, research_backend: "same" })} />
+              <div><strong>{label}</strong><p>{hint}</p></div></label>))}
+        </div>
+        {s.llm_backend === "gemini_api" && <label className="field">Gemini key <a className="small" href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">get one</a>
+          <input type="password" defaultValue={s.gemini_api_key} placeholder="Paste your key" onBlur={e => save({ gemini_api_key: e.target.value })} /></label>}
+        {s.llm_backend === "anthropic_api" && <label className="field">Anthropic key<input type="password" defaultValue={s.anthropic_api_key} placeholder="Paste your key" onBlur={e => save({ anthropic_api_key: e.target.value })} /></label>}
+        {s.llm_backend === "openai_api" && <label className="field">OpenAI key<input type="password" defaultValue={s.openai_api_key} placeholder="Paste your key" onBlur={e => save({ openai_api_key: e.target.value })} /></label>}
+        {s.llm_backend === "ollama" && <Smith onReady={() => { load(); refresh(); }} />}
+        {s.llm_backend === "claude_cli" && <><p className="small">Using your Claude Code login (personal use only).</p><ConnectClaude /></>}
+      </section>
+
+      <section className="card">
+        <h2>While it works</h2>
+        <div className="set-row"><div><strong>Show the browser</strong><p>Off keeps it in the background; watch any application live from Home or the bell.</p></div>
+          <Switch on={s.browser_window === "visible"} label="Show the browser" onChange={v => save({ browser_window: v ? "visible" : "background" })} /></div>
+        <div className="set-row"><div><strong>Notifications</strong><p>When something needs you or gets submitted.</p></div>
+          <Switch on={!!s.notifications} label="Notifications" onChange={v => save({ notifications: v })} /></div>
+        <div className="set-row"><div><strong>Research companies first</strong><p>Better answers; uses about twice the AI. <a href="#/stats">See usage</a></p></div>
+          <Switch on={!!s.research_enabled} label="Research companies" onChange={v => save({ research_enabled: v })} /></div>
       </section>
 
       <ExtensionCard />
 
       <section className="card">
-        <h2>Limits</h2>
-        <div className="grid-2 tight">
-          <label className="field">Applications per day<input type="number" min={0} placeholder="No limit" value={s.max_applications_per_day || ""} onChange={num("max_applications_per_day")} /></label>
-          <label className="field">Per company<input type="number" min={0} placeholder="No limit" value={s.max_applications_per_company || ""} onChange={num("max_applications_per_company")} /></label>
-          <label className="field">Forms filled at once<input type="number" min={1} max={6} value={s.concurrency} onChange={num("concurrency")} /></label>
-          <label className="field">AI calls at once<input type="number" min={1} max={8} value={s.llm_concurrency} onChange={num("llm_concurrency")} /></label>
-        </div>
-        
-      </section>
-
-      <section className="card">
-        <h2>AI</h2>
-        <label className="field">Writes your answers with
-          <select value={s.llm_backend} onChange={e => save({ llm_backend: e.target.value })}>
-            <option value="auto">Whatever's available (API key, then smith)</option>
-            <option value="ollama">smith, on this computer (free, private)</option>
-            <option value="anthropic_api">Claude, with an Anthropic API key</option>
-            <option value="openai_api">ChatGPT, with an OpenAI API key</option>
-            <option value="gemini_api">Gemini, with a Google AI Studio key</option>
-            <option value="claude_cli">Claude Code login (personal use only)</option>
-          </select></label>
-        {status && <p className="small">Using <strong>{status.llm.writing.label}</strong>{status.llm.writing.ok ? "." : `: ${status.llm.writing.message}`}</p>}
-        {s.llm_backend === "claude_cli" && <p className="small warn-text">Anthropic doesn't allow Claude subscription logins in third-party apps, so this is for your own use. Use an API key or smith for anything you share.</p>}
-        {s.llm_backend === "claude_cli" && <ConnectClaude />}
-        {s.llm_backend === "claude_cli" && s.claude_connected_in_app && (
-          <button className="btn ghost sm" onClick={() => api.post("/api/claude/disconnect").then(() => { load(); refresh(); })}>Disconnect Claude</button>)}
-        {["claude_cli", "anthropic_api"].includes(s.llm_backend) && (
-          <label className="field">Claude model
-            <select value={s.llm_model} onChange={e => save({ llm_model: e.target.value })}>
-              <option value="sonnet">Sonnet (recommended)</option><option value="opus">Opus (best writing, uses more)</option><option value="haiku">Haiku (fastest, least usage)</option>
-            </select></label>)}
-        {["anthropic_api", "auto"].includes(s.llm_backend) && (
-          <label className="field">Anthropic API key<input type="password" defaultValue={s.anthropic_api_key} placeholder="or set ANTHROPIC_API_KEY" onBlur={e => save({ anthropic_api_key: e.target.value })} /></label>)}
-        {["openai_api", "auto"].includes(s.llm_backend) && (
-          <label className="field">OpenAI API key<input type="password" defaultValue={s.openai_api_key} placeholder="or set OPENAI_API_KEY" onBlur={e => save({ openai_api_key: e.target.value })} /></label>)}
-        {s.llm_backend === "openai_api" && (
-          <label className="field">OpenAI model<input defaultValue={s.openai_model} onBlur={e => save({ openai_model: e.target.value })} /></label>)}
-        {["gemini_api", "auto"].includes(s.llm_backend) && (
-          <label className="field">Gemini API key<input type="password" defaultValue={s.gemini_api_key} placeholder="or set GEMINI_API_KEY" onBlur={e => save({ gemini_api_key: e.target.value })} /></label>)}
-        {s.llm_backend === "gemini_api" && (
-          <label className="field">Gemini model<input defaultValue={s.gemini_model} onBlur={e => save({ gemini_model: e.target.value })} /></label>)}
-        {s.llm_backend === "ollama" && <Smith onReady={() => { load(); refresh(); }} />}
-        {s.llm_backend === "ollama" && (
-          <label className="field">smith's model<input defaultValue={s.ollama_model} placeholder="blank picks one for this computer" onBlur={e => save({ ollama_model: e.target.value.trim() })} />
-            <span className="small muted">Any Ollama model works. smith runs through Ollama; set OLLAMA_HOST to use one on a Mac mini.</span></label>)}
-        {s.llm_backend === "ollama" && <p className="small muted">smith can't search the web, so company research uses only the posting. Pick a cloud AI below for research if you want it.</p>}
-        <label className="field">Researches companies with
-          <select value={s.research_backend} onChange={e => save({ research_backend: e.target.value })}>
-            <option value="same">The same AI</option>
-            <option value="anthropic_api">Claude, with an Anthropic API key</option>
-            <option value="openai_api">ChatGPT, with an OpenAI API key</option>
-            <option value="gemini_api">Gemini, with a Google AI Studio key</option>
-            <option value="ollama">smith (no web search)</option>
-            <option value="claude_cli">Claude Code login (personal use only)</option>
-          </select></label>
-        {(s.research_backend === "openai_api" && s.llm_backend !== "openai_api") && (
-          <label className="field">OpenAI API key<input type="password" defaultValue={s.openai_api_key} onBlur={e => save({ openai_api_key: e.target.value })} /></label>)}
-        {(s.research_backend === "anthropic_api" && s.llm_backend !== "anthropic_api") && (
-          <label className="field">Anthropic API key<input type="password" defaultValue={s.anthropic_api_key} onBlur={e => save({ anthropic_api_key: e.target.value })} /></label>)}
-        {(s.research_backend === "gemini_api" && s.llm_backend !== "gemini_api") && (
-          <label className="field">Gemini API key<input type="password" defaultValue={s.gemini_api_key} onBlur={e => save({ gemini_api_key: e.target.value })} /></label>)}
-        {s.research_backend === "claude_cli" && s.llm_backend !== "claude_cli" && <ConnectClaude />}
-        <label className="check"><input type="checkbox" checked={s.research_enabled} onChange={e => save({ research_enabled: e.target.checked })} />
-          <span>Research each company before applying (better answers, about twice the AI usage). <a href="#/stats">See usage</a></span></label>
-      </section>
-
-      <section className="card">
-        <h2>Browser</h2>
-        <label className={`choice ${s.browser_window !== "visible" ? "on" : ""}`}><input type="radio" checked={s.browser_window !== "visible"} onChange={() => save({ browser_window: "background" })} />
-          <div><strong>In the background</strong><p>The browser window stays minimized. Watch each application live on the Autopilot page and take over when you want.</p></div></label>
-        <label className={`choice ${s.browser_window === "visible" ? "on" : ""}`}><input type="radio" checked={s.browser_window === "visible"} onChange={() => save({ browser_window: "visible" })} />
-          <div><strong>Visible</strong><p>The browser window stays up while it works.</p></div></label>
-        <label className="check"><input type="checkbox" checked={s.multistep_beta} onChange={e => save({ multistep_beta: e.target.checked })} />
-          <span>Multi-page sites like Workday (beta). You sign in yourself; Jobsmith never types passwords.</span></label>
-        <label className="check"><input type="checkbox" checked={s.tailor_resume} onChange={e => save({ tailor_resume: e.target.checked })} />
-          <span>Tailor my resume per job: same words, most relevant bullets first (needs <code>brew install tectonic</code>)</span></label>
-        <label className="check"><input type="checkbox" checked={s.notifications} onChange={e => save({ notifications: e.target.checked })} />
-          <span>Mac notifications when something needs me or gets submitted</span></label>
-      </section>
-
-      <section className="card">
-        <h2>What to look for</h2>
-        <div className="checks">{CATS.map(c => (
-          <label key={c} className="check"><input type="checkbox" checked={s.target_categories.includes(c)}
-            onChange={e => save({ target_categories: e.target.checked ? [...s.target_categories, c] : s.target_categories.filter((x: string) => x !== c) })} />{c}</label>))}</div>
-        <label className="field">Seasons, comma separated<input defaultValue={s.target_terms.join(", ")} onBlur={list("target_terms")} /></label>
-        <label className="field">Locations, comma separated (blank means anywhere)<input defaultValue={s.target_locations.join(", ")} onBlur={list("target_locations")} placeholder="e.g. CA, New York, Remote" /></label>
-        <label className="field">Never apply to<input defaultValue={s.exclude_companies.join(", ")} onBlur={list("exclude_companies")} /></label>
-      </section>
-
-      <section className="card">
-        <h2>Job lists</h2>
+        <h2>Where jobs come from</h2>
+        <p className="small muted">Jobsmith checks these lists for new roles on its own. You can add:</p>
+        <ul className="small src-kinds">
+          <li><strong>A GitHub job list</strong>, like SimplifyJobs' internship and new grad lists. Checked every few hours.</li>
+          <li><strong>A company name</strong>, like "NVIDIA" or "Jane Street". Jobsmith finds their open roles that fit you and starts on them.</li>
+          <li><strong>A link</strong> to one job or a careers page. Jobsmith reads it and starts the application.</li>
+        </ul>
         <ul className="rows">{src.filter(x => x.active).map(x => (
           <li key={x.id} className="src"><Icon name="github" size={18} /><a className="grow" href={x.url} target="_blank" rel="noreferrer">{x.url.replace("https://github.com/", "")}</a>
-            <span className="small muted">{x.last_synced ? `${x.last_count} roles` : "not synced"}</span>
+            <span className="small muted">{x.last_synced ? `${x.last_count} roles` : "not checked yet"}</span>
             <button className="btn ghost sm" onClick={() => api.del(`/api/sources/${x.id}`).then(load)}>Remove</button></li>))}
         </ul>
         <div className="row">
-          <input className="grow" placeholder="https://github.com/SimplifyJobs/New-Grad-Positions" value={newSrc} onChange={e => setNewSrc(e.target.value)} />
-          <button className="btn primary" disabled={!newSrc} onClick={() => api.post("/api/sources", { url: newSrc }).then(() => { setNewSrc(""); load(); })}>Add list</button>
+          <input className="grow" placeholder="A GitHub list, a company name, or a job link" value={newSrc} onChange={e => setNewSrc(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && newSrc.trim() && addSource()} />
+          <button className="btn primary" disabled={!newSrc.trim() || adding} onClick={addSource}>{adding ? "Adding…" : "Add"}</button>
         </div>
       </section>
 
-      <section className="card">
-        <h2>Track replies with Gmail</h2>
-        <p className="small muted">Read-only. Jobsmith reads recent emails to spot confirmations, assessments, interviews and rejections, and moves them on the Tracker.
-          Use a Google <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer">app password</a>, not your normal password.</p>
+      <details className="card more">
+        <summary><h2>More options</h2></summary>
         <div className="grid-2 tight">
-          <label className="field">Gmail address<input defaultValue={s.gmail_address} onBlur={e => save({ gmail_address: e.target.value.trim() })} /></label>
-          <label className="field">App password<input type="password" defaultValue={s.gmail_app_password} onBlur={e => save({ gmail_app_password: e.target.value })} /></label>
+          <label className="field">Most applications per day<input type="number" min={0} placeholder="No limit" value={s.max_applications_per_day || ""} onChange={num("max_applications_per_day")} /></label>
+          <label className="field">Most per company<input type="number" min={0} placeholder="No limit" value={s.max_applications_per_company || ""} onChange={num("max_applications_per_company")} /></label>
         </div>
-        <button className="btn" onClick={() => api.post<{ error?: string; checked?: number; new_outcomes?: number }>("/api/outcomes/check")
-          .then(r => setSaved(r.error ?? `Checked ${r.checked} emails, ${r.new_outcomes} new replies matched`))}>Check now</button>
-      </section>
+        <label className="check"><input type="checkbox" checked={s.multistep_beta} onChange={e => save({ multistep_beta: e.target.checked })} />
+          <span>Multi-page sites like Workday (beta). You sign in yourself; Jobsmith never types passwords.</span></label>
+        <label className="check"><input type="checkbox" checked={s.tailor_resume} onChange={e => save({ tailor_resume: e.target.checked })} />
+          <span>Reorder my resume's bullets for each job (needs a LaTeX resume)</span></label>
+        <label className="field">Research companies with
+          <select value={s.research_backend} onChange={e => save({ research_backend: e.target.value })}>
+            <option value="same">The same AI</option><option value="gemini_api">Gemini</option><option value="anthropic_api">Claude (API key)</option>
+            <option value="openai_api">ChatGPT (API key)</option><option value="ollama">smith</option><option value="claude_cli">Claude Code login (personal use)</option>
+          </select></label>
+        {s.llm_backend !== "claude_cli" && <button className="link small" onClick={() => save({ llm_backend: "claude_cli" })}>Use my Claude Code login instead (personal use only)</button>}
+      </details>
     </div>
   );
 }
 
 function ExtensionCard() {
-  const [x, setX] = useState<{ path: string; exists: boolean } | null>(null);
-  useEffect(() => { api.get<{ path: string; exists: boolean }>("/api/ext/install").then(setX).catch(() => {}); }, []);
+  const [x, setX] = useState<{ path: string; exists: boolean; seen: number | null } | null>(null);
+  const [msg, setMsg] = useState("");
+  useEffect(() => { api.get<{ path: string; exists: boolean; seen: number | null }>("/api/ext/install").then(setX).catch(() => {}); }, []);
   if (!x?.exists) return null;
+  const open = async () => {
+    const r = await api.post<{ chrome: boolean; folder: boolean }>("/api/ext/open-install");
+    setMsg(r.chrome || r.folder ? "Opened Chrome's extensions page and the folder. The folder path is copied too." : "Open chrome://extensions yourself, then pick the folder below.");
+  };
+  const copy = () => navigator.clipboard.writeText(x.path).then(() => setMsg("Folder path copied.")).catch(() => {});
   return (
-    <section className="card">
-      <h2>Chrome extension</h2>
-      <p>Fill any application you're looking at from your profile (Alt+J), and send postings to autopilot with one click. It never submits.</p>
-      <ol className="small">
-        <li>Open <code>chrome://extensions</code> and turn on Developer mode.</li>
+    <section className="card" id="extension">
+      <div className="card-h"><h2>Chrome extension</h2>{x.seen ? <span className="pill-on">installed</span> : <span className="tag quiet">not added yet</span>}</div>
+      <p>A panel on every job posting: autofill from your profile, resume match, who you know there, your cover letter, and Write with Jobsmith beside open questions. It never submits.</p>
+      <ol className="small steps-list">
+        <li>In <code>chrome://extensions</code>, turn on Developer mode (top right).</li>
         <li>Click Load unpacked and choose <code className="path">{x.path}</code></li>
-        <li>Pin Jobsmith from the puzzle-piece menu.</li>
+        <li>Pin Jobsmith from the puzzle-piece menu, then open any job posting.</li>
       </ol>
+      <div className="row tight">
+        <button className="btn primary sm" onClick={open}>Open Chrome's extensions page</button>
+        <button className="btn sm" onClick={copy}>Copy the folder path</button>
+        {msg && <span className="small muted">{msg}</span>}
+      </div>
+      <p className="small muted">After you update Jobsmith, click the reload arrow on Jobsmith's card in chrome://extensions.</p>
     </section>
   );
 }
+

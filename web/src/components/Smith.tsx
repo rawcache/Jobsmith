@@ -60,7 +60,9 @@ export default function Smith({ onReady, compact, noButton }: { onReady?: () => 
 export function SmithLine() {
   const [st, setSt] = useState<SmithStatus["state"] | null>(null);
   const load = () => api.get<SmithStatus>("/api/smith").then(s => setSt(s.state));
-  useEffect(() => { load(); const t = setInterval(load, 1000); return () => clearInterval(t); }, []);
+  useEffect(() => { load(); }, []);
+  const working = !!st && busy(st.phase);
+  useEffect(() => { if (!working) return; const t = setInterval(load, 1500); return () => clearInterval(t); }, [working]);
   if (!st || st.phase === "idle") return null;
   const pct = st.progress == null ? null : Math.round(st.progress * 100);
   return (

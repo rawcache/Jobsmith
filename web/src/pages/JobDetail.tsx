@@ -1,13 +1,14 @@
 import { useContext, useEffect, useState } from "react";
 import { ago, api, companyHref, Draft, Job, LiveTab, Match, OUTCOME_LABEL, Person, Run, tok, Usage } from "../api";
+import { friendly } from "./Tracker";
 import { StatusCtx } from "../main";
-import { Dots, Icon, Logo, MatchText, Modal, useTick } from "../ui";
-import ConnectClaude from "../components/ConnectClaude";
+import { Dots, Icon, Logo, MatchText, Modal, useTick, poll } from "../ui";
 
 type Section = { heading: string; kind: string; items: string[] };
 type Resp = { job: Job; drafts: Draft[]; runs: Run[]; readiness: { ready: boolean; blockers: string[] } | null;
   busy?: string; can_fill: boolean; usage: Usage; match: Match; connections: Person[]; sections: Section[];
-  eligibility: { ok: boolean; reasons: string[]; notes: string[] } };
+  eligibility: { ok: boolean; reasons: string[]; notes: string[] };
+  facts: { pay: string; level: string; mode: string; category: string; sponsorship: string; degree: string } };
 
 const SOURCE: Record<string, string> = {
   answer_bank: "from your profile", learned: "reused from an answer you approved", generated: "written by AI", file: "file",
@@ -130,6 +131,43 @@ function LivePeek({ id, company }: { id: string; company: string }) {
   );
 }
 
+/** The cover letter, as employers will get it: read it, edit it, open the PDF that gets attached. */
+function CoverLetter({ id, d, busy, onChange }: { id: string; d?: Draft; busy: boolean; onChange: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [writing, setWriting] = useState(false);
+  const [err, setErr] = useState("");
+  const value = d ? (d.final_answer ?? d.answer) : "";
+  const [text, setText] = useState(value);
+  useEffect(() => setText(value), [value]);
+  const write = async () => {
+    setWriting(true); setErr("");
+    try { await api.post(`/api/jobs/${id}/cover-letter`); onChange(); } catch (e) { setErr((e as Error).message); }
+    setWriting(false);
+  };
+  const save = () => api.put(`/api/drafts/${d!.id}`, { final_answer: text, verdict: "green" }).then(() => { setEditing(false); onChange(); });
+  return (
+    <section className="block cover">
+      <div className="sub-h"><h3>Cover letter</h3>
+        {value && <a className="link" href={`/api/jobs/${id}/cover-letter.pdf?v=${encodeURIComponent(value.length + (d?.verdict ?? ""))}`} target="_blank" rel="noreferrer">Open the PDF that gets attached</a>}</div>
+      {!value ? (
+        <p className="muted">{d ? "Not written yet: connect an AI in Settings, then Redraft." : "This application doesn't ask for one."}{" "}
+          {!d && <button className="link" onClick={write} disabled={writing || busy}>{writing ? <><Dots />Writing</> : "Write one anyway"}</button>}</p>
+      ) : editing ? (<>
+        <textarea className="letter-edit" value={text} rows={Math.min(22, Math.max(8, Math.ceil(text.length / 80)))} onChange={e => setText(e.target.value)} />
+        <div className="row tight"><button className="btn primary sm" onClick={save}>Save</button><button className="link" onClick={() => { setText(value); setEditing(false); }}>Cancel</button></div>
+      </>) : (<>
+        <div className="letter">{value.split(/\n+/).map((p, i) => <p key={i}>{p}</p>)}</div>
+        <div className="row tight">
+          <button className="btn sm" onClick={() => setEditing(true)}>Edit</button>
+          {d && d.verdict !== "green" && <button className="link" onClick={() => api.put(`/api/drafts/${d.id}`, { verdict: "green" }).then(onChange)}>Looks right</button>}
+          {d?.verdict === "green" && <span className="ok-text small">Approved</span>}
+        </div>
+      </>)}
+      {err && <p className="warn-text small">{err}</p>}
+    </section>
+  );
+}
+
 const SECTION_ORDER = ["requirements", "responsibilities", "preferred", "pay", "benefits"];
 const SECTION_TITLE: Record<string, string> = { requirements: "Requirements", responsibilities: "Responsibilities",
   preferred: "Desired qualifications", pay: "Pay", benefits: "Benefits" };
@@ -140,8 +178,9 @@ export default function JobPage({ id, embedded = false }: { id: string; embedded
   const [r, setR] = useState<Resp | null>(null);
   const [err, setErr] = useState("");
   const [fullPosting, setFullPosting] = useState(false);
+  const [tab, setTab] = useState<"overview" | "company" | "application">("overview");
   const load = () => api.get<Resp>(`/api/jobs/${id}`).then(x => { setR(x); setErr(""); }).catch(e => setErr(e.message));
-  useEffect(() => { setR(null); setFullPosting(false); load(); const t = setInterval(load, 3000); return () => clearInterval(t); }, [id]);
+  useEffect(() => { setR(null); setFullPosting(false); setTab("overview"); load(); const t = poll(load, 3000); return () => t.stop(); }, [id]);
   if (err) return <div className="jobview"><p>{err}</p></div>;
   if (!r) return <div className="jobview"><p className="muted"><Dots />Loading</p></div>;
 
@@ -150,140 +189,157 @@ export default function JobPage({ id, embedded = false }: { id: string; embedded
   const res = job.research ?? {};
   const act = async (path: string, body?: object) => { await api.post(`/api/jobs/${id}/${path}`, body); refresh(); load(); };
   const autopilot = () => api.post("/api/jobs/batch", { action: "autopilot", ids: [id] }).then(() => { refresh(); load(); });
-  const needs = drafts.filter(d => ["amber", "red"].includes(state(d)));
-  const written = drafts.filter(d => !needs.includes(d) && (d.kind === "generated" || d.kind === "learned"));
-  const fromProfile = drafts.filter(d => !needs.includes(d) && !written.includes(d));
+  const isCover = (d: Draft) => /cover/i.test(d.field + " " + d.label);
+  const cover = drafts.find(isCover);
+  const needs = drafts.filter(d => !isCover(d) && ["amber", "red"].includes(state(d)));
+  const written = drafts.filter(d => !isCover(d) && !needs.includes(d) && (d.kind === "generated" || d.kind === "learned"));
+  const fromProfile = drafts.filter(d => !isCover(d) && !needs.includes(d) && !written.includes(d));
   const unapproved = fromProfile.filter(d => !d.verdict && !d.final_answer).length;
   const lastShot = runs.find(x => x.screenshot);
   const applied = job.status === "submitted";
   const byKind = Object.fromEntries(sections.map(s => [s.kind, s]));
   const people = res.people ?? [];
 
-  return (
-    <div className={`jobview ${embedded ? "embedded" : "page narrow"}`}>
-      {!embedded && <a className="back" href="#/matches"><Icon name="back" size={15} />Matches</a>}
+  const f = r.facts;
+  const where = job.locations.length ? job.locations.slice(0, 2).join("; ") + (job.locations.length > 2 ? ` +${job.locations.length - 2}` : "") : "";
+  const facts: [string, string][] = ([["dollar", f?.pay], ["level", f?.level], ["pin", where], ["globe", f?.mode],
+    ["doc", f?.category], ["passport", f?.sponsorship || (f?.degree ? `${f.degree} required` : "")]] as [string, string | undefined][])
+    .filter(([, v]) => !!v) as [string, string][];
+  const stage = applied ? (job.outcome ? OUTCOME_LABEL[job.outcome] : "Applied") : job.status === "filled" || job.status === "error" ? "Needs you"
+    : r.busy ? "Working on it" : job.status === "skipped" ? "Skipped" : "";
 
-      <header className="jv-head">
-        <Logo name={job.company} size={52} />
+  return (
+    <div className={`jobview ${embedded ? "embedded" : "page"}`}>
+      {!embedded && <a className="back" href="#/matches"><Icon name="back" size={14} />Matches</a>}
+
+      <header className="jv-top">
+        <Logo name={job.company} size={40} />
         <div className="grow">
           <a className="co" href={companyHref(job.company)}>{job.company}</a>
-          {res.what_the_team_builds && <p className="muted tagline">{res.what_the_team_builds}</p>}
+          {res.what_the_team_builds && <p className="muted tagline clamp1">{res.what_the_team_builds}</p>}
         </div>
-        {embedded && <a className="link small" href={`#/job/${id}`}>Open full page</a>}
-      </header>
-      <h1 className="jv-title">{job.title}</h1>
-      <ul className="facts">
-        {job.terms.length > 0 && <li>{job.terms.join(", ")}</li>}
-        {job.locations.length > 0 && <li>{job.locations.slice(0, 3).join("; ")}{job.locations.length > 3 ? ` and ${job.locations.length - 3} more` : ""}</li>}
-        {job.date_posted && <li>Posted {ago(job.date_posted)}</li>}
-        {job.sponsorship && <li>{job.sponsorship}</li>}
-        <li>Applies through {job.ats}. <a href={job.url} target="_blank" rel="noreferrer">See the posting</a></li>
-      </ul>
-
-      <div className="apply-bar">
-        {applied ? <p className="ok-text strong"><Icon name="check" size={16} /> Applied{job.outcome ? `. ${OUTCOME_LABEL[job.outcome]}.` : ""}</p>
-          : r.busy ? <p className="strong accent-text"><Dots />{r.busy === "drafting" ? "Researching and drafting answers" : "Autopilot is applying"}</p>
-          : (<>
-            <button className="btn primary" onClick={autopilot}>{unsure || job.status === "skipped" ? "Apply anyway" : "Apply with autopilot"}</button>
-            {drafts.length > 0 && r.can_fill && <button className="btn" onClick={() => act("fill", { submit: false })}>Fill it, I'll submit</button>}
-            {(job.status === "filled" || !r.can_fill) && <button className="link" onClick={() => act("submitted")}>I submitted it myself</button>}
+        <div className="jv-actions">
+          <a className="btn ghost sm" href={job.url} target="_blank" rel="noreferrer" title="Open the posting"><Icon name="ext" size={14} />Posting</a>
+          {!applied && (job.status === "filled" || !r.can_fill) && <button className="btn ghost sm" onClick={() => act("submitted")}>Mark applied</button>}
+          <button className={`btn ghost sm ${job.verdict === "red" ? "on" : ""}`} onClick={() => act("verdict", { verdict: job.verdict === "red" ? null : "red" })}>Not for me</button>
+          {applied ? null : r.busy ? <span className="btn sm" aria-busy><Dots />{r.busy === "filling" ? "Filling" : "Drafting"}</span> : (<>
+            {drafts.length > 0 && r.can_fill && <button className="btn sm" onClick={() => act("fill", { submit: false })}>Fill, I'll submit</button>}
+            <button className="btn primary sm" onClick={autopilot}>{unsure || job.status === "skipped" ? "Apply anyway" : "Apply"}</button>
           </>)}
+        </div>
+      </header>
+      <h1 className="jv-title">{job.title}{embedded && <a className="small jv-open" href={`#/job/${id}`}>Full page</a>}</h1>
+      <div className="jv-tags">
+        {stage && <span className={`tag ${applied ? "ok" : stage === "Needs you" ? "warn" : ""}`}>{stage}</span>}
+        {job.terms.map(t => <span key={t} className="tag">{t}</span>)}
+        {job.date_posted && <span className="tag quiet">Posted {ago(job.date_posted)}</span>}
+        {match.score != null && <span className="tag quiet">Resume match {match.matched.length}/{match.total}</span>}
+        <span className="tag quiet">via {job.ats}</span>
       </div>
-      {status && !status.llm.ok && <div className="note warn"><p>No AI is connected, so only answers from your profile get filled.</p><ConnectClaude compact /></div>}
-      {unsure && !applied && <div className="note warn"><p><strong>You may not qualify.</strong> {eligibility.reasons.join(" ")}</p>
-        <p className="small">Autopilot skips roles like this on its own. You can still apply: it's your call.</p></div>}
-      {job.hold_reason && job.status === "filled" && <p className="note warn">Autopilot held this for you: {job.hold_reason}. Check it in the browser below and submit, or click Submit there.</p>}
-      {job.error && !/connect/i.test(job.error) && <p className="note warn">{job.error}</p>}
+      {facts.length > 0 && <dl className="jv-facts">{facts.map(([icon, v]) => (
+        <div key={icon}><dt><Icon name={icon} size={15} /></dt><dd>{v}</dd></div>))}</dl>}
 
-      <LivePeek id={id} company={job.company} />
+      {status && !status.llm.ok && <p className="note warn">No AI is connected, so only answers from your profile get filled. <a href="#/settings">Choose an AI</a>.</p>}
+      {unsure && !applied && <p className="note warn"><strong>You may not qualify.</strong> {eligibility.reasons.join(" ")} Autopilot skips roles like this; Apply anyway is your call.</p>}
+      {job.hold_reason && job.status === "filled" && <p className="note warn">Held for you: {job.hold_reason}</p>}
+      {job.error && !/connect/i.test(job.error) && <p className="note warn">{friendly(job.error)}</p>}
 
-      <section className="block">
-        <h3>About the job</h3>
-        {res.summary && <p>{res.summary}</p>}
-        {SECTION_ORDER.filter(k => byKind[k]).map(k => (
-          <div key={k}><h4>{SECTION_TITLE[k]}</h4><ul>{byKind[k].items.map((t, i) => <li key={i}>{t}</li>)}</ul></div>
-        ))}
-        {!res.summary && sections.length === 0 && !job.description && <p className="muted">Jobsmith reads the posting when it drafts or applies.</p>}
-        {job.description && (<>
-          <button className="link" onClick={() => setFullPosting(v => !v)}>{fullPosting ? "Hide the full posting" : "Read the full posting"}</button>
-          {fullPosting && <pre className="posting">{job.description}</pre>}
-        </>)}
-      </section>
+      <div className="tabs jv-tabs" role="tablist">
+        {([["overview", "Overview"], ["company", "Company"], ["application", `Application${drafts.length ? ` (${drafts.length})` : ""}`]] as [typeof tab, string][]).map(([k, l]) => (
+          <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}>{l}</button>))}
+      </div>
+      <div className="jv-body">
+        <div className="jv-main">
+          <LivePeek id={id} company={job.company} />
+          {tab === "overview" && <>
 
-      <section className="block">
-        <h3>How your resume matches</h3>
-        {match.score == null ? <p className="muted">No posting text yet.</p> : (<>
-          <p><MatchText score={match.score} matched={match.matched.length} total={match.total} /> this posting asks for show up on your resume.</p>
-          {match.matched.length > 0 && <p><span className="muted">On your resume:</span> {match.matched.join(", ")}.</p>}
-          {match.missing.length > 0 && <p><span className="muted">Not on it:</span> {match.missing.join(", ")}.</p>}
-        </>)}
-        {res.fit_angles && res.fit_angles.length > 0 && (<><h4>Where you fit</h4><ul>{res.fit_angles.map(a => <li key={a.angle}>{a.angle}</li>)}</ul></>)}
-      </section>
+          <section className="block">
+            <div className="sub-h"><h3>About the job</h3>
+              {job.description && <div className="seg mini" role="tablist">
+                <button role="tab" aria-selected={!fullPosting} className={!fullPosting ? "on" : ""} onClick={() => setFullPosting(false)}>Summary</button>
+                <button role="tab" aria-selected={fullPosting} className={fullPosting ? "on" : ""} onClick={() => setFullPosting(true)}>Full posting</button></div>}</div>
+            {fullPosting ? <pre className="posting">{job.description}</pre> : (<>
+              {res.summary && <p>{res.summary}</p>}
+              {SECTION_ORDER.filter(k => byKind[k]).map(k => (
+                <div key={k}><h4>{SECTION_TITLE[k]}</h4><ul>{byKind[k].items.map((t, i) => <li key={i}>{t}</li>)}</ul></div>))}
+              {!res.summary && sections.length === 0 && (job.description
+                ? <pre className="posting">{job.description.slice(0, 1600)}{job.description.length > 1600 ? "…" : ""}</pre>
+                : <p className="muted">Jobsmith reads the posting when it drafts or applies.</p>)}
+            </>)}
+          </section>
 
-      <section className="block">
-        <h3>Get referred</h3>
-        {connections.length === 0 && people.length === 0 && (
-          <p className="muted">Nobody yet. <a href="#/profile">Import your LinkedIn connections</a> to see who you know at {job.company}.</p>
-        )}
-        {connections.length > 0 && (<>
-          <h4>People you know at {job.company}</h4>
-          <ul className="people">{connections.map(p => (
-            <li key={p.url || p.first_name + p.last_name}><a href={p.url} target="_blank" rel="noreferrer">{p.first_name} {p.last_name}</a>
-              <span className="muted">, {p.position}</span></li>))}</ul>
-        </>)}
-        {people.length > 0 && (<>
-          <h4>Hiring managers and alumni</h4>
-          <ul className="people">{people.map(p => (
-            <li key={p.name}>{p.source_url ? <a href={p.source_url} target="_blank" rel="noreferrer">{p.name}</a> : <strong>{p.name}</strong>}
-              <span className="muted">, {p.role}{p.why_relevant ? `. ${p.why_relevant}` : ""}</span></li>))}</ul>
-        </>)}
-        <details><summary>{job.referral_name ? `Referred by ${job.referral_name}` : "Someone referred you?"}</summary><Referral job={job} onSaved={load} /></details>
-      </section>
+          <section className="block">
+            <h3>Your resume against it</h3>
+            {match.score == null ? <p className="muted">No posting text yet.</p> : (<>
+              <p><MatchText score={match.score} matched={match.matched.length} total={match.total} /> this posting asks for are on your resume.</p>
+              {match.matched.length > 0 && <p className="small"><span className="muted">On it:</span> {match.matched.join(", ")}</p>}
+              {match.missing.length > 0 && <p className="small"><span className="muted">Missing:</span> {match.missing.join(", ")}</p>}
+            </>)}
+            {res.fit_angles && res.fit_angles.length > 0 && <ul className="small">{res.fit_angles.map(a => <li key={a.angle}>{a.angle}</li>)}</ul>}
+          </section>
 
-      <section className="block">
-        <div className="sub-h"><h3>Your answers{drafts.length ? ` (${drafts.length})` : ""}</h3>
-          {drafts.length > 0 && !r.busy && <button className="link" onClick={() => act("prepare")}>Redraft</button>}</div>
-        {drafts.length === 0 ? (
-          <p className="muted">None yet. Applying drafts every answer first. <button className="link" onClick={() => act("prepare")} disabled={!!r.busy}>Draft without applying</button></p>
-        ) : (<>
-          {readiness && !readiness.ready && !applied && (
-            <p className="muted">Autopilot would stop on {readiness.blockers.length} of these: {readiness.blockers.slice(0, 3).join("; ")}{readiness.blockers.length > 3 ? "; and more" : ""}.</p>)}
-          {needs.length > 0 && (<details open={needs.length <= 6}><summary>Needs you ({needs.length})</summary>
-            <ul className="answers">{needs.map(d => <AnswerRow key={d.id} d={d} onChange={load} />)}</ul></details>)}
-          {written.length > 0 && (<details open={!embedded}><summary>Written for this job ({written.length})</summary>
-            <ul className="answers">{written.map(d => <AnswerRow key={d.id} d={d} onChange={load} />)}</ul></details>)}
-          {fromProfile.length > 0 && (<details><summary>From your profile ({fromProfile.length})</summary>
-            <ProfileAnswers rows={fromProfile} onChange={load} approveAll={unapproved ? () => act("approve-standard") : undefined} /></details>)}
-        </>)}
-      </section>
+          </>}
+          {tab === "company" && (
+            <section className="block">
+              <h3>{job.company}</h3>
+              {res.what_the_team_builds && <p>{res.what_the_team_builds}</p>}
+              {res.values_and_culture ? <p>{res.values_and_culture}</p> : !res.what_the_team_builds && <p className="muted">Researched the first time Jobsmith applies here.</p>}
+              {res.tech_stack && res.tech_stack.length > 0 && <><h4>Stack</h4><p>{res.tech_stack.join(", ")}</p></>}
+              {res.red_flags && res.red_flags.length > 0 && <><h4>Worth knowing</h4><p>{res.red_flags.join(" ")}</p></>}
+              <p><a href={companyHref(job.company)}>Every role at {job.company}</a></p>
+            </section>)}
+          {tab === "application" && <>
+          <section className="block">
+            <div className="sub-h"><h3>Your answers{drafts.length - (cover ? 1 : 0) ? ` (${drafts.length - (cover ? 1 : 0)})` : ""}</h3>
+              {drafts.length > 0 && !r.busy && <button className="link small" onClick={() => act("prepare")}>Redraft</button>}</div>
+            {drafts.length === 0 ? (
+              <p className="muted">Drafted when it applies. <button className="link" onClick={() => act("prepare")} disabled={!!r.busy}>Draft now</button></p>
+            ) : (<>
+              {readiness && !readiness.ready && !applied && (
+                <p className="small muted">Autopilot would stop on {readiness.blockers.length}: {readiness.blockers.slice(0, 3).join("; ")}{readiness.blockers.length > 3 ? "; and more" : ""}.</p>)}
+              {needs.length > 0 && (<details open={needs.length <= 6}><summary>Needs you ({needs.length})</summary>
+                <ul className="answers">{needs.map(d => <AnswerRow key={d.id} d={d} onChange={load} />)}</ul></details>)}
+              {written.length > 0 && (<details open={!embedded}><summary>Written for this job ({written.length})</summary>
+                <ul className="answers">{written.map(d => <AnswerRow key={d.id} d={d} onChange={load} />)}</ul></details>)}
+              {fromProfile.length > 0 && (<details><summary>From your profile ({fromProfile.length})</summary>
+                <ProfileAnswers rows={fromProfile} onChange={load} approveAll={unapproved ? () => act("approve-standard") : undefined} /></details>)}
+            </>)}
+          </section>
 
-      <section className="block">
-        <h3>About {job.company}</h3>
-        {res.summary ? <p>{res.values_and_culture || res.what_the_team_builds || "Researched when Jobsmith applies."}</p> : <p className="muted">Researched the first time Jobsmith applies here.</p>}
-        {res.tech_stack && res.tech_stack.length > 0 && <p><span className="muted">Stack:</span> {res.tech_stack.join(", ")}.</p>}
-        {res.red_flags && res.red_flags.length > 0 && <p><span className="muted">Worth knowing:</span> {res.red_flags.join(" ")}</p>}
-        <p><a href={companyHref(job.company)}>Everything at {job.company}</a></p>
-        <details><summary>Your call on this job{job.verdict ? `: ${job.verdict === "green" ? "good fit" : "not for me"}` : ""}</summary>
-          <div className="row tight">
-            <button className={`btn sm ${job.verdict === "green" ? "on" : ""}`} onClick={() => act("verdict", { verdict: "green" })}>Good fit</button>
-            <button className={`btn sm ${job.verdict === "red" ? "on" : ""}`} onClick={() => act("verdict", { verdict: "red" })}>Not for me</button>
-          </div>
-        </details>
-      </section>
+          <CoverLetter id={id} d={cover} busy={!!r.busy} onChange={load} />
+          </>}
+        </div>
 
-      {runs.length > 0 && (
-        <section className="block">
-          <details><summary>Activity{usage.tokens ? `, ${tok(usage.tokens)} AI tokens` : ""}</summary>
-            {runs.slice(0, 5).map(x => (
-              <div key={x.id} className="run">
-                <p><strong>{x.kind === "fill" ? "Filled the form" : x.kind === "draft" ? "Researched and drafted" : x.kind === "submit" ? "Submitted" : x.kind}</strong>
-                  <span className="muted"> {new Date(x.started_at * 1000).toLocaleString()}</span></p>
-                <pre className="log">{x.log}</pre>
-              </div>))}
-            {lastShot && <p><a href={`/api/runs/${lastShot.id}/screenshot`} target="_blank" rel="noreferrer">Screenshot of the filled form</a></p>}
-          </details>
-        </section>
-      )}
+        <aside className="jv-rail">
+          <section className="rail-card">
+            <h3>Get referred for this role</h3>
+            {connections.length === 0 && people.length === 0 && (
+              <p className="small muted">No one yet. <a href="#/profile">Import LinkedIn</a> to see who you know here.</p>)}
+            {connections.length > 0 && (<>
+              <p className="rail-h">You know</p>
+              <ul className="people">{connections.map(p => (
+                <li key={p.url || p.first_name + p.last_name}><a href={p.url} target="_blank" rel="noreferrer">{p.first_name} {p.last_name}</a>
+                  <span className="muted small clamp1">{p.position}</span></li>))}</ul></>)}
+            {people.length > 0 && (<>
+              <p className="rail-h">Hiring managers and alumni</p>
+              <ul className="people">{people.map(p => (
+                <li key={p.name}>{p.source_url ? <a href={p.source_url} target="_blank" rel="noreferrer">{p.name}</a> : <strong>{p.name}</strong>}
+                  <span className="muted small clamp1">{p.role}</span></li>))}</ul></>)}
+            <details><summary className="small">{job.referral_name ? `Referred by ${job.referral_name}` : "Someone referred you?"}</summary><Referral job={job} onSaved={load} /></details>
+          </section>
+
+          {runs.length > 0 && (
+            <section className="rail-card">
+              <details><summary><h3 className="inline">History</h3>{usage.tokens ? <span className="small muted"> {tok(usage.tokens)} tokens</span> : null}</summary>
+                <ul className="hist">{runs.slice(0, 6).map(x => (
+                  <li key={x.id}><strong>{x.kind === "fill" ? "Filled" : x.kind === "draft" ? "Drafted" : x.kind === "submit" ? "Submitted" : x.kind}</strong>
+                    <span className="muted small"> {ago(x.started_at)}</span>
+                    <details><summary className="small">Log</summary><pre className="log">{x.log}</pre></details></li>))}</ul>
+                {lastShot && <a className="small" href={`/api/runs/${lastShot.id}/screenshot`} target="_blank" rel="noreferrer">Screenshot of the filled form</a>}
+              </details>
+            </section>)}
+        </aside>
+      </div>
     </div>
   );
 }
