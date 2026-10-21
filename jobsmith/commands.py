@@ -114,8 +114,12 @@ async def discover(company: str, keywords: list[str]) -> list[dict]:
 
 async def run(text: str, mode: str | None = None) -> dict:
     """mode: None = your setting; "autopilot" = submit when confident; "copilot" = stop before submit."""
+    from .config import DEMO
     _ensure_table()
     text = text.strip()
+    if DEMO:
+        return {"log": ["Demo mode: this is a practice copy, so nothing is searched or applied to. Try it in your real Jobsmith."],
+                "started": [], "found": 0}
     log: list[str] = []
     found: list[str] = []
     explicit = False

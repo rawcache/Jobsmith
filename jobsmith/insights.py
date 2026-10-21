@@ -105,6 +105,9 @@ def _user_from(url: str, host: str) -> str | None:
 
 async def github(url: str, refresh: bool = False) -> dict | None:
     import httpx
+    from .config import DEMO
+    if DEMO:
+        return None
     user = _user_from(url, r"github\.com")
     if not user:
         return None
@@ -151,6 +154,9 @@ def parse_devpost(page: str) -> dict:
 
 async def devpost(url: str, refresh: bool = False) -> dict | None:
     import httpx
+    from .config import DEMO
+    if DEMO:
+        return None
     user = _user_from(url, r"devpost\.com")
     if not user:
         return None
@@ -284,3 +290,61 @@ def posting_sections(description: str) -> list[dict]:
         elif cur is not None and len(cur["items"]) < 14:
             cur["items"].append(line)
     return [s for s in out if s["items"] and s["kind"] != "other"]
+
+
+# --------------------------------------------------------------------------- the facts row on a job page
+PAY = re.compile(r"\$\s?(\d{2,3}(?:,\d{3})+|\d{2,3}(?:\.\d+)?\s?[kK]|\d{2,3}(?:\.\d{1,2})?)"
+                 r"(?:\s*(?:-|–|—|to)\s*\$?\s?(\d{2,3}(?:,\d{3})+|\d{2,3}(?:\.\d+)?\s?[kK]|\d{2,3}(?:\.\d{1,2})?))?"
+                 r"\s*(?:USD\s*)?(?:/|per\s+|an?\s+)?\s*(hour|hr|year|yr|annually|annum)?", re.I)
+LEVELS = [("Intern", r"\bintern(ship)?\b|\bco-?op\b"), ("New grad", r"new ?grad|university grad|early career|entry[- ]level|\bgraduate\b"),
+          ("Principal", r"\bprincipal\b"), ("Staff", r"\bstaff\b"), ("Senior", r"\bsenior\b|\bsr\.?\b"), ("Lead", r"\blead\b")]
+
+
+def _money(x: str) -> float:
+    x = x.replace(",", "").replace(" ", "")
+    return float(x[:-1]) * 1000 if x[-1:] in "kK" else float(x)
+
+
+def _fmt(v: float, hourly: bool) -> str:
+    return f"${v:,.0f}" if hourly or v < 1000 else f"${v / 1000:,.0f}k"
+
+
+def pay_of(text: str) -> str:
+    """'$45 - $55/hr' or '$140k - $180k/yr' from a posting, or ''. Ignores small amounts like '$5 credit'."""
+    for m in PAY.finditer(text or ""):
+        lo = _money(m.group(1))
+        hi = _money(m.group(2)) if m.group(2) else None
+        unit = (m.group(3) or "").lower()
+        hourly = unit in ("hour", "hr") or (not unit and lo < 300)
+        if hourly and not (12 <= lo <= 300):
+            continue
+        if not hourly and lo < 20000:
+            continue
+        rng = _fmt(lo, hourly) + (f" - {_fmt(hi, hourly)}" if hi and hi > lo else "")
+        return rng + ("/hr" if hourly else "/yr")
+    return ""
+
+
+def job_facts(job: dict) -> dict:
+    """Pay, level, where and how, degree and sponsorship: what Simplify shows in a row under the title."""
+    text = job.get("description") or ""
+    title = job.get("title") or ""
+    level = next((name for name, pat in LEVELS if re.search(pat, title, re.I)), "")
+    if not level and any("new grad" in t.lower() for t in job.get("terms") or []):
+        level = "New grad"
+    if not level and job.get("terms"):
+        level = "Intern"
+    locs = job.get("locations") or []
+    hay = " ".join(locs) + " " + text[:3000]
+    mode = ("Remote" if re.search(r"\bremote\b", " ".join(locs), re.I) else
+            "Hybrid" if re.search(r"\bhybrid\b", hay, re.I) else
+            "Remote" if re.search(r"\bfully remote\b|\bremote[- ]first\b", hay, re.I) else
+            "In person" if locs else "")
+    spons = job.get("sponsorship") or ""
+    if not spons and re.search(r"(not|unable to|cannot|won't|will not)\s+(provide\s+|offer\s+)?(visa\s+)?sponsor", text, re.I):
+        spons = "No visa sponsorship"
+    if re.search(r"u\.?s\.? citizen(ship)? (is )?required|must be a u\.?s\.? citizen", text, re.I):
+        spons = "U.S. citizens only"
+    degrees = job.get("degrees") or []
+    return {"pay": pay_of(text), "level": level, "mode": mode, "category": job.get("category") or "",
+            "sponsorship": spons, "degree": ", ".join(degrees[:2]) if isinstance(degrees, list) else str(degrees)}

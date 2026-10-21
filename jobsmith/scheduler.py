@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import time
 
-from . import commands, db, match, runner, sources
+from . import commands, db, match, power, runner, sources
 
 _task: asyncio.Task | None = None
 state = {"last_run": None, "next_run": None, "last_summary": ""}
@@ -42,9 +42,15 @@ def notify(title: str, message: str) -> None:
 
 def pick_new_jobs(limit: int) -> list[str]:
     s = db.get_settings()
-    rows = db.q("""SELECT id, company, ats, fit_score FROM jobs WHERE active=1 AND status IN ('new','fetched')
+    rows = db.q("""SELECT id, company, ats, fit_score FROM jobs WHERE active=1 AND status IN ('new','fetched','drafted')
                    AND verdict IS NULL AND COALESCE(fit_score,0) >= ? AND eligibility NOT LIKE '%"ok": false%'
-                   ORDER BY fit_score DESC, date_posted DESC LIMIT 400""", (s.get("min_fit_score") or 40,))
+                   ORDER BY status='drafted' DESC, fit_score DESC, date_posted DESC LIMIT 400""", (s.get("min_fit_score") or 40,))
+    # Network hiccups ("too slow", "couldn't reach") get two more tries, an hour apart.
+    rows += db.q("""SELECT j.id, j.company, j.ats, j.fit_score FROM jobs j WHERE j.active=1 AND j.status='error'
+                    AND j.updated_at < ? AND (j.error LIKE '%imeout%' OR j.error LIKE '%nodename%' OR j.error LIKE '%ERR_%'
+                         OR j.error LIKE '%onnect%' OR j.error LIKE '%name or service%')
+                    AND (SELECT COUNT(*) FROM runs r WHERE r.job_id=j.id AND r.status='error') < 3""",
+                 (time.time() - 3600,))
     per_company: dict[str, int] = {}
     for r in db.q("SELECT company, COUNT(*) n FROM jobs WHERE status IN ('submitted','filling','filled','drafted') "
                   "GROUP BY company"):
@@ -64,20 +70,30 @@ def pick_new_jobs(limit: int) -> list[str]:
 
 
 async def run_once(reason: str = "scheduled") -> dict:
+    from .config import DEMO
+    if DEMO:
+        state.update(last_run=time.time(), last_summary="Demo mode: nothing is checked or sent.")
+        return {"summary": state["last_summary"], "started": []}
     s = db.get_settings()
     results = await sources.sync_all()
     match.rescore()
     new = sum(r.get("added", 0) for r in results)
     room = min(int(s.get("auto_max_per_run") or 10), commands._remaining_today())
     picked = pick_new_jobs(room)
-    started = commands.queue(picked)
-    if s.get("gmail_address") and s.get("gmail_app_password"):
-        from . import outcomes
+    # Autopilot may have been switched off while the lists were syncing: then only look, don't start.
+    from . import llm
+    waiting_ai = llm.gemini_limited() and not llm._local_ok() and db.get_setting("llm_backend") in ("gemini_api", "auto")
+    go = (reason == "manual" or enabled(db.get_settings())) and not power.paused() and not waiting_ai
+    started = commands.queue(picked) if go else []
+    from . import outcomes
+    if outcomes.email_ready():
         o = await outcomes.check_inbox()
         if o.get("new_outcomes"):
             notify("Jobsmith: replies", f"{o['new_outcomes']} new replies from companies (see Jobs).")
     summary = (f"Synced {len(results)} list{'s' if len(results) != 1 else ''} ({new} new postings). "
-               f"Started {len(started)} application{'s' if len(started) != 1 else ''}.")
+               + (f"Started {len(started)} application{'s' if len(started) != 1 else ''}." if go else
+                  "Waiting for Gemini's free limit to reset before applying." if waiting_ai else
+                  "Paused: on battery." if power.paused() else "Autopilot is off, so nothing was started."))
     state.update(last_run=time.time(), last_summary=summary)
     commands._ensure_table()
     db.x("INSERT INTO commands(text, result, created_at) VALUES(?,?,?)",
@@ -103,6 +119,7 @@ async def _loop() -> None:
                 if time.time() >= last + interval:
                     await run_once()
                     db.set_settings({"auto_last_run": time.time()})
+                    state["next_run"] = (state["last_run"] or time.time()) + interval
             else:
                 state["next_run"] = None
         except Exception as e:  # never let the loop die

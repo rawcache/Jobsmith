@@ -91,15 +91,17 @@ def score_job(job: dict, s: dict, vocab: set[str], bias: dict[str, float]) -> tu
 
     locs = " ".join(job.get("locations") or [])
     tl = s.get("target_locations") or []
+    wanted_place = False
     if tl:
-        if any(t.lower() in locs.lower() for t in tl):
+        if any(re.search(r"(?<![A-Za-z])" + re.escape(t) + r"(?![A-Za-z])", locs, re.I) for t in tl):
             score += 8
+            wanted_place = True
             reasons.append("+ location")
         else:
             score -= 10
             reasons.append("- location")
 
-    if job.get("locations") and not any(_in_us(l) for l in job["locations"]):
+    if job.get("locations") and not wanted_place and not any(_in_us(l) for l in job["locations"]):
         score -= 25
         reasons.append("- outside the US")
 
@@ -144,10 +146,44 @@ def score_job(job: dict, s: dict, vocab: set[str], bias: dict[str, float]) -> tu
     if b:
         score += max(-25, min(15, b))
         reasons.append(f"{'+' if b > 0 else '-'} your past flags")
+    for why, pts in value_bonus(job, s.get("values") or []):
+        score += pts
+        reasons.append(f"+ you value {why}")
     if not job.get("active"):
         score -= 50
         reasons.append("- closed")
     return max(0.0, min(100.0, round(score, 1))), reasons
+
+
+# What you said you value in a role (up to 3, from setup or Job preferences): small nudges toward roles that
+# show it. Only things a posting can actually show; the rest still shapes cover letters and "why us" answers.
+VALUES = ["Learning and mentorship", "Hard technical problems", "Impact on real users", "Pay", "Well-known company",
+          "Small team, big ownership", "Path to a full-time offer", "Work-life balance", "A mission I care about",
+          "Remote or flexible"]
+
+
+def value_bonus(job: dict, values: list[str]) -> list[tuple[str, float]]:
+    from . import clout, insights
+    if not values:
+        return []
+    text = f"{job.get('title', '')} {job.get('description', '')}"
+    out: list[tuple[str, float]] = []
+    known = clout.rank(job.get("company") or "")
+    for v in values[:3]:
+        if v == "Well-known company" and known is not None:
+            out.append(("well-known companies", 6 if known < 60 else 3))
+        elif v == "Small team, big ownership" and (known is None and re.search(
+                r"\b(startup|seed|series [a-c]|early[- ]stage|founding|small team)\b", text, re.I)):
+            out.append(("small teams", 5))
+        elif v == "Pay" and insights.pay_of(job.get("description") or ""):
+            out.append(("pay (listed)", 3))
+        elif v == "Path to a full-time offer" and re.search(r"return offer|full[- ]time (conversion|offer)|convert to full", text, re.I):
+            out.append(("a full-time path", 5))
+        elif v == "Learning and mentorship" and re.search(r"\bmentor(ship|s|ing)?\b|learning|grow(th)?", text, re.I):
+            out.append(("mentorship", 3))
+        elif v == "Remote or flexible" and re.search(r"\b(remote|hybrid|flexible)\b", " ".join(job.get("locations") or []) + " " + text[:3000], re.I):
+            out.append(("flexibility", 4))
+    return out
 
 
 def rescore(job_ids: list[str] | None = None) -> int:

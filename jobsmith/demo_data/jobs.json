@@ -1,0 +1,125 @@
+[
+ {
+  "id": "demo-acme",
+  "company": "Acme Robotics",
+  "title": "Software Engineering Intern, Autonomy",
+  "status": "filled",
+  "terms": [
+   "Summer 2027"
+  ],
+  "locations": [
+   "Boston, MA"
+  ],
+  "category": "Software",
+  "description": "Acme Robotics builds autonomy software for warehouse robots. Our interns ship code to customer sites in their first month.\n\nRequirements\n- Pursuing a BS or MS in Computer Science, Computer Engineering or a related field\n- Experience with Python and C++\n- Familiarity with ROS, Linux and Git\n\nResponsibilities\n- Build perception and planning features that ship to customer sites\n- Write tests and help run fleet experiments\n- Work with a mentor on the motion planning team\n\nStrong interns receive a return offer for a full-time role.\n\nPay: $45 - $55 per hour. Hybrid in Boston, MA. We are unable to sponsor visas for this role.",
+  "hold_reason": "AI wasn't sure (52% confident): Why Acme?"
+ },
+ {
+  "id": "demo-northwind",
+  "company": "Northwind",
+  "title": "Hardware Engineer Intern",
+  "status": "submitted",
+  "outcome": "interview",
+  "terms": [
+   "Summer 2027"
+  ],
+  "locations": [
+   "Austin, TX"
+  ],
+  "category": "Hardware"
+ },
+ {
+  "id": "demo-globex",
+  "company": "Globex",
+  "title": "Embedded Software Intern",
+  "status": "submitted",
+  "terms": [
+   "Summer 2027"
+  ],
+  "locations": [
+   "Seattle, WA"
+  ],
+  "category": "Hardware"
+ },
+ {
+  "id": "demo-initech",
+  "company": "Initech",
+  "title": "New Grad Software Engineer",
+  "status": "submitted",
+  "outcome": "rejected",
+  "terms": [
+   "New Grad"
+  ],
+  "locations": [
+   "New York, NY"
+  ]
+ },
+ {
+  "id": "demo-umbrella",
+  "company": "Umbrella Labs",
+  "title": "ML Engineer Intern",
+  "status": "error",
+  "error": "404 Not Found",
+  "terms": [
+   "Summer 2027"
+  ],
+  "locations": [
+   "Remote in USA"
+  ],
+  "category": "AI/ML/Data"
+ },
+ {
+  "id": "demo-hooli",
+  "company": "Hooli",
+  "title": "Firmware Intern",
+  "status": "drafted",
+  "terms": [
+   "Summer 2027"
+  ],
+  "locations": [
+   "San Francisco, CA"
+  ],
+  "category": "Hardware"
+ },
+ {
+  "id": "demo-stark",
+  "company": "Stark Industries",
+  "title": "FPGA Design Intern",
+  "status": "submitted",
+  "outcome": "received",
+  "terms": [
+   "Summer 2027"
+  ],
+  "locations": [
+   "Los Angeles, CA"
+  ],
+  "category": "Hardware"
+ },
+ {
+  "id": "demo-wayne",
+  "company": "Wayne Enterprises",
+  "title": "Software Engineer 1, New Grad",
+  "status": "filled",
+  "terms": [
+   "New Grad"
+  ],
+  "locations": [
+   "New York, NY"
+  ],
+  "hold_reason": "Emailed verification code needed"
+ },
+ {
+  "id": "demo-soylent",
+  "company": "Soylent Systems",
+  "title": "Data Engineering Intern",
+  "status": "submitted",
+  "outcome": "assessment",
+  "terms": [
+   "Summer 2027"
+  ],
+  "locations": [
+   "Remote in USA"
+  ],
+  "category": "AI/ML/Data"
+ }
+]

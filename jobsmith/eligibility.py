@@ -26,6 +26,13 @@ NO_SPONSOR = re.compile(r"(will not|won'?t|cannot|can'?t|unable to|does not|do n
                         r"not\s+offer\s+sponsorship|sponsorship\s+(is\s+)?not\s+available", re.I)
 PHD_REQ = re.compile(r"(currently\s+)?(pursuing|enrolled\s+in|working\s+towards?)\s+(a\s+)?(phd|ph\.d\.?|doctoral|doctorate)", re.I)
 MASTERS_REQ = re.compile(r"(currently\s+)?(pursuing|enrolled\s+in)\s+(a\s+)?(master'?s|ms|m\.s\.)\s+(degree|program|in)", re.I)
+PHD_TITLE = re.compile(r"\b(ph\.?\s?d\.?|doctoral|doctorate|post-?doc(toral)?)\b", re.I)
+MASTERS_TITLE = re.compile(r"\b(master'?s|m\.s\.|mba)\b(?!\s*(or|/)\s*(bachelor|b\.?s))", re.I)
+PHD_REQUIRED = re.compile(r"(ph\.?\s?d\.?|doctorate|doctoral degree)\s+(degree\s+)?(is\s+)?(required|needed)|"
+                          r"requires?\s+(a\s+)?(ph\.?\s?d|doctorate)|(must|should)\s+(have|hold)\s+(a\s+)?(ph\.?\s?d|doctorate)|"
+                          r"(completed|earned|hold)\s+(a\s+)?(ph\.?\s?d|doctorate)", re.I)
+MASTERS_REQUIRED = re.compile(r"master'?s\s+(degree\s+)?(is\s+)?(required|needed)|requires?\s+(a\s+)?master'?s|"
+                              r"(must|should)\s+(have|hold)\s+(a\s+)?master'?s", re.I)
 UNDERGRAD_OK = re.compile(r"bachelor'?s|b\.s\.|bs/ms|undergrad|bs,|bs or|bs in", re.I)
 YEARS = re.compile(r"(\d{1,2})\s*\+?\s*(?:or more\s+|plus\s+)?years?['’]?\s+(?:of\s+)?(?:professional\s+|industry\s+|relevant\s+|"
                    r"full[- ]time\s+|hands[- ]on\s+|work\s+)*experience", re.I)
@@ -41,6 +48,30 @@ def _yes(v: str) -> bool:
 
 def _no(v: str) -> bool:
     return (v or "").strip().lower() in ("no", "n", "false", "none")
+
+
+def level_of(degree: str) -> str | None:
+    d = (degree or "").lower().replace(".", "")
+    if re.search(r"\bphd\b|doctor", d):
+        return "phd"
+    if re.search(r"master|\bms\b|\bmeng\b|\bmba\b", d):
+        return "master"
+    if re.search(r"bachelor|\bbs\b|\bba\b|\bbse?\b|\bbeng\b|undergrad", d):
+        return "bachelor"
+    return None
+
+
+def _degree_name(level: str) -> str:
+    return {"bachelor": "bachelor's", "master": "master's", "phd": "PhD"}[level]
+
+
+def _degree_names(tags: list[str]) -> list[str]:
+    out = []
+    for t in tags:
+        lv = level_of(t)
+        if lv and _degree_name(lv) not in out:
+            out.append(_degree_name(lv))
+    return out or tags
 
 
 def check(job: dict, ans: dict | None = None) -> dict:
@@ -78,9 +109,23 @@ def check(job: dict, ans: dict | None = None) -> dict:
     if _yes(v("needs_sponsorship")) and NO_SPONSOR.search(text):
         reasons.append("Doesn't sponsor visas, and you need sponsorship")
 
-    # degree level
+    # degree level: the job list's own degree tags, the title, then what the posting says is required
     degree = (v("degree") or "").lower()
     has_grad_degree = any(w in degree for w in ("master", "ms", "m.s", "phd", "ph.d", "doctor"))
+    level = level_of(degree)
+    tags = [str(d).lower() for d in (job.get("degrees") or [])]
+    if tags and level:
+        wanted = {"bachelor": ("bachelor", "undergrad"), "master": ("master",), "phd": ("phd", "ph.d", "doctor")}[level]
+        if not any(w in t for t in tags for w in wanted):
+            reasons.append(f"For {' or '.join(_degree_names(tags))} graduates; you're getting a {_degree_name(level)}")
+    if level != "phd" and PHD_TITLE.search(title):
+        reasons.append("A PhD role")
+    elif level == "bachelor" and MASTERS_TITLE.search(title):
+        reasons.append("A master's role")
+    elif level == "bachelor" and PHD_REQUIRED.search(text) and not UNDERGRAD_OK.search(text):
+        reasons.append("Requires a PhD")
+    elif level == "bachelor" and MASTERS_REQUIRED.search(text) and not UNDERGRAD_OK.search(text):
+        reasons.append("Requires a master's degree")
     if PHD_REQ.search(text) and "phd" not in degree.replace(".", "") and not UNDERGRAD_OK.search(text) \
             and not re.search(r"master'?s\s+or|or\s+(a\s+)?master", text, re.I):
         reasons.append("For PhD students")
@@ -88,6 +133,11 @@ def check(job: dict, ans: dict | None = None) -> dict:
         reasons.append("For master's students")
 
     # graduation window (internships and new grad roles state these a lot)
+    if grad_year and re.search(r"new grad|graduate|university grad|early career|entry", title, re.I) and \
+            not re.search(r"\bintern", title, re.I):
+        ym = re.search(r"\b(20\d\d)\b", title)
+        if ym and int(ym.group(1)) < grad_year:
+            reasons.append(f"For {ym.group(1)} graduates; you graduate in {grad_year}")
     if grad_year:
         for m in GRAD_WINDOW.finditer(text):
             lo, hi = int(m.group(1)), int(m.group(2) or m.group(1))

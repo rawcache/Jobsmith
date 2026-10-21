@@ -179,9 +179,12 @@ async def fetch_generic(url: str, client: httpx.AsyncClient) -> dict:
 
 
 async def fetch_job(job_id: str) -> dict:
+    from .config import DEMO
     job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (job_id,)))
     if not job:
         raise KeyError(job_id)
+    if DEMO:
+        return job
     async with httpx.AsyncClient(headers=UA, timeout=40, follow_redirects=True) as client:
         kind = job["ats"]
         if kind == "greenhouse":

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 
+from .skills import voice
 from . import classify, db, jobdetail, learn, profile
 from . import llm
 from .llm import LLMError, complete_json
@@ -131,6 +132,14 @@ def _derived(canon: str, ans: dict, job: dict | None = None) -> tuple[str, bool]
     if canon == "us_person":
         cit = v("us_citizen").lower()
         return ("Yes" if cit == "yes" else ""), c("us_citizen")
+    if canon == "citizenship_status":
+        cit = v("us_citizen").lower()
+        if cit == "yes":
+            return "U.S. Citizen", c("us_citizen")
+        return v("citizenships"), c("citizenships")
+    if canon == "full_address":
+        parts = [v("address_line1"), v("city"), " ".join(x for x in (v("state_province"), v("postal_code")) if x)]
+        return ", ".join(p for p in parts if p), all(c(k) for k in ("address_line1", "city") if v(k))
     if canon == "country" and not v("country"):
         # A US citizen, or someone with a US state in their location, lives in the United States.
         if v("us_citizen").lower() == "yes" or state_from_location(v("location")):
@@ -153,6 +162,9 @@ MONTHS = ["January", "February", "March", "April", "May", "June", "July", "Augus
 
 
 def _month_year(text: str) -> tuple[str, str]:
+    iso = re.search(r"(\d{4})-(\d{1,2})", text or "")          # "2025-05"
+    if iso and 1 <= int(iso.group(2)) <= 12:
+        return MONTHS[int(iso.group(2)) - 1], iso.group(1)
     m = re.search(r"([A-Za-z]{3,})\.?\s*(\d{4})", text or "")
     if not m:
         y = re.search(r"(\d{4})", text or "")
@@ -172,6 +184,8 @@ def _edu_date(field: dict) -> tuple[str, int] | None:
     """Greenhouse's education date pickers, by field name or (on other sites, or via the extension) by label."""
     if field["field"] in EDU_DATE_FIELDS:
         return EDU_DATE_FIELDS[field["field"]]
+    if re.search(r"employ|experience|work history", field.get("group") or "", re.I):
+        return None
     m = EDU_DATE_LABEL.match(field.get("label", "").strip())
     if m:
         return ("enrollment_start" if m.group(1).lower() in ("start", "enrollment") else "graduation_date",
@@ -207,6 +221,11 @@ def deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | Non
         return None
     value, confirmed = _derived(canon, ans, job)
     sensitive = canon in profile.SENSITIVE_KEYS
+    if canon in ("acknowledge_notices", "ai_tools_consent") and value.lower() != "yes":
+        return {"kind": "answer_bank", "canon": canon, "answer": "", "confidence": 1.0,
+                "issues": ["Asks you to agree to something; you chose to answer these yourself"] if field["required"] else []}
+    if canon == "referral_name" and not value and re.search(r"\bn/?a\b|if not|if no\b|otherwise", field["label"], re.I):
+        return {"kind": "answer_bank", "canon": canon, "answer": "N/A", "confidence": 1.0, "issues": []}
     if canon == "referral_name" and not value:
         return {"kind": "answer_bank", "canon": canon, "answer": "", "confidence": 1.0, "issues":
                 ["Asks who referred you; add the referrer on this job if you have one"] if field["required"] else []}
@@ -280,8 +299,16 @@ def build_prompt(job: dict, fields: list[dict]) -> str:
         parts.append("COMPANY RESEARCH (use fit_angles and talking_points to make answers specific):\n" +
                      json.dumps(r, ensure_ascii=False)[:4000])
     parts.append("FACTS (cite by id):\n" + profile.facts_prompt_block())
+    vals = db.get_setting("values") or []
+    if vals:
+        parts.append("WHAT THE APPLICANT VALUES IN A ROLE (their own words; use only for 'why this company/role' answers and "
+                     "cover letters, and only where this job honestly offers it): " + ", ".join(vals[:3]))
     bank = {k: v["value"] for k, v in profile.answers().items() if v["value"] and k not in profile.EEO_KEYS}
     parts.append("APPLICANT BASICS:\n" + json.dumps(bank, ensure_ascii=False))
+    notes = voice.style_notes()
+    if notes:
+        parts.append("THE APPLICANT'S VOICE (measured from their own writing; match it, and reuse their own sentences "
+                     "from applicants_own_writing_on_this where they fit): " + notes)
     rules = learn.guidance_rules()
     if rules:
         parts.append("USER GUIDANCE (from past feedback):\n- " + "\n- ".join(rules))
@@ -299,6 +326,10 @@ def build_prompt(job: dict, fields: list[dict]) -> str:
         lim = _limit(f)
         if lim:
             q["limit"] = f"{lim[1]} {lim[0]}"
+        if f["qtype"] in ("textarea", "text") and not f["options"]:
+            own = voice.search(f["label"], job, k=2)
+            if own:
+                q["applicants_own_writing_on_this"] = [o["text"][:900] for o in own]
         ex = learn.similar_examples(f["label"], f["qtype"], k=2)
         if ex:
             q["approved_answers_to_similar_questions"] = [
@@ -311,7 +342,8 @@ def build_prompt(job: dict, fields: list[dict]) -> str:
 _NUM = re.compile(r"(?<![\w.])\d[\d,]*(?:\.\d+)?%?")
 
 
-def validate(field: dict, answer: str, fact_ids: list[str], facts: dict[str, dict]) -> tuple[list[str], list[str]]:
+def validate(field: dict, answer: str, fact_ids: list[str], facts: dict[str, dict],
+             job_text: str = "") -> tuple[list[str], list[str]]:
     """Return (issues, valid_fact_ids)."""
     issues = []
     valid = [f for f in fact_ids if f in facts]
@@ -331,7 +363,7 @@ def validate(field: dict, answer: str, fact_ids: list[str], facts: dict[str, dic
             issues.append("No supporting facts cited")
     # every number must appear in the applicant's facts or the job posting
     corpus = " ".join(f["text"] for f in facts.values()) + " " + " ".join(
-        v["value"] for v in profile.answers().values())
+        v["value"] for v in profile.answers().values()) + " " + job_text     # "66 Degrees" is the company, not a claim
     corpus_nums = {n.replace(",", "").rstrip("%") for n in _NUM.findall(corpus)}
     for n in _NUM.findall(answer):
         core = n.replace(",", "").rstrip("%")
@@ -363,7 +395,10 @@ async def generate(job: dict, fields: list[dict]) -> dict[str, dict]:
         answer = (a.get("answer") or "").strip()
         if f["options"] and answer not in f["options"]:
             answer = classify.pick_option(answer, f["options"]) or answer
-        issues, valid = validate(f, answer, a.get("fact_ids") or [], facts)
+        issues, valid = validate(f, answer, a.get("fact_ids") or [], facts,
+                                 f"{job.get('company', '')} {job.get('title', '')} {job.get('description', '')}")
+        if f["qtype"] in ("textarea", "text") and len(answer) > 80:
+            issues += voice.style_issues(answer)
         conf = float(a.get("confidence") or 0)
         if conf < 0.5 and not issues:
             issues.append("Low confidence: " + (a.get("rationale") or "the facts don't clearly cover this"))
@@ -488,7 +523,14 @@ async def answer_fields(job: dict, fields: list[dict], skip_locked: bool = True)
         gen_error = str(e)
         for f in to_generate:
             results[f["field"]] = {"kind": "generated", "answer": "", "confidence": 0,
-                                   "issues": ["Needs your AI connected (Settings), then Redraft"]}
+                                   "issues": ["Needs your AI connected (Settings), or more of your writing (Voice), then Redraft"]}
+    # No AI, the free limit ran out, or the AI came back empty: answer from your own writing instead.
+    for f in to_generate:
+        r = results.get(f["field"]) or {}
+        if f["qtype"] in ("textarea", "text") and not f["options"] and not (r.get("answer") or "").strip():
+            mine = voice.compose(job, f)
+            if mine:
+                results[f["field"]] = mine
     return results, gen_error
 
 
@@ -553,10 +595,10 @@ def readiness(job_id: str) -> dict:
             continue  # optional (e.g. EEO) left blank on purpose
         if d["issues"]:
             blockers.append(f"{d['label']}: {d['issues'][0]}")
-        elif d["kind"] == "generated" and learn.trust_for(d["label"]) < threshold and \
-                (not autopilot or (d["confidence"] or 0) < min_conf or not val.strip()):
-            blockers.append(f"{d['label']}: AI isn't confident in this answer" if autopilot else
-                            f"{d['label']}: not yet trusted (needs {threshold} approvals of similar answers)")
+        elif d["kind"] in ("generated", "voice", "agent") and ((d["confidence"] or 0) < min_conf or not val.strip()) and \
+                learn.trust_for(d["label"]) < threshold:
+            who = "Your-writing match" if d["kind"] == "voice" else "AI"
+            blockers.append(f"{d['label']}: {who} wasn't sure ({round((d['confidence'] or 0) * 100)}% confident)")
         elif d["kind"] == "learned" and d["confidence"] < (0.6 if autopilot else 0.8):
             blockers.append(f"{d['label']}: reused answer has little support yet")
     return {"ready": not blockers, "blockers": blockers}
