@@ -31,8 +31,8 @@ Work top to bottom. Tick each box in this file as it's done and commit the tick 
 - [ ] Make `.github/workflows/ci.yml` pass on ubuntu, macOS and Windows. Fix Windows failures or mark the specific
       tests `skipif` with a reason and an issue link.
 - [ ] Turn on GitHub Pages (Settings → Pages → Source: GitHub Actions) so `pages.yml` publishes `site/`.
-- [ ] Bump the version to 0.4.0 in `pyproject.toml`, `jobsmith/__init__.py`, `extension/manifest.json`.
-- [ ] Fill in `CHANGELOG.md` 0.4.0 from the commits.
+- [x] Bump the version to 0.4.0 in `pyproject.toml`, `jobsmith/__init__.py`, `extension/manifest.json`.
+- [x] Fill in `CHANGELOG.md` 0.4.0 from the commits.
 - [ ] Follow `docs/RELEASING.md` to tag `v0.4.0` and publish the GitHub release.
 
 ## 4. Contributor on-ramp
