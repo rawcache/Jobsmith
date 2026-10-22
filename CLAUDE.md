@@ -94,3 +94,7 @@ engineer for three jobs. Run `codex review --help` and `codex exec --help` once 
 
 Never use `--dangerously-bypass-approvals-and-sandbox` or `-s danger-full-access`, never let Codex commit or push,
 and never give it anything from `data/`. Long tasks can take minutes; run them in the background and keep working.
+
+Always run `git add` as its own command before `git commit`, never in the same command. The commit hook in
+`.claude/settings.json` runs Codex before the whole command starts, so a combined `git add && git commit` is
+reviewed with nothing staged.
