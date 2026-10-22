@@ -663,10 +663,39 @@ def test_moved_project_folder_keeps_uploaded_files(tmp_path):
     f.write_bytes(b"%PDF")
     try:
         assert _rehome("/Users/someone/wyzard/data/uploads/rehome-test.pdf") == str(f)
+        assert _rehome(r"C:\Users\someone\wyzard\data\uploads\rehome-test.pdf") == str(f)   # saved on Windows
+        assert _rehome("uploads/rehome-test.pdf") is None                                     # relative: left alone
         assert _rehome("/Users/someone/wyzard/data/uploads/missing.pdf") is None
         assert _rehome(str(f)) is None
     finally:
         f.unlink()
+
+
+def test_no_platform_only_time_formats():
+    """%-I and %-d work on macOS and Linux but Windows strftime rejects them, so the app would crash there."""
+    import re
+    from pathlib import Path
+    from jobsmith import config
+    src = Path(config.__file__).parent
+    hits = [f"{f.relative_to(src)}:{n}" for f in src.rglob("*.py")
+            for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1)
+            if re.search(r"%-[a-zA-Z]", line.split("#")[0])]
+    assert not hits, hits
+
+
+def test_clock_drops_leading_zeros():
+    import datetime as dt
+    from jobsmith.ask import clock
+    today = dt.datetime.now()
+    at = lambda **k: today.replace(second=0, microsecond=0, **k).timestamp()
+    assert clock(at(hour=0, minute=5)) == "12:05 AM"
+    assert clock(at(hour=9, minute=5)) == "9:05 AM"
+    assert clock(at(hour=12, minute=0)) == "12:00 PM"
+    assert clock(at(hour=14, minute=30)) == "2:30 PM"
+    three_days = (today - dt.timedelta(days=3)).replace(hour=7, minute=15)
+    assert clock(three_days.timestamp()) == f"{three_days:%a} 7:15 AM"
+    assert clock(dt.datetime(2020, 3, 4, 14, 5).timestamp()) == "Mar 4"
+    assert clock(None) == ""
 
 
 def test_autopilot_waits_for_the_first_supervised_run():

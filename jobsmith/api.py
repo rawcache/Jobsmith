@@ -126,7 +126,7 @@ async def notifications():
                       "at": r["received_at"] or now, "href": f"#/job/{r['job_id']}"})
     q = llm.quota_status()
     if q and q["limited"]:
-        at = time.strftime("%-I:%M %p", time.localtime(q["resets_at"]))
+        at = time.strftime("%I:%M %p", time.localtime(q["resets_at"])).lstrip("0")
         items.append({"id": "quota", "kind": "quota", "title": f"{q['name']}'s free limit is used up until {at}",
                       "detail": "smith is writing until then." if q.get("fallback") else "Answers wait until it resets.", "at": now})
     ok, msg = await llm.available_cached(role="write")

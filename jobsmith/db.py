@@ -171,12 +171,13 @@ def _rehome(p: str | None) -> str | None:
     """A file saved under an old data folder (the project folder was moved or renamed): find it in today's."""
     if not p:
         return None
-    from pathlib import Path
+    import re
+    from pathlib import Path, PureWindowsPath
     from .config import DATA_DIR
     path = Path(p)
-    if path.exists() or not path.is_absolute():
+    if path.exists() or not (path.is_absolute() or p.startswith("/") or PureWindowsPath(p).is_absolute()):
         return None
-    parts = path.parts
+    parts = [s for s in re.split(r"[\\/]+", p) if s]    # saved on any OS: split on / and \
     for i in range(len(parts) - 1, -1, -1):
         if parts[i] in ("uploads", "runs", "attach", "documents"):
             cand = DATA_DIR.joinpath(*parts[i:])

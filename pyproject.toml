@@ -18,6 +18,7 @@ dependencies = [
   "psutil>=5.9",
   "textual>=0.80",
   "mcp>=1.2",
+  "tzdata; sys_platform == 'win32'",   # zoneinfo has no time-zone database on Windows
 ]
 
 [project.optional-dependencies]

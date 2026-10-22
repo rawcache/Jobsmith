@@ -770,7 +770,7 @@ class Board(View):
         b.clear()
         for it in (notes or {}).get("items", [])[:30]:
             mark = Text("●", style=EMBER) if it.get("urgent") else Text("•", style=EMBER if it.get("unread") else FAINT)
-            b.add_row(mark, it["title"][:60], time.strftime("%-I:%M", time.localtime(it["at"])) if it.get("at") else "", key=it["id"])
+            b.add_row(mark, it["title"][:60], time.strftime("%I:%M", time.localtime(it["at"])).lstrip("0") if it.get("at") else "", key=it["id"])
         b.move_cursor(row=min(k3, max(0, b.row_count - 1)))
         self.query_one("#t", Static).update(self.heading(("Board", "bold"), ("   live from your engine · r review · w watch · t take over · esc back", DIM)))
 
@@ -909,7 +909,7 @@ class Jobsmith(App):
         nxt = home.get("next_run")
         more = []
         if on and nxt:
-            more.append("next run " + time.strftime("%-I:%M %p", time.localtime(nxt)))
+            more.append("next run " + time.strftime("%I:%M %p", time.localtime(nxt)).lstrip("0"))
         if home.get("queued"):
             more.append(f"{home['queued']} good matches queued")
         t = Text.assemble((f"Welcome back{', ' + name if name else ''}!", "bold"), "\n",
