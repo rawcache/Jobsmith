@@ -342,7 +342,7 @@ class GeminiAPI(Backend):
             if daily:
                 _learn_limit(gemini_used_today())
             raise QuotaError("Gemini's free tier limit is used up for now"
-                             + (f" (daily limit; it resets at {time.strftime('%-I:%M %p', time.localtime(gemini_reset()))})." if daily else "."))
+                             + (f" (daily limit; it resets at {time.strftime('%I:%M %p', time.localtime(gemini_reset())).lstrip('0')})." if daily else "."))
         if r.status_code in (400, 403) and ("API_KEY_INVALID" in r.text or "API key not valid" in r.text):
             raise LLMError("That Gemini key isn't valid. Copy it again from aistudio.google.com/apikey.")
         if r.status_code != 200:
@@ -449,7 +449,7 @@ async def recheck_gemini() -> dict:
     if ok:
         return {"ok": True, "message": "Gemini is back. Autopilot will use it again.", "quota": quota_status()}
     if gemini_limited():
-        at = time.strftime("%-I:%M %p", time.localtime(gemini_reset()))
+        at = time.strftime("%I:%M %p", time.localtime(gemini_reset())).lstrip("0")
         return {"ok": False, "message": f"Still at today's free limit. Google resets it at midnight Pacific ({at} your time).",
                 "quota": quota_status()}
     return {"ok": False, "message": msg, "quota": quota_status()}

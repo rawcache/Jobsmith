@@ -1,5 +1,6 @@
 """Skills (outreach, follow-ups), email providers, the bell, the extension's panel, and the practice copy."""
 import json
+import os
 import subprocess
 import sys
 import time
@@ -136,6 +137,8 @@ def test_demo_mode_never_opens_a_site(monkeypatch):
 
 def test_practice_copy_seeds_in_its_own_folder(tmp_path):
     env = {"JOBSMITH_DATA": str(tmp_path / "demo"), "JOBSMITH_DEMO": "1", "JOBSMITH_DEMO_DATA": str(tmp_path / "demo"), "PATH": "/usr/bin:/bin"}
+    if os.name == "nt":     # Windows can't start asyncio's sockets without SYSTEMROOT
+        env["SYSTEMROOT"] = os.environ["SYSTEMROOT"]
     (tmp_path / "demo").mkdir()
     r = subprocess.run([sys.executable, "-m", "jobsmith", "demo-seed"], env=env, capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stderr[-1500:]

@@ -169,7 +169,8 @@ def ago(ts: float | None, now: float | None = None) -> str:
         return f"{int(s // 3600)}h ago"
     if s < 7 * 86400:
         return f"{int(s // 86400)}d ago"
-    return dt.datetime.fromtimestamp(ts).strftime("%b %-d")
+    d = dt.datetime.fromtimestamp(ts)
+    return f"{d:%b} {d.day}"
 
 
 def clock(ts: float | None) -> str:
@@ -177,7 +178,8 @@ def clock(ts: float | None) -> str:
         return ""
     d = dt.datetime.fromtimestamp(ts)
     today = dt.datetime.now().date()
-    return d.strftime("%-I:%M %p") if d.date() == today else d.strftime("%a %-I:%M %p") if (today - d.date()).days < 7 else d.strftime("%b %-d")
+    hm = d.strftime("%I:%M %p").lstrip("0")         # no %-I: Windows strftime rejects it
+    return hm if d.date() == today else f"{d:%a} {hm}" if (today - d.date()).days < 7 else f"{d:%b} {d.day}"
 
 
 def _in(col: str, since: float | None, until: float | None, company: str | None) -> tuple[str, list]:
