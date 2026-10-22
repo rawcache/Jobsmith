@@ -1,16 +1,24 @@
-"""Fill a local mock of Greenhouse's form in a real (headless) browser."""
+"""Fill local application forms in a real (headless) browser."""
 import json
+import os
 import shutil
+from pathlib import Path
 
 import pytest
 
 from jobsmith import db, draft, jobdetail, profile, runner, sources
-from jobsmith.fill import greenhouse
+from jobsmith.fill import generic, greenhouse
 from jobsmith.fill.base import page_confirms_submission, scan_form
 from conftest import FIXTURES
 
-pytestmark = pytest.mark.skipif(shutil.which("chromium") is None and not __import__("os").path.exists("/opt/pw-browsers"),
-                                reason="no browser available")
+def _browser_available():
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as pw:
+        executable = os.environ.get("JOBSMITH_CHROMIUM_PATH") or pw.chromium.executable_path
+    return Path(executable).exists() or shutil.which("chromium") is not None or Path("/opt/pw-browsers").exists()
+
+
+pytestmark = pytest.mark.skipif(not _browser_available(), reason="no browser available")
 
 
 async def _job_with_drafts(fake_llm, tmp_path):
@@ -91,6 +99,49 @@ async def test_scan_generic_form(page):
     assert fields["Resume/CV"]["qtype"] == "file"
 
 
+async def test_lever_generic_fill_stops_before_submit(tmp_path, page):
+    await profile.ingest_document(FIXTURES / "sample_resume.tex")
+    answers = {k: v["value"] for k, v in profile.answers().items()}
+    values = {
+        '[name="name"]': f"{answers['first_name']} {answers['last_name']}",
+        '[name="email"]': answers["email"],
+        '[name="phone"]': answers["phone"],
+        "#location-input": answers["location"],
+        '[name="org"]': "Northwind Labs",
+        '[name="urls[LinkedIn]"]': answers["linkedin"],
+        '[name="urls[GitHub]"]': answers["github"],
+        '[name="urls[Other]"]': "https://example.com/alex-rivera",
+        '[name="cards[demo-question-1][field0]"]': "5000 USD net per month",
+        '[name="cards[demo-question-2][field0]"]': "C2: Proficiency / Native",
+        '[name="cards[demo-question-3][field0]"]': "I enjoy building useful software and solving engineering problems.",
+    }
+    url = (FIXTURES / "lever_form.html").resolve().as_uri()
+    fields = await generic.scan(page, url)
+    assert {f["field"] for f in fields} == set(values) | {"#resume-upload-input"}
+    assert {f["qtype"] for f in fields} == {"text", "textarea", "radio", "file"}
+    assert all(not f["value"] for f in fields)
+    drafts = [dict(f, value=values.get(f["field"], "")) for f in fields]
+    resume = tmp_path / "resume.pdf"
+    resume.write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+    result = await generic.fill(page, drafts, {"resume": str(resume)})
+
+    assert not result["failed"], result
+    assert len(result["filled"]) == len(fields)
+    for selector, expected in values.items():
+        if "demo-question-2" in selector:
+            assert await page.locator(selector + ":checked").input_value() == expected
+        else:
+            assert await page.input_value(selector) == expected
+    assert await page.input_value('[name="name"]') == "Alex Rivera"
+    assert await page.input_value('[name="email"]') == "alex.rivera@example.edu"
+    assert await page.locator("#resume-upload-input").evaluate("el => [...el.files].map(f => f.name)") == ["resume.pdf"]
+    assert await page.locator("#btn-submit").is_visible()
+    assert await page.evaluate("[window.submitClicks, window.submitEvents]") == [0, 0]
+    assert page.url == url
+    assert not await page_confirms_submission(page)
+
+
 async def test_runner_fill_and_detect_submission(fake_llm, tmp_path):
     jid, _ = await _job_with_drafts(fake_llm, tmp_path)
     db.set_settings({"browser_channel": "", "headless": True, "autonomy": "autonomous", "trust_threshold": 0})
@@ -149,6 +200,46 @@ async def test_multistep_signin_handoff_and_review(fake_llm, tmp_path, page):
     assert not await page.locator("text=Thank you for applying").count()       # stopped before Submit
     saved = {d["field"]: d for d in draft.drafts_for(jid)}
     assert saved["#why"]["kind"] == "generated" and saved["#first"]["kind"] == "answer_bank"
+
+
+async def test_generic_fills_ashby_style_form_stops_before_submit(page, tmp_path):
+    """The generic filler (fill/generic.py) handles a hand-written Ashby-style form: scan the fields,
+    fill them from the made-up demo profile, and stop before Submit. Sponsorship is left for the
+    user (confirmed profile only), so the filler is never handed an answer for it."""
+    from jobsmith.fill import generic
+    resume = tmp_path / "resume.pdf"
+    resume.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    await page.goto((FIXTURES / "ashby_style_form.html").resolve().as_uri())
+
+    fields = {f["label"]: f for f in await scan_form(page)}
+    # the demo profile's answers, keyed by the label the form shows
+    answers = {
+        "Name": "Alex Rivera",
+        "Email": "alex.rivera@example.edu",
+        "LinkedIn Profile": "https://www.linkedin.com/in/alexrivera",
+        "GitHub Profile": "https://github.com/alexrivera",
+        "Why do you want to work here?": "I built perception systems on NVIDIA Jetson and want to keep shipping them.",
+        "How did you hear about us?": "LinkedIn",
+    }
+    drafts = []
+    for label, value in answers.items():
+        f = fields[label]
+        drafts.append({**f, "value": value})
+    drafts.append({**fields["Resume"], "value": ""})            # file comes from the files map
+
+    res = await generic.fill(page, drafts, {"resume": str(resume)})
+    assert not res["failed"], res
+
+    assert await page.input_value("#_systemfield_name") == "Alex Rivera"
+    assert await page.input_value("#_systemfield_email") == "alex.rivera@example.edu"
+    assert await page.input_value("#field-linkedin") == "https://www.linkedin.com/in/alexrivera"
+    assert "Jetson" in await page.input_value("#field-why")
+    assert await page.input_value("#field-heard") == "LinkedIn"
+    assert await page.evaluate("document.querySelector('#_systemfield_resume').files.length") == 1
+    assert await page.input_value("#field-sponsorship") == ""      # left for the user
+    # counted directly: the blank required sponsorship field alone would block a submit
+    assert await page.evaluate("[window.submitClicks, window.submitEvents]") == [0, 0]
+    assert not await page_confirms_submission(page)                # nothing submitted
 
 
 async def test_real_react_select_ignores_other_option_lists(page):
