@@ -6,21 +6,24 @@ Work top to bottom. Tick each box in this file as it's done and commit the tick 
 
 ## 1. Clean the working tree
 
-- [ ] `git status`: about 84 changed files since the last push. Review them by area, not one by one.
-- [ ] Confirm nothing personal is staged: no `data/`, `_to_delete/`, `downloaded_simplify/`, `.env`, keys, tokens,
+- [x] `git status`: about 84 changed files since the last push. Review them by area, not one by one.
+- [x] Confirm nothing personal is staged: no `data/`, `_to_delete/`, `downloaded_simplify/`, `.env`, keys, tokens,
       real resumes or real names. Search: `git diff --cached | grep -iE "AIza|sk-ant|sk-[A-Za-z0-9]{20}|password|@gmail"`.
-- [ ] Remove dead files the restructure left behind (old `skills.py`, `outreach.py`, `followups.py` if present).
+- [x] Remove dead files the restructure left behind (old `skills.py`, `outreach.py`, `followups.py` if present).
 - [ ] Commit in logical pieces: skills restructure · voice skill · MCP server · terminal app + ask box · cobalt
       redesign · docs. Push to `main`.
 
 ## 2. Make the public claims true
 
-- [ ] List every site the README, site/index.html and SKILL.md files say works "end to end".
-- [ ] For each, confirm a test in `tests/test_fill.py` fills a saved fixture of that site up to the submit button.
-      Lever and Ashby currently go through `fill/generic.py` with no site fixture.
-- [ ] Either add fixtures + tests for Lever and Ashby (save a real public posting's form HTML, strip anything
+- [x] List every site the README, site/index.html and SKILL.md files say works "end to end".
+      Only Greenhouse is claimed end to end; Lever/Ashby are described as "filled generically".
+- [x] For each, confirm a test in `tests/test_fill.py` fills a saved fixture of that site up to the submit button.
+      Lever and Ashby go through `fill/generic.py` and had no site fixture before this phase.
+- [x] Either add fixtures + tests for Lever and Ashby (save a real public posting's form HTML, strip anything
       personal) or change the wording to "Greenhouse end to end; Lever, Ashby and most single-page forms filled
-      generically".
+      generically". Added `tests/fixtures/lever_form.html` (sanitized real capture) and
+      `tests/fixtures/ashby_style_form.html` (hand-written, modeled on Ashby's layout) + tests through
+      `fill/generic.py`, stopping before Submit.
 - [ ] Same check for the numbers in the README (tests count, sites, sources).
 
 ## 3. CI and release
@@ -54,5 +57,9 @@ Work top to bottom. Tick each box in this file as it's done and commit the tick 
 - [ ] Record 30 seconds in the practice copy: the terminal asks "what's waiting for me?", autopilot applies with the
       hammer animating, one application held for review and approved. Save as `docs/images/demo.gif` (under 8 MB)
       and put it at the top of the README.
+
+## Carry to Phase 1
+
+- [ ] Capture a sanitized real Ashby application form and test the generic filler against it.
 
 Phase 0 is done when every box is ticked and the gate passes. Then start Phase 1 (`docs/PHASE1.md`, to be written).
