@@ -141,3 +141,21 @@ def test_job_name_prefers_the_tab_then_the_record_then_the_id():
     assert app.job_name("r1") == ("Globex", "Data Intern")
     assert app.job_name("r1", {"company": "Globex Corp", "title": ""}) == ("Globex Corp", "Data Intern")
     assert app.job_name("gone") == ("gone", "")
+
+
+def test_timers_survive_the_app_closing(engine):
+    """The logo animates every 0.1 s and engine updates repaint the welcome box; a tick that lands after the
+    widgets are removed (quitting) must be skipped, not crash. Seen on CI as NoMatches('#logo')."""
+    from jobsmith.tuiapp import Jobsmith
+    db.conn()
+
+    async def go():
+        app = Jobsmith(engine, splash=False)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause(0.3)
+            for sel in ("#welcome", "#live", "#think", "#status"):
+                await app.query_one(sel).remove()
+            app.strike = 3
+            app.animate()                                          # would raise NoMatches('#logo')
+            app.apply_state({"active": {}, "demo": True}, [], {}, {})   # would raise NoMatches('#hello')
+    asyncio.run(go())
