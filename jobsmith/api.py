@@ -53,6 +53,21 @@ async def _startup():
     asyncio.create_task(smith.wake())
 
 
+class ShowIn(BaseModel):
+    speed: float = 1.0
+
+
+@app.post("/api/demo/autopilot-show")
+async def autopilot_show(s: ShowIn | None = None):
+    """Practice copy only: play three made-up applications through autopilot (see showcase.py)."""
+    from . import showcase
+    try:
+        started = showcase.start(max(0.0, min(5.0, (s or ShowIn()).speed)))
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    return {"started": started, "playing": showcase.running()}
+
+
 @app.post("/api/shutdown")
 async def shutdown():
     """The terminal restarts an engine left running by an older version of Jobsmith."""

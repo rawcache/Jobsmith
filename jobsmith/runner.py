@@ -213,7 +213,10 @@ def live_list() -> list[dict]:
     out = []
     for jid, v in list(LIVE.items()):
         page = v.get("page")
-        if page is None or page.is_closed():
+        gone = page is None or page.is_closed()
+        # showcase.py's practice entries never have a tab: list them while they play or wait for you, and let a
+        # submitted one expire like any other
+        if gone and (not v.get("practice") or v.get("phase") == "submitted"):
             if v.get("phase") not in ("submitted",) or time.time() - v.get("since", 0) > 600:
                 LIVE.pop(jid, None)
                 continue
