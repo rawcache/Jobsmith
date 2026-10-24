@@ -204,6 +204,16 @@ def test_install_sh_writes_its_log_to_a_new_file(tmp_path):
 
 
 @sh_only
+def test_install_sh_keeps_a_log_it_was_told_to_write(tmp_path):
+    """CI names the log (JOBSMITH_INSTALL_LOG) to check that nothing was built; it is kept after a success too."""
+    named = tmp_path / "install.log"
+    r, _ = _run_sh(tmp_path, "200", _release("v0.4.2", WHEEL), install_fails="network",
+                   env={"JOBSMITH_INSTALL_LOG": str(named)})
+    assert r.returncode == 0, r.stderr
+    assert named.exists() and "Trying once more" in r.stdout
+
+
+@sh_only
 def test_install_sh_trusts_a_mirror_instead_of_pypi(tmp_path):
     """Someone who points uv at their own package mirror may have no route to pypi.org at all."""
     r, log = _run_sh(tmp_path, "200", _release("v0.4.2", WHEEL), pypi_down=True,
@@ -319,4 +329,20 @@ def test_install_ps1_shows_a_short_message_when_a_package_wont_install(tmp_path)
     assert "Jobsmith couldn't install a package for this computer" in r.stdout
     assert f"{REPO}/issues/new" in r.stdout and "cryptography==50.0.2" in r.stdout
     assert len(r.stdout.splitlines()) < 35
+    full = Path(re.search(r"\(Full log: (.+)\)", r.stdout).group(1).strip())   # all of stderr, kept
+    assert "Compiling openssl-sys 300" in full.read_text()
     assert not (tmp_path / "doctor.ran").exists()
+
+
+@ps_only
+@pytest.mark.parametrize("named", [False, True])
+def test_install_ps1_removes_its_own_log_once_installed(tmp_path, named):
+    """Its own temp log goes once the install works; one CI named (JOBSMITH_INSTALL_LOG) stays."""
+    log = tmp_path / "ci" / "install.log"
+    log.parent.mkdir()
+    before = set(tmp_path.iterdir())
+    r, _ = _run_ps1(tmp_path, _rest_release(_release("v0.4.2", WHEEL)), "$global:LASTEXITCODE = 0",
+                    env={"JOBSMITH_INSTALL_LOG": str(log)} if named else None)
+    assert r.returncode == 0, (r.stdout, r.stderr)
+    assert log.exists() == named
+    assert {p.name for p in set(tmp_path.iterdir()) - before} <= {"uv.log", "doctor.ran"}
