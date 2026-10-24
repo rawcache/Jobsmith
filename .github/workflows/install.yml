@@ -30,6 +30,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       JOBSMITH_INSTALL_LOG: ${{ github.workspace }}/install.log    # kept for the checks below and on failure
+      JOBSMITH_GITHUB_TOKEN: ${{ github.token }}    # shared runners hit GitHub's anonymous rate limit
     steps:
       - uses: actions/checkout@v4      # the installers themselves; nothing else from the checkout is used
       - uses: actions/download-artifact@v4
