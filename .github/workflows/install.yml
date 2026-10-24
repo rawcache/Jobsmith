@@ -28,6 +28,8 @@ jobs:
         # macos-15-intel: Intel Macs, which lack wheels for some packages' newest versions (cryptography 50)
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest, windows-11-arm]
     runs-on: ${{ matrix.os }}
+    env:
+      JOBSMITH_INSTALL_LOG: ${{ github.workspace }}/install.log    # kept for the checks below and on failure
     steps:
       - uses: actions/checkout@v4      # the installers themselves; nothing else from the checkout is used
       - uses: actions/download-artifact@v4
@@ -40,7 +42,6 @@ jobs:
           echo "$(uname -sm), uv before: $(command -v uv || echo none)"
           if [ -d dist ]; then export JOBSMITH_WHEEL="$(ls "$PWD"/dist/*.whl)"; fi
           sh install.sh
-          cp "${TMPDIR:-/tmp}/jobsmith-install.log" install.log
       - name: Run install.ps1
         if: runner.os == 'Windows'
         shell: powershell
@@ -49,7 +50,6 @@ jobs:
           if (Test-Path dist) { $env:JOBSMITH_WHEEL = (Get-ChildItem dist\*.whl).FullName }
           .\install.ps1
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          Copy-Item (Join-Path $env:TEMP "jobsmith-install.log") install.log
       - name: Nothing was built from source
         shell: bash
         run: |

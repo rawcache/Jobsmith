@@ -75,8 +75,10 @@ if ($wheel) {
   $src = @($native | ForEach-Object { "--no-build-package"; $_ }) + $url
 }
 Write-Host "Installing Jobsmith $ref (this can take a minute or two)"
-# The full output goes to a log, so a failure shows a short message instead of pages of build output.
-$log = Join-Path $env:TEMP "jobsmith-install.log"
+# The full output goes to a log, so a failure shows a short message instead of pages of build output. A new file of
+# its own, never a fixed name; kept only on failure. CI names its own (JOBSMITH_INSTALL_LOG).
+$log = $env:JOBSMITH_INSTALL_LOG
+if (-not $log) { $log = [System.IO.Path]::GetTempFileName() }
 function Install-Tool {
   # Python 3.13, the version CI tests (.python-version); left to choose, uv may download any version 3.11-3.13.
   # uv writes progress to stderr; with "Stop", Windows PowerShell would treat the first line as a fatal error.
@@ -114,6 +116,7 @@ if (-not $ok) {
   }
   exit 1
 }
+if (-not $env:JOBSMITH_INSTALL_LOG) { Remove-Item -Path $log -ErrorAction SilentlyContinue }
 $bin = uv tool dir --bin
 if ($bin) { $env:Path = "$bin;$env:Path" }
 jobsmith doctor

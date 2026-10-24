@@ -185,8 +185,31 @@ def test_install_sh_shows_a_short_message_when_a_package_wont_install(tmp_path):
     assert len(_installs(log)) == 1                                   # a build failure isn't retried
     assert "Jobsmith couldn't install a package for this computer" in r.stderr
     assert f"{REPO}/issues/new" in r.stderr and "Failed to build `cryptography==50.0.2`" in r.stderr
-    assert len(r.stderr.splitlines()) < 35 and (tmp_path / "jobsmith-install.log").exists()
+    assert len(r.stderr.splitlines()) < 35
+    full = Path(re.search(r"\(Full log: (.+)\)", r.stderr).group(1))   # everything is kept for the issue
+    assert full.parent == tmp_path and "Compiling openssl-sys 299" in full.read_text()
     assert not (tmp_path / "jobsmith.log").exists()                  # no doctor run against an old copy
+
+
+@sh_only
+def test_install_sh_writes_its_log_to_a_new_file(tmp_path):
+    """Never through a fixed name another user could have planted as a symlink; removed once the install works."""
+    target = tmp_path / "precious"
+    target.write_text("keep me")
+    (tmp_path / "jobsmith-install.log").symlink_to(target)
+    r, _ = _run_sh(tmp_path, "200", _release("v0.4.2", WHEEL))
+    assert r.returncode == 0, r.stderr
+    assert target.read_text() == "keep me"
+    assert not [p for p in tmp_path.iterdir() if p.name.startswith("jobsmith-install.") and not p.is_symlink()]
+
+
+@sh_only
+def test_install_sh_trusts_a_mirror_instead_of_pypi(tmp_path):
+    """Someone who points uv at their own package mirror may have no route to pypi.org at all."""
+    r, log = _run_sh(tmp_path, "200", _release("v0.4.2", WHEEL), pypi_down=True,
+                     env={"UV_DEFAULT_INDEX": "https://mirror.example/simple"})
+    assert r.returncode == 0, r.stderr
+    assert _installs(log) == [["--no-build", WHEEL]]
 
 
 @sh_only
@@ -218,7 +241,7 @@ def _run_ps1(tmp_path: Path, fake_rest: str, uv_body: str, pypi_up: bool = True,
               f"& '{ROOT / 'install.ps1'}'\n")
     r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
                        capture_output=True, text=True, timeout=60,
-                       env={**os.environ, "TEMP": str(tmp_path), **(env or {})})
+                       env={**os.environ, "TEMP": str(tmp_path), "TMP": str(tmp_path), **(env or {})})
     return r, log
 
 
@@ -276,9 +299,20 @@ def test_install_ps1_tries_again_when_the_connection_drops(tmp_path):
 
 
 @ps_only
+def test_install_ps1_gives_up_on_a_connection_that_keeps_dropping(tmp_path):
+    body = "Write-Error 'error: Failed to fetch: https://pypi.org/simple/x/ (dns error)'; $global:LASTEXITCODE = 2"
+    r, log = _run_ps1(tmp_path, _rest_release(_release("v0.4.2", WHEEL)), body)
+    assert r.returncode != 0 and len(_installs(log)) == 2, (r.stdout, r.stderr)
+    assert "connection to pypi.org keeps dropping" in r.stdout and "open an issue" not in r.stdout
+    assert not (tmp_path / "doctor.ran").exists()
+
+
+@ps_only
 def test_install_ps1_shows_a_short_message_when_a_package_wont_install(tmp_path):
-    body = ("Write-Error 'error: Failed to build `cryptography==50.0.2`'; "
-            "1..300 | ForEach-Object { Write-Error \"   Compiling openssl-sys $_\" }; $global:LASTEXITCODE = 1")
+    """A real program writing hundreds of lines to stderr, as uv does: Windows PowerShell with "Stop" would turn
+    the first one into a crash."""
+    body = ('cmd /c "echo error: Failed to build cryptography==50.0.2 1>&2 & '
+            'for /L %i in (1,1,300) do @echo    Compiling openssl-sys %i 1>&2 & exit /b 1"')
     r, log = _run_ps1(tmp_path, _rest_release(_release("v0.4.2", WHEEL)), body)
     assert r.returncode != 0 and "Done" not in r.stdout, (r.stdout, r.stderr)
     assert len(_installs(log)) == 1
