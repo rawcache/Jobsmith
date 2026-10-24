@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.4.1 (2026-10-24)
+
+### Added
+- `jobsmith demo show`: watch autopilot apply to three made-up applications in the practice copy, with the real
+  terminal app's progress bars. Two are submitted and one is held for you to review. Nothing real is opened or sent.
+
+### Changed
+- The one-line installers install the latest release, not unreleased changes. If GitHub can't be reached, they stop
+  and ask you to try again instead of installing something else.
+- The installers no longer need git, so they work on a new Mac without developer tools and on Windows PCs without
+  git. They install with Python 3.13, the version the tests run on.
+- When the installer finishes, it tells you to open a new terminal window if `jobsmith` won't be found in the one
+  you used.
+- Issue and pull request templates for contributors, and private security reporting on GitHub.
+
+### Fixed
+- The terminal app names the company from the first moment it starts on an application, instead of showing an id
+  until the browser tab opens.
+- The terminal app no longer prints an error when you quit while it's animating.
+- On Windows, a failed install no longer ends with "Done".
+
 ## 0.4.0 (2026-10-22)
 
 ### Added

@@ -1,6 +1,6 @@
 [project]
 name = "jobsmith"
-version = "0.4.0"
+version = "0.4.1"
 description = "Applies to jobs and internships for you, from your real resume, and never makes anything up."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"   # 3.14: native deps (uvloop, greenlet) not yet reliable
