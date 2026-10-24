@@ -49,6 +49,16 @@ def test_style_catches_answers_that_dont_sound_like_you():
     assert "Never writes" in voice.style_notes()
 
 
+def test_style_flags_the_cover_letter_openers_nobody_writes():
+    """The stock phrases people only write because a template told them to."""
+    voice.add(ESSAY, "essay.md")
+    assert "i am writing to express" in voice.STOCK and "passionate about leveraging" in voice.STOCK
+    assert voice.style_issues("I am writing to express my interest in this position.")
+    assert voice.style_issues("I am passionate about leveraging cutting-edge technology.")
+    assert voice.style_issues("My proven track record shows I can hit the ground running.")
+    assert not voice.style_issues("I applied because your team ships the perception stack I have been building for a year.")
+
+
 async def test_drafting_falls_back_to_your_writing_without_an_ai():
     voice.add(ESSAY, "essay.md")
     job = _job()

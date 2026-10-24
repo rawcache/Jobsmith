@@ -41,7 +41,9 @@ STORIES: dict[str, tuple[str, str, str]] = {
 # Phrases that make an answer sound machine-written. If you never use one, Jobsmith won't let an AI either.
 STOCK = ["passionate about", "i am excited to", "i'm excited to", "thrilled", "leverage", "delve", "synergy", "fast-paced",
          "cutting-edge", "align with", "aligns with", "furthermore", "moreover", "in today's", "ever-evolving", "tapestry",
-         "i am writing to", "dynamic team", "unique blend", "testament to", "eager to contribute", "make a meaningful impact",
+         "i am writing to", "i am writing to express", "passionate about leveraging", "dynamic team", "unique blend",
+         "testament to", "eager to contribute", "make a meaningful impact", "proven track record", "at the forefront of",
+         "wealth of experience", "hit the ground running", "humbled to be",
          "—", "invaluable", "honed", "spearheaded", "robust", "seamless", "pivotal"]
 
 
