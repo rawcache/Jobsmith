@@ -118,7 +118,6 @@ async def _steps(a: dict, delay: float, speed: float) -> None:
     jid = a["id"]
     await pause(delay)
     _add(a)
-    runner.live_set(jid, practice=True)                     # listed from the start, so rows show the company name
     runner._active[jid] = "autopilot"                       # step 1 of 5: reading the posting
     await pause(STEP_SECONDS["reading"])
     db.x("UPDATE jobs SET description=? WHERE id=?",        # step 2: writing answers

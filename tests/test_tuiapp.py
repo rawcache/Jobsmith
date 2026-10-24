@@ -91,3 +91,53 @@ def test_ask_review_and_autopilot(engine):
             await pilot.pause(0.5)
             assert bool(db.get_setting("auto_run")) != before
     asyncio.run(go())
+
+
+def test_a_running_job_is_named_before_its_tab_opens(engine):
+    """Researching and drafting happen before a browser tab exists; the terminal should name the company from the
+    first frame, not show the job's id."""
+    from textual.widgets import DataTable
+    from jobsmith import runner
+    from jobsmith.tuiapp import Board, Jobsmith
+    db.conn()
+    now = db.now()
+    db.x("""INSERT INTO jobs(id, company, title, url, ats, status, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?)""",
+         ("gh_7f3a91", "Northwind Labs", "Firmware Intern", "https://x/2", "greenhouse", "new", now, now))
+    runner._active["gh_7f3a91"] = "autopilot"
+    assert "gh_7f3a91" not in runner.LIVE                                # no tab yet
+
+    async def go():
+        app = Jobsmith(engine, splash=False)
+        async with app.run_test(size=(120, 40)) as pilot:
+            for _ in range(30):
+                await pilot.pause(0.1)
+                if app.state.get("st"):
+                    break
+            await pilot.pause(0.3)
+            live = str(app.query_one("#live").render())
+            assert "Northwind Labs" in live and "gh_7f3a91" not in live, live
+            await pilot.press("ctrl+o")
+            await pilot.pause(0.8)
+            assert isinstance(app.screen, Board)
+            row = [str(c) for c in app.screen.query_one("#live", DataTable).get_row_at(0)]
+            assert "Northwind Labs" in row and "Firmware Intern" in row and "gh_7f3a91" not in row, row
+    try:
+        asyncio.run(go())
+    finally:
+        runner._active.pop("gh_7f3a91", None)
+
+
+def test_job_name_prefers_the_tab_then_the_record_then_the_id():
+    from jobsmith.api import _names
+    from jobsmith.tuiapp import Jobsmith
+    db.conn()
+    now = db.now()
+    db.x("INSERT INTO jobs(id, company, title, url, ats, status, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?)",
+         ("r1", "Globex", "Data Intern", "https://x/3", "greenhouse", "new", now, now))
+    assert _names([]) == {}
+    assert _names(["r1", "gone"]) == {"r1": {"company": "Globex", "title": "Data Intern"}}   # unknown ids are left out
+    app = Jobsmith("http://127.0.0.1:9", splash=False)
+    app.state = {"st": {"names": _names(["r1"])}}
+    assert app.job_name("r1") == ("Globex", "Data Intern")
+    assert app.job_name("r1", {"company": "Globex Corp", "title": ""}) == ("Globex Corp", "Data Intern")
+    assert app.job_name("gone") == ("gone", "")

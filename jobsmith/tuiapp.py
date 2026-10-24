@@ -754,7 +754,8 @@ class Board(View):
             ph = tab.get("phase") or st["active"].get(jid, "")
             mark = (Text("✓", style="green") if ph == "submitted" else Text("!", style="yellow") if ph in ("code", "review", "error")
                     else Text(SPIN[self.app.frame % len(SPIN)], style=EMBER))
-            t.add_row(mark, Text(tab.get("company") or jid, style="bold"), (tab.get("title") or "")[:40], bar(pr["step"], pr["total"]),
+            company, title = self.app.job_name(jid, tab)
+            t.add_row(mark, Text(company, style="bold"), title[:40], bar(pr["step"], pr["total"]),
                       (pr.get("label") or tab.get("phase_label") or "")[:30], key=jid)
         if not rows:
             t.add_row("", Text("Nothing running.", style=DIM), "", "", "")
@@ -1332,7 +1333,7 @@ class Jobsmith(App):
             tab = tabs.get(jid, {})
             ph = tab.get("phase") or st["active"].get(jid, "")
             if jid in self.phases and self.phases[jid] != ph:
-                who = tab.get("company") or jid
+                who = self.job_name(jid, tab)[0]
                 msg = {"submitted": f"[b]{who}[/] [green]submitted ✓[/]", "code": f"[b]{who}[/] [yellow]emailed you a code[/] · /code",
                        "review": f"[b]{who}[/] [yellow]is filled and waiting for you[/] · /review", "error": f"[b]{who}[/] [yellow]couldn't finish[/] · /review"}.get(ph)
                 if msg:
@@ -1342,6 +1343,12 @@ class Jobsmith(App):
             self.phases[jid] = ph
         self.paint_hello()
         self.paint_status()
+
+    def job_name(self, jid: str, tab: dict | None = None) -> tuple[str, str]:
+        """Company and title for a job: from its browser tab, else the job record (before a tab exists), else the id."""
+        tab = tab or {}
+        rec = (self.state.get("st", {}).get("names") or {}).get(jid) or {}
+        return (tab.get("company") or rec.get("company") or jid), (tab.get("title") or rec.get("title") or "")
 
     def paint_status(self) -> None:
         st, notes = self.state.get("st", {}), self.state.get("notes", {})
@@ -1402,7 +1409,7 @@ class Jobsmith(App):
                 mark = (("✓", "green") if ph == "submitted" else ("!", "yellow") if ph in ("code", "review", "error")
                         else (SPIN[(self.frame + i) % len(SPIN)], EMBER))
                 t.append("\n")
-                t.append_text(Text.assemble(("  ⎿  " if i == 0 else "     ", DIM), mark, " ", (f"{(tab.get('company') or jid)[:22]:<23}", "bold " + INK),
+                t.append_text(Text.assemble(("  ⎿  " if i == 0 else "     ", DIM), mark, " ", (f"{self.job_name(jid, tab)[0][:22]:<23}", "bold " + INK),
                                             bar(pr["step"], pr["total"]), "  ", ((pr.get("label") or tab.get("phase_label") or ph or "")[:40], STEEL)))
             if len(rows) > 6:
                 t.append(f"\n     … and {len(rows) - 6} more · ctrl+o", style=DIM)
