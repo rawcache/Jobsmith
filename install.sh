@@ -24,7 +24,10 @@ wheel="${JOBSMITH_WHEEL:-}"
 if [ -n "$wheel" ]; then
   ref="from $wheel"
 else
-  resp=$(curl -sS --max-time 30 --retry 2 --retry-delay 3 -w '\n%{http_code}' https://api.github.com/repos/rawcache/Jobsmith/releases/latest 2>/dev/null) || resp="000"
+  # CI's shared runners use up GitHub's 60 anonymous lookups an hour, so CI passes its own token (never set otherwise)
+  set --
+  [ -z "${JOBSMITH_GITHUB_TOKEN:-}" ] || set -- -H "Authorization: Bearer $JOBSMITH_GITHUB_TOKEN"
+  resp=$(curl -sS --max-time 30 --retry 2 --retry-delay 3 "$@" -w '\n%{http_code}' https://api.github.com/repos/rawcache/Jobsmith/releases/latest 2>/dev/null) || resp="000"
   code=$(printf '%s\n' "$resp" | tail -n 1)
   if [ "$code" = "404" ]; then
     ref="main"

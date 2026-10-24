@@ -19,10 +19,13 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 
 function Get-Latest {
   # Two tries: one slow answer shouldn't stop the install
+  $headers = @{ "User-Agent" = "jobsmith-installer" }
+  # CI's shared runners use up GitHub's 60 anonymous lookups an hour, so CI passes its own token (never set otherwise)
+  if ($env:JOBSMITH_GITHUB_TOKEN) { $headers["Authorization"] = "Bearer $env:JOBSMITH_GITHUB_TOKEN" }
   for ($try = 1; ; $try++) {
     try {
       return Invoke-RestMethod -Uri "https://api.github.com/repos/rawcache/Jobsmith/releases/latest" `
-        -Headers @{ "User-Agent" = "jobsmith-installer" } -TimeoutSec 30
+        -Headers $headers -TimeoutSec 30
     } catch {
       $status = $_.Exception.Response.StatusCode
       if (($status -and [int]$status -eq 404) -or $try -ge 2) { throw }

@@ -90,6 +90,7 @@ def _run_sh(tmp_path: Path, code: str, body: str, curl_exit: int = 0, bin_on_pat
     loses the connection, the next works) or "network-always"."""
     log, bin_ = tmp_path / "uv.log", tmp_path / "toolbin"
     _stub(tmp_path / "curl", f'''case "$*" in *pypi.org*) exit {7 if pypi_down else 0} ;; esac
+echo "$*" >> "{tmp_path}/curl.log"
 printf '%s\\n%s' '{body}' '{code}'
 exit {curl_exit}
 ''')
@@ -154,6 +155,18 @@ def test_install_sh_installs_a_given_wheel_without_asking_github(tmp_path):
     r, log = _run_sh(tmp_path, "000", "", 7, env={"JOBSMITH_WHEEL": "/build/jobsmith-0.4.2-py3-none-any.whl"})
     assert r.returncode == 0, r.stderr
     assert _installs(log) == [["--no-build", "/build/jobsmith-0.4.2-py3-none-any.whl"]]
+
+
+@sh_only
+@pytest.mark.parametrize("token", ["", "ghs_ci"])
+def test_install_sh_sends_a_token_only_when_ci_gives_one(tmp_path, token):
+    r, _ = _run_sh(tmp_path, "200", _release("v0.4.2", WHEEL), env={"JOBSMITH_GITHUB_TOKEN": token} if token else None)
+    assert r.returncode == 0, r.stderr
+    lookup = (tmp_path / "curl.log").read_text()
+    if token:
+        assert "Authorization: Bearer ghs_ci" in lookup
+    else:
+        assert "Authorization" not in lookup
 
 
 @sh_only
