@@ -318,11 +318,12 @@ def test_install_ps1_gives_up_on_a_connection_that_keeps_dropping(tmp_path):
 
 
 @ps_only
+@pytest.mark.skipif(os.name != "nt", reason="the stand-in uv is a cmd.exe program")
 def test_install_ps1_shows_a_short_message_when_a_package_wont_install(tmp_path):
     """A real program writing hundreds of lines to stderr, as uv does: Windows PowerShell with "Stop" would turn
     the first one into a crash."""
     body = ('cmd /c "echo error: Failed to build cryptography==50.0.2 1>&2 & '
-            'for /L %i in (1,1,300) do @echo    Compiling openssl-sys %i 1>&2 & exit /b 1"')
+            '(for /L %i in (1,1,300) do @echo    Compiling openssl-sys %i 1>&2) & exit /b 1"')
     r, log = _run_ps1(tmp_path, _rest_release(_release("v0.4.2", WHEEL)), body)
     assert r.returncode != 0 and "Done" not in r.stdout, (r.stdout, r.stderr)
     assert len(_installs(log)) == 1

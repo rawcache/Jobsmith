@@ -83,7 +83,8 @@ function Install-Tool {
   # Python 3.13, the version CI tests (.python-version); left to choose, uv may download any version 3.11-3.13.
   # uv writes progress to stderr; with "Stop", Windows PowerShell would treat the first line as a fatal error.
   $ErrorActionPreference = "Continue"
-  uv tool install --force --python 3.13 @src 2>&1 | ForEach-Object { "$_" } | Set-Content -Path $log
+  # -Value, not the pipeline: an install that prints nothing still leaves a (empty) log behind
+  Set-Content -Path $log -Value @(uv tool install --force --python 3.13 @src 2>&1 | ForEach-Object { "$_" })
   return ($LASTEXITCODE -eq 0)    # PowerShell doesn't stop on a failed program by itself
 }
 function Test-NetworkError {
