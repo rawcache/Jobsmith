@@ -11,3 +11,6 @@ _to_delete/
 
 # reference material scraped from other sites: never publish it
 downloaded_simplify/
+
+# built wheels (attached to releases, never committed)
+dist/

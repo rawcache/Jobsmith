@@ -22,12 +22,20 @@ Local, free, and built for students applying to software, hardware, data and AI 
 
 ### Use the terminal
 
+Install with one line. On macOS or Linux, paste into Terminal:
+
 ```bash
-curl -LsSf https://raw.githubusercontent.com/rawcache/Jobsmith/main/install.sh | sh     # macOS, Linux
-jobsmith
+curl -LsSf https://raw.githubusercontent.com/rawcache/Jobsmith/main/install.sh | sh
 ```
 
-Windows (PowerShell): `powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/rawcache/Jobsmith/main/install.ps1 | iex"`
+On Windows, paste into PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/rawcache/Jobsmith/main/install.ps1 | iex"
+```
+
+Then run `jobsmith`. The installer says if you need to open a new window first. It needs no git, compiler or admin
+rights, and works on Intel and Apple silicon Macs, Linux (x86 and ARM) and Windows (x86 and ARM).
 
 The first run asks what you're applying for and which AI to use, and reads your resume. Then it works like Claude
 Code: one prompt, a conversation, and everything a `/command` away.
