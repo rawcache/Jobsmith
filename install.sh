@@ -57,8 +57,9 @@ else
   for p in $native; do set -- --no-build-package "$p" "$@"; done
 fi
 echo "Installing Jobsmith $ref (this can take a minute or two)"
-# The full output goes to a log, so a failure shows a short message instead of pages of build output.
-log="${TMPDIR:-/tmp}/jobsmith-install.log"
+# The full output goes to a log, so a failure shows a short message instead of pages of build output. A new file of
+# its own (mktemp), never a fixed name another user could have planted; kept only on failure. CI names its own.
+log="${JOBSMITH_INSTALL_LOG:-$(mktemp "${TMPDIR:-/tmp}/jobsmith-install.XXXXXX")}"
 network_error() { grep -Eqi 'failed to fetch|error sending request|timed out|dns error|connection (reset|refused|closed)|tcp connect' "$log"; }
 # Python 3.13, the version CI tests (.python-version); left to choose, uv may download any version 3.11-3.13.
 ok=0
@@ -86,6 +87,7 @@ if [ "$ok" = 0 ]; then
   fi
   exit 1
 fi
+[ -n "${JOBSMITH_INSTALL_LOG:-}" ] || rm -f "$log"
 bin=$(uv tool dir --bin 2>/dev/null) && export PATH="$bin:$PATH"
 jobsmith doctor || true
 echo
