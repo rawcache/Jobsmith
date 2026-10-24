@@ -31,7 +31,8 @@ Labels: help wanted, source
 ## Check a posting is still live before applying
 
 Before autopilot opens a job, confirm the posting still exists (no 404, no "this job is closed"). Start in
-`jobsmith/insights.py`; mark closed jobs instead of failing on them.
+`jobsmith/jobdetail.py`, which already notices closed Greenhouse and Ashby postings when it fetches them; extend
+that to Lever and other sites, and mark closed jobs instead of failing on them.
 
 Labels: good first issue
 
@@ -62,9 +63,12 @@ Pick a question the ask box can't answer yet (e.g. "which companies haven't repl
 
 Labels: good first issue, terminal
 
-## Windows: installer fixes and a passing CI run
+## Windows: sign in to Claude from Jobsmith
 
-Make `install.ps1` and the Windows CI job pass; skip any test that truly can't run on Windows, with a reason.
+On macOS and Linux, Settings can sign you in to Claude with your subscription (it runs `claude setup-token` in a
+pseudo-terminal). On Windows it stops with "isn't available on Windows", because `jobsmith/claude_login.py` uses
+`pty`, `fcntl` and `termios`, which Windows doesn't have. Find out whether `claude setup-token` works there without
+a terminal, or use Windows' own pseudo-terminal (ConPTY, e.g. via `pywinpty`), and add a test.
 
 Labels: help wanted
 

@@ -146,9 +146,14 @@ uv run jobsmith check            # tests, dashboard build, screenshots of every 
 uv run jobsmith dev              # practice copy with live reload while you edit
 ```
 
-**Add a skill:** make `jobsmith/skills/<name>/` with a `SKILL.md` (frontmatter: `name`, `description`, `title`,
-`status`) and its code beside it. It appears in `jobsmith skills`, the dashboard and your agent automatically.
-Support for a new job site lives in `jobsmith/fill/`, tested against a saved copy of its form in `tests/fixtures/`.
+Start from the templates in [`docs/templates/`](docs/templates/), and see [`CONTRIBUTING.md`](CONTRIBUTING.md)
+for the steps.
+
+**Add a skill:** copy `docs/templates/skill/` to `jobsmith/skills/<name>/`, fill in its `SKILL.md` (frontmatter:
+`name`, `description`, `title`, `status`) and put its code beside it. It appears in `jobsmith skills`, the
+dashboard and your agent automatically.
+**Support a job site:** copy `docs/templates/adapter.py` to `jobsmith/fill/<site>.py` and test it against a saved
+copy of the site's form in `tests/fixtures/`.
 
 | Command | What it does |
 |---|---|
