@@ -10,7 +10,7 @@ Work top to bottom. Tick each box in this file as it's done and commit the tick 
 - [x] Confirm nothing personal is staged: no `data/`, `_to_delete/`, `downloaded_simplify/`, `.env`, keys, tokens,
       real resumes or real names. Search: `git diff --cached | grep -iE "AIza|sk-ant|sk-[A-Za-z0-9]{20}|password|@gmail"`.
 - [x] Remove dead files the restructure left behind (old `skills.py`, `outreach.py`, `followups.py` if present).
-- [ ] Commit in logical pieces: skills restructure · voice skill · MCP server · terminal app + ask box · cobalt
+- [x] Commit in logical pieces: skills restructure · voice skill · MCP server · terminal app + ask box · cobalt
       redesign · docs. Push to `main`.
 
 ## 2. Make the public claims true
