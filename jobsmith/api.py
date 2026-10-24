@@ -181,6 +181,13 @@ def notifications_seen():
     return {"ok": True}
 
 
+def _names(job_ids: list[str]) -> dict[str, dict]:
+    if not job_ids:
+        return {}
+    rows = db.q(f"SELECT id, company, title FROM jobs WHERE id IN ({','.join('?' * len(job_ids))})", tuple(job_ids))
+    return {r["id"]: {"company": r["company"], "title": r["title"]} for r in rows}
+
+
 @app.get("/api/status")
 async def status():
     ok, msg = await llm.available_cached(role="write")
@@ -188,6 +195,7 @@ async def status():
     split = s_.get("research_backend") not in (None, "", "same", s_.get("llm_backend"))
     r_ok, r_msg = (await llm.available_cached(role="research")) if split else (ok, msg)
     counts = {r["status"]: r["n"] for r in db.q("SELECT status, COUNT(*) n FROM jobs WHERE active=1 GROUP BY status")}
+    working = list(dict.fromkeys(list(runner._active) + [t["job_id"] for t in runner.live_list()]))
     ans = profile.answers()
     unconfirmed = sum(1 for a in ans.values() if a["value"] and not a["confirmed"])
     missing = [a["label"] for k, a in ans.items()
@@ -213,7 +221,9 @@ async def status():
             "counts": counts, "active": runner.active(), "setup": setup, "quota": llm.quota_status(),
             "power": {"saver": power.saver(), "battery": power.battery(), "paused": power.paused()},
             "attention": attention(),
-            "progress": {jid: runner.progress(jid) for jid in list(runner._active) + [t["job_id"] for t in runner.live_list()]},
+            "progress": {jid: runner.progress(jid) for jid in working},
+            # company and title from the job record, so the terminal names a job before its browser tab exists
+            "names": _names(working),
             "has_resume": rs["attached"] is not None,
             "facts": len(profile.facts()), "autonomy": db.get_setting("autonomy"),
             "auto": {"on": bool(db.get_setting("auto_run")), "next_run": scheduler.state["next_run"],
