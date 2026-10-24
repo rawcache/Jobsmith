@@ -89,8 +89,8 @@ def _run_sh(tmp_path: Path, code: str, body: str, curl_exit: int = 0, bin_on_pat
     PATH only if bin_on_path. install_fails is "build" (every try fails to build), "network" (the first try
     loses the connection, the next works) or "network-always"."""
     log, bin_ = tmp_path / "uv.log", tmp_path / "toolbin"
-    _stub(tmp_path / "curl", f'''case "$*" in *pypi.org*) exit {7 if pypi_down else 0} ;; esac
-echo "$*" >> "{tmp_path}/curl.log"
+    _stub(tmp_path / "curl", f'''echo "$*" >> "{tmp_path}/curl.log"
+case "$*" in *pypi.org*) exit {7 if pypi_down else 0} ;; esac
 printf '%s\\n%s' '{body}' '{code}'
 exit {curl_exit}
 ''')
@@ -162,11 +162,12 @@ def test_install_sh_installs_a_given_wheel_without_asking_github(tmp_path):
 def test_install_sh_sends_a_token_only_when_ci_gives_one(tmp_path, token):
     r, _ = _run_sh(tmp_path, "200", _release("v0.4.2", WHEEL), env={"JOBSMITH_GITHUB_TOKEN": token} if token else None)
     assert r.returncode == 0, r.stderr
-    lookup = (tmp_path / "curl.log").read_text()
-    if token:
-        assert "Authorization: Bearer ghs_ci" in lookup
-    else:
-        assert "Authorization" not in lookup
+    calls = (tmp_path / "curl.log").read_text()
+    [pypi] = [c for c in calls.splitlines() if "pypi.org" in c]
+    github = calls.replace(pypi, "")                                  # the lookup spans two lines (-w '\n...')
+    assert "api.github.com" in github
+    assert ("Authorization: Bearer ghs_ci" in github) == bool(token)
+    assert "Authorization" not in pypi                               # only ever sent to GitHub
 
 
 @sh_only
@@ -254,7 +255,7 @@ def _run_ps1(tmp_path: Path, fake_rest: str, uv_body: str, pypi_up: bool = True,
     a function that logs installs (uv_body decides its exit code), jobsmith marks that doctor ran."""
     log = tmp_path / "uv.log"
     web = "" if pypi_up else "throw [System.Exception]::new('fake: no route to pypi.org')"
-    script = (f"function Invoke-RestMethod {{ {fake_rest} }}\n"
+    script = (f"function Invoke-RestMethod {{ param($Uri, $Headers, $TimeoutSec) {fake_rest} }}\n"
               f"function Invoke-WebRequest {{ {web} }}\n"
               "function Start-Sleep { }\n"
               f"function uv {{ if ($args[0] -eq 'tool' -and $args[1] -eq 'dir') {{ return '{tmp_path}' }}; "
@@ -301,6 +302,17 @@ def test_install_ps1_installs_a_given_wheel_without_asking_github(tmp_path):
                       env={"JOBSMITH_WHEEL": r"C:\build\jobsmith-0.4.2-py3-none-any.whl"})
     assert r.returncode == 0, (r.stdout, r.stderr)
     assert _installs(log) == [["--no-build", r"C:\build\jobsmith-0.4.2-py3-none-any.whl"]]
+
+
+@ps_only
+@pytest.mark.parametrize("token", ["", "ghs_ci"])
+def test_install_ps1_sends_a_token_only_when_ci_gives_one(tmp_path, token):
+    seen = tmp_path / "auth.txt"
+    fake = (f"Set-Content -Path '{seen}' -Value ([string]$Headers['Authorization']); "
+            + _rest_release(_release("v0.4.2", WHEEL)))
+    r, _ = _run_ps1(tmp_path, fake, "$global:LASTEXITCODE = 0", env={"JOBSMITH_GITHUB_TOKEN": token})
+    assert r.returncode == 0, (r.stdout, r.stderr)
+    assert seen.read_text().strip() == (f"Bearer {token}" if token else "")
 
 
 @ps_only
