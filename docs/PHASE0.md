@@ -39,10 +39,10 @@ Work top to bottom. Tick each box in this file as it's done and commit the tick 
 
 - [x] Move `docs/to-github/*` into `.github/` (`pull_request_template.md` and `ISSUE_TEMPLATE/`), then delete
       `docs/to-github/`. Review them with `CONTRIBUTING.md` and `SECURITY.md`.
-- [ ] Add `docs/templates/` to the README's Contributing section.
+- [x] Add `docs/templates/` to the README's Contributing section.
 - [x] Create labels: `good first issue`, `help wanted`, `job site`, `skill`, `source`, `terminal`, `dashboard`,
       `extension`, `bug`.
-- [ ] Open the issues in `docs/good-first-issues.md` with `gh issue create` (one per section; title, body, labels).
+- [x] Open the issues in `docs/good-first-issues.md` with `gh issue create` (one per section; title, body, labels).
 - [x] Create GitHub milestones for Phases 1–5 with the dates from the roadmap.
 
 ## 5. Fresh-install test (the gate)
