@@ -27,6 +27,7 @@ from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.css.query import NoMatches
 from textual.screen import ModalScreen, Screen
 from textual.widgets import DataTable, Footer, Input, Static, TextArea
 
@@ -1324,6 +1325,12 @@ class Jobsmith(App):
         self.paint_status()
 
     def apply_state(self, st: dict, live: list, home: dict, notes: dict) -> None:
+        try:
+            self._paint_state(st, live, home, notes)
+        except NoMatches:          # the app is closing and its widgets are already gone: skip this update
+            pass
+
+    def _paint_state(self, st: dict, live: list, home: dict, notes: dict) -> None:
         if self.connected is False:
             self.say("[green]Back in touch with the engine.[/]")
         self.connected = True
@@ -1372,6 +1379,12 @@ class Jobsmith(App):
         self.query_one("#status", Static).update(Text.assemble(left, " " * w, r))
 
     def animate(self) -> None:
+        try:
+            self._tick()
+        except NoMatches:          # a last tick while the app closes, after its widgets are removed
+            pass
+
+    def _tick(self) -> None:
         self.frame += 1
         st = self.state.get("st", {})
         tabs = {t["job_id"]: t for t in self.state.get("live", [])}
