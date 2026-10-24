@@ -6,7 +6,25 @@ if ! command -v uv >/dev/null 2>&1; then
   curl -LsSf https://astral.sh/uv/install.sh | sh
   export PATH="$HOME/.local/bin:$PATH"
 fi
-uv tool install --force git+https://github.com/rawcache/Jobsmith
+# Install the latest release, not whatever is on main. Only "no release yet" (404) falls back to main;
+# any other failure (offline, rate limit, timeout) stops, so an unreleased main never ships by accident.
+# A curl failure (even after a 200 or 404 header arrived, e.g. a timeout mid-body) counts as unreachable.
+resp=$(curl -sS --max-time 15 -w '\n%{http_code}' https://api.github.com/repos/rawcache/Jobsmith/releases/latest 2>/dev/null) || resp="000"
+code=$(printf '%s\n' "$resp" | tail -n 1)
+if [ "$code" = "404" ]; then
+  ref="main"
+elif [ "$code" = "200" ]; then
+  ref=$(printf '%s\n' "$resp" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)
+  if ! printf '%s' "$ref" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+    echo "The latest Jobsmith release has an unexpected tag ('$ref'). Nothing was installed." >&2
+    exit 1
+  fi
+else
+  echo "Couldn't reach GitHub to find the latest Jobsmith release (HTTP ${code:-none}). Try again in a minute." >&2
+  exit 1
+fi
+echo "Installing Jobsmith $ref"
+uv tool install --force "git+https://github.com/rawcache/Jobsmith@$ref"
 jobsmith doctor || true
 echo
 echo "Done. Run:  jobsmith"
