@@ -898,6 +898,8 @@ class Jobsmith(App):
             self.push_screen(Review())
         elif self.start == "matches":
             self.push_screen(Matches())
+        elif self.start == "show":
+            self.show_autopilot()
 
     def paint_hello(self) -> None:
         st, home = self.state.get("st", {}), self.state.get("home", {})
@@ -989,6 +991,20 @@ class Jobsmith(App):
             self.call_from_thread(self.mount_block, Text(f"     {time.time() - t0:.1f}s · from your records, no AI", style=FAINT))
 
     _last_t = ""
+
+    @work(thread=True, group="cmd")
+    def show_autopilot(self) -> None:
+        """`jobsmith demo show`: the practice engine plays three made-up applications; this app draws them as usual."""
+        time.sleep(1.5)                                   # let the welcome box draw first
+        self.call_from_thread(self.say, "[b]Practice copy:[/] showing autopilot on 3 made-up applications. "
+                                        "Nothing real is opened, sent or written by an AI.")
+        try:
+            r = self.http.post("/api/demo/autopilot-show", json={}, timeout=10)
+            ok, why = r.status_code == 200, (r.json().get("detail") if r.status_code != 200 else "")
+        except (httpx.HTTPError, ValueError) as e:
+            ok, why = False, e.__class__.__name__
+        if not ok:
+            self.call_from_thread(self.say, f"[yellow]Couldn't start the show: {why}[/]")
 
     @work(thread=True, group="cmd")
     def run_request(self, text: str) -> None:

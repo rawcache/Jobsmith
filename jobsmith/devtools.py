@@ -4,6 +4,7 @@
     jobsmith demo --setup    the same, starting the website setup from step 1 (nothing filled in yet)
     jobsmith demo --keep     reuse the practice copy as you left it instead of starting over
     jobsmith demo stop       stop the practice copy
+    jobsmith demo show       a fresh practice copy, then the terminal app plays autopilot on 3 made-up applications
     jobsmith setup           run your real setup again from step 1, in the terminal
     jobsmith setup --web     ... or on the website
     jobsmith dev             (source checkout) the practice copy with live reload: edit web/ or jobsmith/ and see it
@@ -288,6 +289,14 @@ def main(argv: list[str]) -> None:
     elif cmd == "demo":
         if rest[:1] == ["stop"]:
             _say("Stopped the practice copy." if stop() else "The practice copy wasn't running.")
+            return
+        if rest[:1] == ["show"]:
+            # Always a fresh practice copy of our own: pointing the terminal at a port with nothing on it
+            # would make it start a real engine there.
+            url = demo(open_browser=False)
+            from . import tuiapp
+            tuiapp.run(url.split("/#")[0].rstrip("/"), splash=False, start="show")
+            _say("The practice copy is still running. Stop it with: jobsmith demo stop")
             return
         url = demo(setup="--setup" in rest, keep="--keep" in rest)
         _say(f"Practice copy running at {url}\nA made-up person (Alex Rivera) and made-up jobs. Nothing real is opened, "

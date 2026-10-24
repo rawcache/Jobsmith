@@ -524,6 +524,7 @@ COMMANDS: list[tuple[str, list[tuple[str, str]]]] = [
     ("Try changes safely", [
         ("jobsmith demo", "a practice copy with a made-up person and jobs; nothing real is opened or sent"),
         ("jobsmith demo --setup", "the practice copy, starting the website setup from step 1"),
+        ("jobsmith demo show", "watch autopilot apply to 3 made-up applications in the practice copy"),
         ("jobsmith dev", "practice copy with live reload while you edit (source checkout)"),
         ("jobsmith check", "tests, dashboard build, and screenshots of every page (source checkout)"),
         ("/help  /commands  /quit", ""),
