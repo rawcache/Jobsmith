@@ -37,13 +37,13 @@ Work top to bottom. Tick each box in this file as it's done and commit the tick 
 
 ## 4. Contributor on-ramp
 
-- [ ] Move `docs/to-github/*` into `.github/` (`pull_request_template.md` and `ISSUE_TEMPLATE/`), then delete
+- [x] Move `docs/to-github/*` into `.github/` (`pull_request_template.md` and `ISSUE_TEMPLATE/`), then delete
       `docs/to-github/`. Review them with `CONTRIBUTING.md` and `SECURITY.md`.
 - [ ] Add `docs/templates/` to the README's Contributing section.
-- [ ] Create labels: `good first issue`, `help wanted`, `job site`, `skill`, `source`, `terminal`, `dashboard`,
+- [x] Create labels: `good first issue`, `help wanted`, `job site`, `skill`, `source`, `terminal`, `dashboard`,
       `extension`, `bug`.
 - [ ] Open the issues in `docs/good-first-issues.md` with `gh issue create` (one per section; title, body, labels).
-- [ ] Create GitHub milestones for Phases 1–5 with the dates from the roadmap.
+- [x] Create GitHub milestones for Phases 1–5 with the dates from the roadmap.
 
 ## 5. Fresh-install test (the gate)
 
