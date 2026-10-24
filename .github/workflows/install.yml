@@ -1,0 +1,75 @@
+# Runs the real one-line installers on every kind of computer we say Jobsmith installs on, and fails if any
+# package is built from source (a new user's computer may have no compiler, Rust or OpenSSL headers).
+# On a push or pull request it installs the wheel of the commit being tested (JOBSMITH_WHEEL); when a release is
+# published, or on demand, it installs exactly what a new user gets: the latest release.
+name: install
+on:
+  push:
+  pull_request:
+  release:
+    types: [published]
+  workflow_dispatch:
+jobs:
+  wheel:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv build --wheel -o dist
+      - uses: actions/upload-artifact@v4
+        with: { name: wheel, path: dist/*.whl }
+  install:
+    needs: wheel
+    if: ${{ !cancelled() && needs.wheel.result != 'failure' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-15-intel: Intel Macs, which lack wheels for some packages' newest versions (cryptography 50)
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest, windows-11-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4      # the installers themselves; nothing else from the checkout is used
+      - uses: actions/download-artifact@v4
+        if: needs.wheel.result == 'success'
+        with: { name: wheel, path: dist }
+      - name: Run install.sh
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          echo "$(uname -sm), uv before: $(command -v uv || echo none)"
+          if [ -d dist ]; then export JOBSMITH_WHEEL="$(ls "$PWD"/dist/*.whl)"; fi
+          sh install.sh
+          cp "${TMPDIR:-/tmp}/jobsmith-install.log" install.log
+      - name: Run install.ps1
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          Write-Host "$env:PROCESSOR_ARCHITECTURE, uv before: $((Get-Command uv -ErrorAction SilentlyContinue).Source)"
+          if (Test-Path dist) { $env:JOBSMITH_WHEEL = (Get-ChildItem dist\*.whl).FullName }
+          .\install.ps1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Copy-Item (Join-Path $env:TEMP "jobsmith-install.log") install.log
+      - name: Nothing was built from source
+        shell: bash
+        run: |
+          cat install.log
+          if grep -Eq '^ *(Built|Building) ' install.log; then echo "::error::A package was built from source"; exit 1; fi
+      - name: The compiled parts load
+        shell: bash
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          unix() { if command -v cygpath > /dev/null; then cygpath -u "$1"; else echo "$1"; fi; }   # Git Bash on Windows
+          export PATH="$(unix "$(uv tool dir --bin)"):$PATH"
+          tool="$(unix "$(uv tool dir)")/jobsmith"
+          py="$tool/bin/python"; [ -x "$py" ] || py="$tool/Scripts/python.exe"
+          "$py" -c "
+          import platform, sys
+          import cryptography, cryptography.hazmat.bindings._rust, greenlet, pydantic_core, PIL._imaging, psutil, playwright
+          import jobsmith, jobsmith.cli
+          print(platform.system(), platform.machine(), sys.version.split()[0], 'jobsmith', jobsmith.__version__, 'cryptography', cryptography.__version__)
+          "
+          jobsmith --help > /dev/null
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: "install-log-${{ matrix.os }}", path: install.log, if-no-files-found: ignore }
