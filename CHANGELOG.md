@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.2 (2026-10-24)
+
+### Fixed
+- The installers never compile anything, so Jobsmith installs on Intel Macs (it stopped while building cryptography
+  with Rust) and on any computer without developer tools. They install a ready-built copy of Jobsmith and take the
+  newest version of each part that has a ready-built file for your computer.
+- If an install fails anyway, you get a short message with what went wrong and where to report it, instead of
+  pages of build output. The full log is kept for the report.
+- On a slow connection the installers wait longer for each download and try again once if the connection drops.
+  If pypi.org (where Jobsmith's parts come from) can't be reached, they say so before starting.
+
+### Changed
+- Every change is now tested by running the real installers on Intel and Apple silicon Macs, Linux (x86 and ARM)
+  and Windows (x86 and ARM).
+- The README shows the install as one line for each system.
+
 ## 0.4.1 (2026-10-24)
 
 ### Added
