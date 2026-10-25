@@ -219,17 +219,35 @@ def _applied(since, until, label, company):
                "job_id": r["id"]}
 
 
+CODE_HOLD = re.compile(r"\b(emailed|verification|security) code\b", re.I)
+
+
+def _only_you(attention, company) -> list[dict]:
+    """Codes, CAPTCHAs and sign-ins. A filled application whose hold reason is an emailed code counts too: the tab
+    asking for it may be gone (or, in the practice copy, never existed), but it still can't go on without you."""
+    items = [a for a in attention if not company or a["company"] == company]
+    seen = {a["job_id"] for a in items}
+    for r in db.q("SELECT id, company, hold_reason FROM jobs WHERE status='filled'" + (" AND company=?" if company else "")
+                  + " ORDER BY updated_at DESC", (company,) if company else ()):
+        if r["id"] not in seen and CODE_HOLD.search(r["hold_reason"] or ""):
+            items.append({"job_id": r["id"], "company": r["company"], "kind": "code",
+                          "message": f"{r['company']} emailed you a verification code."})
+    return items
+
+
 def _waiting(since, until, label, company, attention):
     any_ = False
     cw = " AND company=?" if company else ""
     cp = (company,) if company else ()
-    codes = [a for a in attention if not company or a["company"] == company]
+    codes = _only_you(attention, company)
     if codes:
         any_ = True
         yield {"t": "head", "text": f"Only you can do  {len(codes)}"}
         for a in codes:
             yield {"t": "item", "text": a["company"], "meta": a["message"], "job_id": a["job_id"], "urgent": True}
-    ready = db.q(f"SELECT id, company, title, hold_reason, updated_at FROM jobs WHERE status='filled'{cw} ORDER BY updated_at DESC LIMIT 40", cp)
+    mine = {a["job_id"] for a in codes}            # listed once, under what only you can do
+    ready = [r for r in db.q(f"SELECT id, company, title, hold_reason, updated_at FROM jobs WHERE status='filled'{cw} "
+                             "ORDER BY updated_at DESC LIMIT 40", cp) if r["id"] not in mine]
     if ready:
         any_ = True
         yield {"t": "head", "text": f"Filled, waiting for you to submit  {len(ready)}"}
@@ -264,7 +282,7 @@ def _waiting(since, until, label, company, attention):
 
 
 def _codes(since, until, label, company, attention):
-    items = [a for a in attention if not company or a["company"] == company]
+    items = _only_you(attention, company)
     yield {"t": "head", "text": f"Codes, CAPTCHAs and sign-ins  {len(items)}" if items else "Codes, CAPTCHAs and sign-ins"}
     if not items:
         yield {"t": "note", "text": "Nothing waiting. Jobsmith asks here and under the bell when a site needs you."}
