@@ -17,6 +17,10 @@ ENGINE_CMDS = {"serve", "sync", "ingest", "doctor"}
 def main() -> None:
     import sys
     argv = sys.argv[1:]
+    if argv[:1] in (["--version"], ["version"]):
+        from . import __version__
+        print(f"jobsmith {__version__}")
+        return
     if argv and argv[0] in ("mcp", "skills", "voice", "site"):
         from . import clicmds
         clicmds.main(argv)
@@ -38,7 +42,9 @@ def main() -> None:
     sub.add_parser("sync", help="pull job sources and score them")
     i = sub.add_parser("ingest", help="add a resume / document to your profile")
     i.add_argument("path")
-    sub.add_parser("doctor", help="check AI backend, browser, resume")
+    d = sub.add_parser("doctor", help="check AI backend, browser, resume")
+    d.add_argument("--browser", action="store_true",
+                   help="only make sure a browser is ready, quietly unless one must be downloaded (the installer)")
     args = p.parse_args()
 
     if args.cmd == "serve":
@@ -66,6 +72,10 @@ def main() -> None:
         from . import match, profile
         print(asyncio.run(profile.ingest_document(Path(args.path))))
         match.rescore()
+    elif args.cmd == "doctor" and args.browser:
+        result = browser_check(say=print)
+        if result.startswith("NOT READY"):
+            print(f"Jobsmith couldn't get a browser ready ({result}). Run `jobsmith doctor` later to try again.")
     elif args.cmd == "doctor":
         from . import llm, profile
         ok, msg = asyncio.run(llm.backend().available())
@@ -75,8 +85,9 @@ def main() -> None:
         print(f"Facts: {len(profile.facts())}")
 
 
-def browser_check() -> str:
-    """Use the installed Chrome if there is one; otherwise make sure Playwright's Chromium is downloaded."""
+def browser_check(say=lambda _msg: None) -> str:
+    """Use the installed Chrome if there is one; otherwise make sure Playwright's Chromium is downloaded.
+    `say` hears about the download before it starts, since it takes a while and would otherwise look stuck."""
     import subprocess
     import sys
 
@@ -91,6 +102,7 @@ def browser_check() -> str:
             return f"OK ({ch or 'bundled Chromium'})"
         except Exception:
             continue
+    say("Downloading a browser for Jobsmith to fill applications in (about 150 MB)...")
     r = subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], capture_output=True, text=True)
     return "Downloaded Chromium" if r.returncode == 0 else f"NOT READY: {r.stderr[-200:]}"
 

@@ -92,11 +92,17 @@ if [ "$ok" = 0 ]; then
 fi
 [ -n "${JOBSMITH_INSTALL_LOG:-}" ] || rm -f "$log"
 bin=$(uv tool dir --bin 2>/dev/null) && export PATH="$bin:$PATH"
-jobsmith doctor || true
+# Chrome or Edge if you have one, else download Chromium now rather than on your first application.
+# Silent unless it downloads; the full check is `jobsmith doctor`.
+jobsmith doctor --browser || true
+version=$(jobsmith --version 2>/dev/null | sed 's/^jobsmith //') || version=""
 echo
-if (PATH="$start_path"; command -v jobsmith >/dev/null 2>&1); then
-  echo "Done. Run:  jobsmith"
-else
-  echo "Done. Open a new terminal window, then run:  jobsmith"
-  echo "(If it says 'command not found' there, run:  uv tool update-shell  and open another window.)"
+echo "Installed Jobsmith${version:+ $version}."
+if ! (PATH="$start_path"; command -v jobsmith >/dev/null 2>&1); then
+  echo "Open a new terminal window first. (If \`jobsmith\` says 'command not found' there, run:  uv tool update-shell)"
 fi
+echo
+echo "  Try it with made-up data:  jobsmith demo"
+echo "  Set it up for real:        jobsmith"
+echo
+echo "An AI is optional. You can add one during setup or any time later."

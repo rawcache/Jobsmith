@@ -123,13 +123,20 @@ if (-not $ok) {
 if (-not $env:JOBSMITH_INSTALL_LOG) { Remove-Item -Path $log -ErrorAction SilentlyContinue }
 $bin = uv tool dir --bin
 if ($bin) { $env:Path = "$bin;$env:Path" }
-jobsmith doctor
+# Chrome or Edge if you have one, else download Chromium now rather than on your first application.
+# Silent unless it downloads; the full check is `jobsmith doctor`.
+jobsmith doctor --browser
+$version = "$(jobsmith --version)" -replace '^jobsmith\s*', ''
 Write-Host ""
+if ($version) { Write-Host "Installed Jobsmith $version." } else { Write-Host "Installed Jobsmith." }
 $now = $env:Path; $env:Path = $startPath
 $ready = [bool](Get-Command jobsmith -ErrorAction SilentlyContinue)
 $env:Path = $now
-if ($ready) { Write-Host "Done. Run:  jobsmith" }
-else {
-  Write-Host "Done. Open a new PowerShell window, then run:  jobsmith"
-  Write-Host "(If it says 'not recognized' there, run:  uv tool update-shell  and open another window.)"
+if (-not $ready) {
+  Write-Host "Open a new PowerShell window first. (If 'jobsmith' is 'not recognized' there, run:  uv tool update-shell)"
 }
+Write-Host ""
+Write-Host "  Try it with made-up data:  jobsmith demo"
+Write-Host "  Set it up for real:        jobsmith"
+Write-Host ""
+Write-Host "An AI is optional. You can add one during setup or any time later."
