@@ -79,8 +79,24 @@ def test_an_emailed_code_is_only_you_can_do():
             ["Lumon", "Wayne Enterprises"], (q, got)
         if q == "what needs me?":
             assert got["Filled, waiting for you to submit"] == ["Stark Industries"]
-    at_wayne = _sections(_blocks("what needs me at wayne enterprises?"))
-    assert at_wayne == {"Only you can do": ["Wayne Enterprises"]}
+    at_wayne = _blocks("what needs me at wayne enterprises?")
+    assert _sections(at_wayne) == {"Only you can do": ["Wayne Enterprises"]}
+    # the hold reason as recorded, not a claim about how the code was sent
+    assert [b["meta"] for b in at_wayne if b["t"] == "item"] == ["Emailed verification code needed"]
+    # a live tab and a matching hold reason for the same application: listed once, with the live message
+    both = [{"job_id": "w", "company": "Wayne Enterprises", "kind": "code", "message": "Wayne emailed you a code."}]
+    got = [b for b in _blocks("what needs me?", attention=both) if b["t"] == "item" and b["text"] == "Wayne Enterprises"]
+    assert [b["meta"] for b in got] == ["Wayne emailed you a code."]
+
+
+def test_code_waits_dont_crowd_out_applications_ready_to_submit():
+    db.conn()
+    _job("ready", "Initech", "filled", hold="Why Initech? wasn't sure")
+    db.x("UPDATE jobs SET updated_at=updated_at-3600 WHERE id='ready'")              # older than every code wait
+    for i in range(45):
+        _job(f"c{i}", f"Company {i}", "filled", hold="Emailed verification code needed")
+    got = _sections(_blocks("what needs me?"))
+    assert len(got["Only you can do"]) == 45 and got["Filled, waiting for you to submit"] == ["Initech"]
 
 
 def test_company_counts_and_unknowns():

@@ -231,7 +231,7 @@ def _only_you(attention, company) -> list[dict]:
                   + " ORDER BY updated_at DESC", (company,) if company else ()):
         if r["id"] not in seen and CODE_HOLD.search(r["hold_reason"] or ""):
             items.append({"job_id": r["id"], "company": r["company"], "kind": "code",
-                          "message": f"{r['company']} emailed you a verification code."})
+                          "message": r["hold_reason"]})          # as recorded: it may not say how the code came
     return items
 
 
@@ -247,7 +247,7 @@ def _waiting(since, until, label, company, attention):
             yield {"t": "item", "text": a["company"], "meta": a["message"], "job_id": a["job_id"], "urgent": True}
     mine = {a["job_id"] for a in codes}            # listed once, under what only you can do
     ready = [r for r in db.q(f"SELECT id, company, title, hold_reason, updated_at FROM jobs WHERE status='filled'{cw} "
-                             "ORDER BY updated_at DESC LIMIT 40", cp) if r["id"] not in mine]
+                             "ORDER BY updated_at DESC", cp) if r["id"] not in mine][:40]
     if ready:
         any_ = True
         yield {"t": "head", "text": f"Filled, waiting for you to submit  {len(ready)}"}
