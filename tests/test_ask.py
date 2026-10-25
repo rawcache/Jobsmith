@@ -49,8 +49,38 @@ def test_the_two_part_question():
     assert heads[0].startswith("Applied in the past 6 hours")
     assert "Acme Robotics" in items and "Globex" not in items[:1]
     assert any(h.startswith("Only you can do") for h in heads)
-    assert any(h.startswith("Filled, waiting for you to submit") for h in heads)
     assert any(h.startswith("Messages drafted, not sent") for h in heads) and "Priya Natarajan" in items
+
+
+def _sections(blocks) -> dict[str, list[str]]:
+    """Each heading's items, by heading without its count."""
+    out, head = {}, None
+    for b in blocks:
+        if b["t"] == "head":
+            head = b["text"].rsplit("  ", 1)[0]
+            out[head] = []
+        elif b["t"] == "item" and head:
+            out[head].append(b["text"])
+    return out
+
+
+def test_an_emailed_code_is_only_you_can_do():
+    """An application waiting on an emailed code can't be submitted until you get it: it goes under "Only you can
+    do", once, not under "Filled, waiting for you to submit". Whether its tab is live (attention) or only its hold
+    reason says so, as with the practice copy's Wayne Enterprises."""
+    db.conn()
+    _job("w", "Wayne Enterprises", "filled", hold="Emailed verification code needed")
+    _job("s", "Stark Industries", "filled", hold="Why Stark? wasn't sure")
+    _job("l", "Lumon", "filled", hold="Why Lumon? wasn't sure")
+    live = [{"job_id": "l", "company": "Lumon", "kind": "code", "message": "Lumon emailed you a verification code."}]
+    for q in ("what needs me?", "any verification codes?"):
+        got = _sections(_blocks(q, attention=live))
+        assert sorted(got["Only you can do" if q == "what needs me?" else "Codes, CAPTCHAs and sign-ins"]) == \
+            ["Lumon", "Wayne Enterprises"], (q, got)
+        if q == "what needs me?":
+            assert got["Filled, waiting for you to submit"] == ["Stark Industries"]
+    at_wayne = _sections(_blocks("what needs me at wayne enterprises?"))
+    assert at_wayne == {"Only you can do": ["Wayne Enterprises"]}
 
 
 def test_company_counts_and_unknowns():
