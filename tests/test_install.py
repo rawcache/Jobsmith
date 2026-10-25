@@ -293,14 +293,16 @@ def _run_ps1(tmp_path: Path, fake_rest: str, uv_body: str, pypi_up: bool = True,
 
 
 @ps_only
+@pytest.mark.skipif(os.name != "nt", reason="the stand-in jobsmith is a cmd.exe program")
 def test_install_ps1_ending_works_with_an_older_release(tmp_path):
-    """A release from before `doctor --browser`: the flag fails, so the full doctor runs quietly instead."""
-    script_jobsmith = ("if ($args[1] -eq '--browser') { Write-Error 'error: unrecognized arguments: --browser'; "
-                       "$global:LASTEXITCODE = 2 } else { $global:LASTEXITCODE = 0 }")
+    """A release from before `doctor --browser`: the flag fails, so the full doctor runs quietly instead. A real
+    program's stderr, as argparse writes it: Windows PowerShell must neither stop on it nor show it."""
+    script_jobsmith = ("if ($args[1] -eq '--browser') { cmd /c \"echo error: unrecognized arguments: --browser 1>&2 & exit /b 2\" } "
+                       "else { $global:LASTEXITCODE = 0 }")
     r, _ = _run_ps1(tmp_path, _rest_release(_release("v0.4.0")), "$global:LASTEXITCODE = 0", jobsmith_body=script_jobsmith)
     assert r.returncode == 0, (r.stdout, r.stderr)
     assert (tmp_path / "doctor.ran").read_text().splitlines() == ["doctor --browser", "doctor"]
-    assert "Installed Jobsmith 0.4.0." in r.stdout and "unrecognized" not in r.stdout
+    assert "Installed Jobsmith 0.4.0." in r.stdout and "unrecognized" not in r.stdout + r.stderr
 
 
 def _rest_release(body: str) -> str:
