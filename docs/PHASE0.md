@@ -47,8 +47,10 @@ Work top to bottom. Tick each box in this file as it's done and commit the tick 
 
 ## 5. Fresh-install test (the gate)
 
-- [ ] On a clean macOS user account (or a fresh VM): run the one-line installer from the README, then
+- [x] On a clean macOS user account (or a fresh VM): run the one-line installer from the README, then
       `jobsmith demo`. Time it. Under 5 minutes, or fix what was slow.
+      Passed 2026-10-24 on an Intel Mac (bash, conda active): install 25 s, `jobsmith demo` almost instant,
+      `jobsmith demo show` played all 3 applications, the ask box answered from records. (v0.4.2)
 - [ ] Same on Windows with `install.ps1`.
 - [ ] Load the extension unpacked and confirm the panel appears on a Greenhouse posting.
 
