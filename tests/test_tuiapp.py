@@ -159,3 +159,25 @@ def test_timers_survive_the_app_closing(engine):
             app.animate()                                          # would raise NoMatches('#logo')
             app.apply_state({"active": {}, "demo": True}, [], {}, {})   # would raise NoMatches('#hello')
     asyncio.run(go())
+
+
+@pytest.mark.parametrize("demo", [True, False])
+def test_the_practice_copy_says_whose_data_it_is(engine, demo):
+    """In the practice copy you're the made-up Alex Rivera; "Welcome back, Alex!" read as if it were your own data."""
+    from textual.widgets import Static
+    from jobsmith.tuiapp import Jobsmith
+    db.conn()
+
+    async def go():
+        app = Jobsmith(engine, splash=False)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause(0.3)
+            app.state = {"st": {"demo": demo}, "home": {"first_name": "Alex"}}
+            app.paint_hello()
+            return str(app.query_one("#hello", Static).render())
+    hello = asyncio.run(go())
+    if demo:
+        assert hello.startswith("Welcome to the practice copy. You're Alex Rivera, a made-up student.")
+        assert "Welcome back" not in hello
+    else:
+        assert hello.startswith("Welcome back, Alex!")

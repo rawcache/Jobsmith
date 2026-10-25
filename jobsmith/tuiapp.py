@@ -916,7 +916,10 @@ class Jobsmith(App):
             more.append("next run " + time.strftime("%I:%M %p", time.localtime(nxt)).lstrip("0"))
         if home.get("queued"):
             more.append(f"{home['queued']} good matches queued")
-        t = Text.assemble((f"Welcome back{', ' + name if name else ''}!", "bold"), "\n",
+        # The practice copy's profile is the made-up Alex Rivera: say so, so nobody thinks it's their own data
+        hello = ("Welcome to the practice copy. You're Alex Rivera, a made-up student." if st.get("demo")
+                 else f"Welcome back{', ' + name if name else ''}!")
+        t = Text.assemble((hello, "bold"), "\n",
                           ("Autopilot " + ("on" if on else "off"), EMBER if on else STEEL), (" · " + " · ".join(bits) if home else "", STEEL), "\n",
                           (" · ".join(more), DIM), "\n",
                           ("Ask anything about your job hunt, or say where to apply.", INK), "\n",

@@ -298,10 +298,13 @@ def main(argv: list[str]) -> None:
             tuiapp.run(url.split("/#")[0].rstrip("/"), splash=False, start="show")
             _say("The practice copy is still running. Stop it with: jobsmith demo stop")
             return
-        url = demo(setup="--setup" in rest, keep="--keep" in rest)
+        setup = "--setup" in rest
+        url = demo(setup=setup, keep="--keep" in rest)
         _say(f"Practice copy running at {url}\nA made-up person (Alex Rivera) and made-up jobs. Nothing real is opened, "
-             f"synced or sent.\nTheir resume to upload while testing setup: {DEMO_DIR / 'Alex_Rivera_resume.tex'}\n"
-             "Stop it with: jobsmith demo stop")
+             "synced or sent.\n"
+             + (f"Their resume to upload while testing setup: {DEMO_DIR / 'Alex_Rivera_resume.tex'}\n" if setup
+                else "Watch autopilot: jobsmith demo show\n")
+             + "Stop it with: jobsmith demo stop")
     elif cmd == "dev":
         dev(real="--real" in rest)
     elif cmd == "check":

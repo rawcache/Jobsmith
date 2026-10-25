@@ -148,3 +148,15 @@ def test_demo_show_points_the_terminal_at_its_own_practice_copy(monkeypatch):
     devtools.main(["demo", "show"])
     assert calls["demo"] == {"open_browser": False}                   # always a fresh practice copy of its own
     assert calls["run"] == ("http://127.0.0.1:8766", {"splash": False, "start": "show"})
+
+
+@pytest.mark.parametrize("setup", [False, True])
+def test_demo_says_what_to_try_next(monkeypatch, capsys, setup):
+    """The plain practice copy points at `jobsmith demo show`; the one for testing setup says which resume to use."""
+    from jobsmith import devtools
+    monkeypatch.setattr(devtools, "demo", lambda **kw: "http://127.0.0.1:8766/#/")
+    devtools.main(["demo"] + (["--setup"] if setup else []))
+    out = capsys.readouterr().out
+    assert "Practice copy running at http://127.0.0.1:8766/#/" in out and "jobsmith demo stop" in out
+    assert ("Watch autopilot: jobsmith demo show" in out) != setup
+    assert ("Alex_Rivera_resume.tex" in out) == setup
