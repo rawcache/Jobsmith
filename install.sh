@@ -93,9 +93,12 @@ fi
 [ -n "${JOBSMITH_INSTALL_LOG:-}" ] || rm -f "$log"
 bin=$(uv tool dir --bin 2>/dev/null) && export PATH="$bin:$PATH"
 # Chrome or Edge if you have one, else download Chromium now rather than on your first application.
-# Silent unless it downloads; the full check is `jobsmith doctor`.
-jobsmith doctor --browser || true
-version=$(jobsmith --version 2>/dev/null | sed 's/^jobsmith //') || version=""
+# Silent unless it downloads; the full check is `jobsmith doctor`. This script is served from main, so the release it
+# installs may predate --browser: then the full check runs, quietly.
+jobsmith doctor --browser 2>/dev/null || jobsmith doctor >/dev/null 2>&1 || true
+# From the wheel's name (jobsmith-0.4.3-py3-none-any.whl) or the tag, not from jobsmith itself, for the same reason
+case "$ref" in v*) version="${ref#v}" ;; *) version="" ;; esac
+[ -z "$wheel" ] || version=$(basename "$wheel" | sed -n 's/^jobsmith-\([0-9][0-9.]*\)-.*\.whl$/\1/p')
 echo
 echo "Installed Jobsmith${version:+ $version}."
 if ! (PATH="$start_path"; command -v jobsmith >/dev/null 2>&1); then

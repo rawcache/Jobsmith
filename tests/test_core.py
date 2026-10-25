@@ -1011,9 +1011,10 @@ def test_version_needs_no_engine(monkeypatch, capsys):
     assert capsys.readouterr().out == f"jobsmith {jobsmith.__version__}\n"
 
 
-@pytest.mark.parametrize("found", [True, False])
-def test_doctor_browser_is_quiet_unless_it_downloads(monkeypatch, capsys, found):
-    """The installer's browser check: silent when Chrome or Edge works, one line before a Chromium download."""
+@pytest.mark.parametrize("found,download_ok", [(True, True), (False, True), (False, False)])
+def test_doctor_browser_is_quiet_unless_it_downloads(monkeypatch, capsys, found, download_ok):
+    """The installer's browser check: silent when Chrome or Edge works, one line before a Chromium download, and
+    what to do if the download fails. It never fails the install itself."""
     import subprocess
     import sys
     from jobsmith import cli
@@ -1023,8 +1024,14 @@ def test_doctor_browser_is_quiet_unless_it_downloads(monkeypatch, capsys, found)
         if not found:
             raise OSError("no browser")
     monkeypatch.setattr(cli.asyncio, "run", launch)
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, "", ""))
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0 if download_ok else 1, "", "no disk"))
     monkeypatch.setattr(sys, "argv", ["jobsmith", "doctor", "--browser"])
     cli.main()
-    out = capsys.readouterr().out
-    assert out == ("" if found else "Downloading a browser for Jobsmith to fill applications in (about 150 MB)...\n")
+    out = capsys.readouterr().out.splitlines()
+    if found:
+        assert out == []
+    else:
+        assert out[0] == "Downloading a browser for Jobsmith to fill applications in (about 150 MB)..."
+        assert (len(out) == 1) == download_ok
+        if not download_ok:
+            assert "Run `jobsmith doctor` later to try again" in out[1]
