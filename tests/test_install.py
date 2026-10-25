@@ -105,7 +105,8 @@ exit {curl_exit}
     _stub(tmp_path / "uv", f'''case "$1 $2" in
   "tool dir") echo "{bin_}" ;;
   "tool install") echo "$*" >> "{log}"; {fail}; mkdir -p "{bin_}"
-    printf '#!/bin/sh\\necho "$*" >> "{tmp_path}/jobsmith.log"\\n' > "{bin_}/jobsmith"; chmod +x "{bin_}/jobsmith" ;;
+    printf '#!/bin/sh\\necho "$*" >> "{tmp_path}/jobsmith.log"\\n[ "$1" = --version ] && echo "jobsmith 0.4.2"\\nexit 0\\n' > "{bin_}/jobsmith"
+    chmod +x "{bin_}/jobsmith" ;;
   *) echo "uv 0.0.0" ;;
 esac
 ''')
@@ -195,7 +196,7 @@ def test_install_sh_gives_up_on_a_connection_that_keeps_dropping(tmp_path):
 def test_install_sh_shows_a_short_message_when_a_package_wont_install(tmp_path):
     """Not hundreds of lines of Rust: what failed, on what computer, and where to report it."""
     r, log = _run_sh(tmp_path, "200", _release("v0.4.2", WHEEL), install_fails="build")
-    assert r.returncode != 0 and "Done" not in r.stdout
+    assert r.returncode != 0 and "Installed" not in r.stdout
     assert len(_installs(log)) == 1                                   # a build failure isn't retried
     assert "Jobsmith couldn't install a package for this computer" in r.stderr
     assert f"{REPO}/issues/new" in r.stderr and "Failed to build `cryptography==50.0.2`" in r.stderr
@@ -236,23 +237,27 @@ def test_install_sh_trusts_a_mirror_instead_of_pypi(tmp_path):
     assert _installs(log) == [["--no-build", WHEEL]]
 
 
+ENDING = ["Try it with made-up data:  jobsmith demo", "Set it up for real:        jobsmith", "An AI is optional."]
+
+
 @sh_only
 @pytest.mark.parametrize("on_path", [False, True])
 def test_install_sh_says_how_to_start_it(tmp_path, on_path):
-    """Pasted into a terminal whose PATH lacks uv's tool folder, `jobsmith` won't be found in that window: say to
-    open a new one. Either way the installer itself can run `jobsmith doctor`."""
+    """No doctor report: the version, the two ways to start, and that an AI is optional. Pasted into a terminal
+    whose PATH lacks uv's tool folder, `jobsmith` won't be found in that window: say to open a new one first."""
     r, _ = _run_sh(tmp_path, "200", _release("v0.4.2", WHEEL), bin_on_path=on_path)
     assert r.returncode == 0, r.stderr
-    assert (tmp_path / "jobsmith.log").read_text().split() == ["doctor"]
-    if on_path:
-        assert "Done. Run:  jobsmith" in r.stdout and "new terminal" not in r.stdout
-    else:
-        assert "Open a new terminal window, then run:  jobsmith" in r.stdout and "uv tool update-shell" in r.stdout
+    # only the quiet browser check (Chrome or Edge, else Chromium now), and the version for the message
+    assert (tmp_path / "jobsmith.log").read_text().splitlines() == ["doctor --browser", "--version"]
+    assert "Installed Jobsmith 0.4.2." in r.stdout and all(line in r.stdout for line in ENDING)
+    assert "AI:" not in r.stdout and "Facts:" not in r.stdout
+    assert ("Open a new terminal window first" in r.stdout) != on_path
+    assert ("uv tool update-shell" in r.stdout) != on_path
 
 
 def _run_ps1(tmp_path: Path, fake_rest: str, uv_body: str, pypi_up: bool = True, env: dict | None = None):
     """install.ps1 with stand-ins: Invoke-RestMethod answers like GitHub, Invoke-WebRequest like pypi.org, uv is
-    a function that logs installs (uv_body decides its exit code), jobsmith marks that doctor ran."""
+    a function that logs installs (uv_body decides its exit code), jobsmith logs what it was asked to doctor.ran."""
     log = tmp_path / "uv.log"
     web = "" if pypi_up else "throw [System.Exception]::new('fake: no route to pypi.org')"
     script = (f"function Invoke-RestMethod {{ param($Uri, $Headers, $TimeoutSec) {fake_rest} }}\n"
@@ -261,7 +266,8 @@ def _run_ps1(tmp_path: Path, fake_rest: str, uv_body: str, pypi_up: bool = True,
               f"function uv {{ if ($args[0] -eq 'tool' -and $args[1] -eq 'dir') {{ return '{tmp_path}' }}; "
               "if ($args[0] -eq '--version') { return 'uv 0.0.0' }; "
               f"Add-Content -Path '{log}' -Value ($args -join ' '); {uv_body} }}\n"
-              f"function jobsmith {{ Set-Content -Path '{tmp_path / 'doctor.ran'}' -Value 1 }}\n"
+              f"function jobsmith {{ Add-Content -Path '{tmp_path / 'doctor.ran'}' -Value ($args -join ' '); "
+              "if ($args[0] -eq '--version') { return 'jobsmith 0.4.2' } }\n"
               f"& '{ROOT / 'install.ps1'}'\n")
     r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
                        capture_output=True, text=True, timeout=60,
@@ -293,7 +299,9 @@ def test_install_ps1_picks_the_release(tmp_path, case):
     no_build, rest = _source_args(args)
     assert rest == _expected(want)
     assert no_build == (set() if want[0] == "wheel" else set(NATIVE_PS1))
-    assert "Done. Run:  jobsmith" in r.stdout       # jobsmith (a function here) is found in this window
+    assert "Installed Jobsmith 0.4.2." in r.stdout and all(line in r.stdout for line in ENDING)
+    assert "new PowerShell window" not in r.stdout   # jobsmith (a function here) is found in this window
+    assert (tmp_path / "doctor.ran").read_text().splitlines() == ["doctor --browser", "--version"]
 
 
 @ps_only
@@ -350,7 +358,7 @@ def test_install_ps1_shows_a_short_message_when_a_package_wont_install(tmp_path)
     body = ('cmd /c "echo error: Failed to build cryptography==50.0.2 1>&2 & '
             '(for /L %i in (1,1,300) do @echo    Compiling openssl-sys %i 1>&2) & exit /b 1"')
     r, log = _run_ps1(tmp_path, _rest_release(_release("v0.4.2", WHEEL)), body)
-    assert r.returncode != 0 and "Done" not in r.stdout, (r.stdout, r.stderr)
+    assert r.returncode != 0 and "Installed" not in r.stdout, (r.stdout, r.stderr)
     assert len(_installs(log)) == 1
     assert "Jobsmith couldn't install a package for this computer" in r.stdout
     assert f"{REPO}/issues/new" in r.stdout and "cryptography==50.0.2" in r.stdout

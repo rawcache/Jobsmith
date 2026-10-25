@@ -998,3 +998,33 @@ def test_values_nudge_ranking_and_reach_the_prompt():
     assert db.get_setting("values") == ["Pay", "Work-life balance", "Hard technical problems"]
     prompt = draft.build_prompt({"title": "Intern", "company": "X", "locations": []}, [])
     assert "VALUES IN A ROLE" in prompt and "Work-life balance" in prompt
+
+
+def test_version_needs_no_engine(monkeypatch, capsys):
+    """The installer prints the version it installed from `jobsmith --version`; it mustn't start anything."""
+    import sys
+    import jobsmith
+    from jobsmith import cli, tui
+    monkeypatch.setattr(tui, "main", lambda argv: (_ for _ in ()).throw(AssertionError("started the terminal app")))
+    monkeypatch.setattr(sys, "argv", ["jobsmith", "--version"])
+    cli.main()
+    assert capsys.readouterr().out == f"jobsmith {jobsmith.__version__}\n"
+
+
+@pytest.mark.parametrize("found", [True, False])
+def test_doctor_browser_is_quiet_unless_it_downloads(monkeypatch, capsys, found):
+    """The installer's browser check: silent when Chrome or Edge works, one line before a Chromium download."""
+    import subprocess
+    import sys
+    from jobsmith import cli
+
+    def launch(coro):                       # stands in for starting Chrome, Edge or Chromium
+        coro.close()
+        if not found:
+            raise OSError("no browser")
+    monkeypatch.setattr(cli.asyncio, "run", launch)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, "", ""))
+    monkeypatch.setattr(sys, "argv", ["jobsmith", "doctor", "--browser"])
+    cli.main()
+    out = capsys.readouterr().out
+    assert out == ("" if found else "Downloading a browser for Jobsmith to fill applications in (about 150 MB)...\n")
