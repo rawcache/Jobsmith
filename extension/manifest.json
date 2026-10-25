@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Jobsmith",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "A side panel on job postings: autofill from your Jobsmith profile, resume match, who you know, cover letters, and Write with Jobsmith on open questions. Works with the Jobsmith app on your computer.",
   "icons": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" },
   "action": { "default_popup": "popup.html", "default_title": "Jobsmith", "default_icon": { "16": "icons/16.png", "32": "icons/32.png" } },
