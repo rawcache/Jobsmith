@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.3 (2026-10-25)
+
+### Changed
+- The installer ends by saying which version it installed and how to start: `jobsmith demo` to try it with made-up
+  data, or `jobsmith` to set it up for real. It says an AI is optional. The full check of your AI, browser and
+  resume is still `jobsmith doctor`.
+- `jobsmith demo` points you at `jobsmith demo show` to watch autopilot. (`jobsmith demo --setup` still says which
+  made-up resume to upload.)
+- The practice copy greets you with "Welcome to the practice copy. You're Alex Rivera, a made-up student." so its
+  data isn't mistaken for yours.
+- `jobsmith --version` prints the version.
+
+### Fixed
+- "What needs me?" lists an application waiting on an emailed code under "Only you can do", once, instead of under
+  "Filled, waiting for you to submit".
+- Many applications waiting on codes no longer push the ones ready to submit off that list.
+
 ## 0.4.2 (2026-10-24)
 
 ### Fixed
