@@ -83,12 +83,15 @@ def _stub(path: Path, body: str) -> None:
 
 
 def _run_sh(tmp_path: Path, code: str, body: str, curl_exit: int = 0, bin_on_path: bool = False,
-            install_fails: str = "", pypi_down: bool = False, env: dict | None = None):
+            install_fails: str = "", pypi_down: bool = False, env: dict | None = None, old_release: bool = False):
     """install.sh with stand-ins: curl answers like GitHub (and pypi.org is up unless pypi_down); uv logs
     installs and puts a jobsmith command in its tool folder (like `uv tool install`), which is on the starting
     PATH only if bin_on_path. install_fails is "build" (every try fails to build), "network" (the first try
     loses the connection, the next works) or "network-always"."""
     log, bin_ = tmp_path / "uv.log", tmp_path / "toolbin"
+    # a release from before `doctor --browser` rejects the flag, as argparse does
+    old_cli = ('[ "$2" = --browser ] && { echo "error: unrecognized arguments: --browser" >&2; exit 2; }; exit 0'
+               if old_release else "exit 0")
     _stub(tmp_path / "curl", f'''echo "$*" >> "{tmp_path}/curl.log"
 case "$*" in *pypi.org*) exit {7 if pypi_down else 0} ;; esac
 printf '%s\\n%s' '{body}' '{code}'
@@ -105,7 +108,7 @@ exit {curl_exit}
     _stub(tmp_path / "uv", f'''case "$1 $2" in
   "tool dir") echo "{bin_}" ;;
   "tool install") echo "$*" >> "{log}"; {fail}; mkdir -p "{bin_}"
-    printf '#!/bin/sh\\necho "$*" >> "{tmp_path}/jobsmith.log"\\n[ "$1" = --version ] && echo "jobsmith 0.4.2"\\nexit 0\\n' > "{bin_}/jobsmith"
+    printf '#!/bin/sh\\necho "$*" >> "{tmp_path}/jobsmith.log"\\n{old_cli}\\n' > "{bin_}/jobsmith"
     chmod +x "{bin_}/jobsmith" ;;
   *) echo "uv 0.0.0" ;;
 esac
@@ -247,15 +250,29 @@ def test_install_sh_says_how_to_start_it(tmp_path, on_path):
     whose PATH lacks uv's tool folder, `jobsmith` won't be found in that window: say to open a new one first."""
     r, _ = _run_sh(tmp_path, "200", _release("v0.4.2", WHEEL), bin_on_path=on_path)
     assert r.returncode == 0, r.stderr
-    # only the quiet browser check (Chrome or Edge, else Chromium now), and the version for the message
-    assert (tmp_path / "jobsmith.log").read_text().splitlines() == ["doctor --browser", "--version"]
+    # only the quiet browser check (Chrome or Edge, else Chromium now); the version comes from the wheel's name
+    assert (tmp_path / "jobsmith.log").read_text().splitlines() == ["doctor --browser"]
     assert "Installed Jobsmith 0.4.2." in r.stdout and all(line in r.stdout for line in ENDING)
     assert "AI:" not in r.stdout and "Facts:" not in r.stdout
     assert ("Open a new terminal window first" in r.stdout) != on_path
     assert ("uv tool update-shell" in r.stdout) != on_path
 
 
-def _run_ps1(tmp_path: Path, fake_rest: str, uv_body: str, pypi_up: bool = True, env: dict | None = None):
+@sh_only
+@pytest.mark.parametrize("case", ["release_without_wheel", "no_release"])
+def test_install_sh_ending_works_with_an_older_release(tmp_path, case):
+    """install.sh is served from main, so it may install a release from before `doctor --browser`: then the full
+    doctor runs quietly instead, and the version comes from the tag (none for main), never from jobsmith."""
+    code, body, _ = CASES[case]
+    r, _ = _run_sh(tmp_path, code, body, old_release=True)
+    assert r.returncode == 0, r.stderr
+    assert (tmp_path / "jobsmith.log").read_text().splitlines() == ["doctor --browser", "doctor"]
+    assert "unrecognized" not in r.stdout + r.stderr and "AI:" not in r.stdout
+    assert ("Installed Jobsmith 0.4.0." if case == "release_without_wheel" else "Installed Jobsmith.") in r.stdout
+
+
+def _run_ps1(tmp_path: Path, fake_rest: str, uv_body: str, pypi_up: bool = True, env: dict | None = None,
+             jobsmith_body: str = "$global:LASTEXITCODE = 0"):
     """install.ps1 with stand-ins: Invoke-RestMethod answers like GitHub, Invoke-WebRequest like pypi.org, uv is
     a function that logs installs (uv_body decides its exit code), jobsmith logs what it was asked to doctor.ran."""
     log = tmp_path / "uv.log"
@@ -267,12 +284,23 @@ def _run_ps1(tmp_path: Path, fake_rest: str, uv_body: str, pypi_up: bool = True,
               "if ($args[0] -eq '--version') { return 'uv 0.0.0' }; "
               f"Add-Content -Path '{log}' -Value ($args -join ' '); {uv_body} }}\n"
               f"function jobsmith {{ Add-Content -Path '{tmp_path / 'doctor.ran'}' -Value ($args -join ' '); "
-              "if ($args[0] -eq '--version') { return 'jobsmith 0.4.2' } }\n"
+              f"{jobsmith_body} }}\n"
               f"& '{ROOT / 'install.ps1'}'\n")
     r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
                        capture_output=True, text=True, timeout=60,
                        env={**os.environ, "TEMP": str(tmp_path), "TMP": str(tmp_path), **(env or {})})
     return r, log
+
+
+@ps_only
+def test_install_ps1_ending_works_with_an_older_release(tmp_path):
+    """A release from before `doctor --browser`: the flag fails, so the full doctor runs quietly instead."""
+    script_jobsmith = ("if ($args[1] -eq '--browser') { Write-Error 'error: unrecognized arguments: --browser'; "
+                       "$global:LASTEXITCODE = 2 } else { $global:LASTEXITCODE = 0 }")
+    r, _ = _run_ps1(tmp_path, _rest_release(_release("v0.4.0")), "$global:LASTEXITCODE = 0", jobsmith_body=script_jobsmith)
+    assert r.returncode == 0, (r.stdout, r.stderr)
+    assert (tmp_path / "doctor.ran").read_text().splitlines() == ["doctor --browser", "doctor"]
+    assert "Installed Jobsmith 0.4.0." in r.stdout and "unrecognized" not in r.stdout
 
 
 def _rest_release(body: str) -> str:
@@ -299,9 +327,12 @@ def test_install_ps1_picks_the_release(tmp_path, case):
     no_build, rest = _source_args(args)
     assert rest == _expected(want)
     assert no_build == (set() if want[0] == "wheel" else set(NATIVE_PS1))
-    assert "Installed Jobsmith 0.4.2." in r.stdout and all(line in r.stdout for line in ENDING)
+    kind, what = want
+    version = "0.4.2" if kind == "wheel" else "" if what == "main" else what.lstrip("v")
+    assert f"Installed Jobsmith{' ' + version if version else ''}." in r.stdout
+    assert all(line in r.stdout for line in ENDING)
     assert "new PowerShell window" not in r.stdout   # jobsmith (a function here) is found in this window
-    assert (tmp_path / "doctor.ran").read_text().splitlines() == ["doctor --browser", "--version"]
+    assert (tmp_path / "doctor.ran").read_text().splitlines() == ["doctor --browser"]
 
 
 @ps_only

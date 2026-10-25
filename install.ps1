@@ -124,9 +124,18 @@ if (-not $env:JOBSMITH_INSTALL_LOG) { Remove-Item -Path $log -ErrorAction Silent
 $bin = uv tool dir --bin
 if ($bin) { $env:Path = "$bin;$env:Path" }
 # Chrome or Edge if you have one, else download Chromium now rather than on your first application.
-# Silent unless it downloads; the full check is `jobsmith doctor`.
-jobsmith doctor --browser
-$version = "$(jobsmith --version)" -replace '^jobsmith\s*', ''
+# Silent unless it downloads; the full check is `jobsmith doctor`. This script is served from main, so the release it
+# installs may predate --browser: then the full check runs, quietly.
+function Initialize-Browser {
+  $ErrorActionPreference = "Continue"    # stderr from an older jobsmith mustn't stop the install here
+  jobsmith doctor --browser 2>$null
+  if ($LASTEXITCODE -ne 0) { jobsmith doctor *> $null }
+}
+Initialize-Browser
+# From the wheel's name (jobsmith-0.4.3-py3-none-any.whl) or the tag, not from jobsmith itself, for the same reason
+$version = ""
+if ($ref -match '^v(\d+\.\d+\.\d+)$') { $version = $Matches[1] }
+if ($wheel -and ((Split-Path -Leaf $wheel) -match '^jobsmith-(\d[\d.]*)-.*\.whl$')) { $version = $Matches[1] }
 Write-Host ""
 if ($version) { Write-Host "Installed Jobsmith $version." } else { Write-Host "Installed Jobsmith." }
 $now = $env:Path; $env:Path = $startPath
