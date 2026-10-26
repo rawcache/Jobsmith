@@ -371,13 +371,13 @@
     for (const a of answers) {
       let ok = false;
       const f = fields.find(x => x.id === a.id);
-      if (a.file === "resume" && !resume) noPdf = true;      // no resume PDF yet: skip the upload, fill the rest
+      if (a.file === "resume" && !resume) noPdf ||= !f?.filled;   // no resume PDF yet: skip the upload, fill the rest
       else try { ok = await fillOne(a.id, a, job_id); } catch (_) { ok = false; }
       if (ok) done++;
       else if (a.file === "resume" && !resume) { /* said once below */ }
       else if (f && f.required && !f.filled) { missing.push(f.label); if (a.kind === "generated" && !a.value) needAi++; }
       const el = els.get(a.id); const node = Array.isArray(el) ? el[0]?.closest("fieldset") || el[0] : el;
-      if (node && !ok && f?.required) node.style.outline = "2px solid #d97706";
+      if (node && !ok && f?.required && !f.filled) node.style.outline = "2px solid #d97706";
     }
     say(`<b>Filled ${done} of ${fields.length} fields.</b> Check it, then submit when you're ready.` +
       (noPdf ? `<br>Add your resume PDF to attach it (Profile → PDF employers get, in Jobsmith).` : "") +
