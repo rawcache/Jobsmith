@@ -76,6 +76,11 @@
     return out.filter(f => f.label);
   }
 
+  // A frame worth filling: a whole application, or, on one of the six job sites (the same list as popup.js), one
+  // step of one that asks for something (a resume, a page of questions). A newsletter box elsewhere is left alone.
+  const JOB_SITES = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|myworkdayjobs\.com|icims\.com|smartrecruiters\.com)$/i;
+  const holdsForm = fields => looksLikeApplication(fields) || (JOB_SITES.test(location.hostname) && fields.some(f => f.required));
+
   function looksLikeApplication(fields) {
     if (fields.length < 3) return false;
     const text = fields.map(f => f.label.toLowerCase()).join(" | ");
@@ -475,12 +480,12 @@
 
   addEventListener("message", e => {                 // the page above asking whether this frame has Jobsmith
     if (e.data && e.data.jobsmith === "who" && e.source === window.parent)
-      e.source.postMessage({ jobsmith: "here", application: looksLikeApplication(scan()) }, "*");
+      e.source.postMessage({ jobsmith: "here", application: holdsForm(scan()) }, "*");
   });
 
   chrome.runtime.onMessage.addListener((msg, _s, reply) => {
     if (msg.type === "fill") {                       // every frame hears it; a frame fills only if it holds a form
-      if (window.top === window || looksLikeApplication(scan())) fill();
+      if (window.top === window || holdsForm(scan())) fill();
       reply({ ok: true });
     }
     if (msg.type === "open" && window.top === window) { openPanel(); reply({ ok: true }); }
