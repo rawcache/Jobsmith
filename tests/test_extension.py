@@ -3,6 +3,7 @@ goes when another extension's tab is on the right edge, the popup opening the pa
 import json
 import os
 import re
+import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -768,16 +769,25 @@ async def test_popup_reaches_a_job_site_form_in_a_frame_opened_before_the_extens
     chrome = subprocess.Popen([CHROMIUM, "--headless=new", f"--remote-debugging-port={port}", f"--user-data-dir={profile_dir}",
                                "--enable-unsafe-extension-debugging", "--no-first-run", "--no-default-browser-check",
                                f"--host-resolver-rules=MAP {LISTED} 127.0.0.1, MAP {UNLISTED} 127.0.0.1",
-                               "--ignore-certificate-errors", *browser_args(), "about:blank"],
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                               "--ignore-certificate-errors", *browser_args(),
+                               # Ubuntu 24.04 (CI) blocks Chrome's sandbox for ordinary users; Playwright's own
+                               # launches turn it off the same way
+                               *(["--no-sandbox"] if sys.platform.startswith("linux") else []), "about:blank"],
+                              stdout=subprocess.DEVNULL, stderr=open(tmp_path / "chrome.log", "w"))
     try:
         import urllib.request
-        for _ in range(200):                     # Chrome's DevTools endpoint answers once it's ready to be driven
+        for _ in range(300):                     # Chrome's DevTools endpoint answers once it's ready to be driven
             try:
                 urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=1).read()
                 break
             except OSError:
+                if chrome.poll() is not None:
+                    break
                 await asyncio.sleep(0.1)
+        else:
+            pytest.fail("Chrome didn't start:\n" + (tmp_path / "chrome.log").read_text()[-3000:])
+        if chrome.poll() is not None:
+            pytest.fail(f"Chrome exited ({chrome.returncode}):\n" + (tmp_path / "chrome.log").read_text()[-3000:])
         async with async_playwright() as pw:
             b = await pw.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
             ctx = b.contexts[0]
