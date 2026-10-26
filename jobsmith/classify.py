@@ -114,8 +114,11 @@ def question_kind(label: str, qtype: str, options: list[str] | None = None) -> s
         return "file"
     if options:
         return "choice"
-    if ESSAY_Q.search(l):                         # "Are you willing to relocate? Explain." wants sentences
-        return "essay"
+    # "Please tell us your LinkedIn URL" asks politely for a fact Jobsmith knows; "Tell us your experience with
+    # Python" and "Tell us about yourself" want sentences.
+    fact = len(l.split()) <= 10 and (canon_for(l) or PLACE_Q.search(l))
+    if ESSAY_Q.search(re.sub(r"\b(tell us|share|provide|let us know) (your|the)\b", "your", l, flags=re.I) if fact else l):
+        return "essay"                            # "Are you willing to relocate? Explain." wants sentences
     canon = canon_for(l)
     if canon in ("location", "city", "country"):
         return "location"

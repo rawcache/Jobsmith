@@ -474,11 +474,15 @@
   }
 
   addEventListener("message", e => {                 // the page above asking whether this frame has Jobsmith
-    if (e.data && e.data.jobsmith === "who" && e.source === window.parent) e.source.postMessage({ jobsmith: "here" }, "*");
+    if (e.data && e.data.jobsmith === "who" && e.source === window.parent)
+      e.source.postMessage({ jobsmith: "here", application: looksLikeApplication(scan()) }, "*");
   });
 
   chrome.runtime.onMessage.addListener((msg, _s, reply) => {
-    if (msg.type === "fill") { fill(); reply({ ok: true }); }
+    if (msg.type === "fill") {                       // every frame hears it; a frame fills only if it holds a form
+      if (window.top === window || looksLikeApplication(scan())) fill();
+      reply({ ok: true });
+    }
     if (msg.type === "open" && window.top === window) { openPanel(); reply({ ok: true }); }
     if (msg.type === "info") {
       const fields = scan();
@@ -487,14 +491,14 @@
       // script answers "who's there?" below. A page could fake that answer, but all it would hide is the reload hint.
       const big = [...document.querySelectorAll("iframe[src]")].filter(f => { const r = f.getBoundingClientRect(); return r.width > 200 && r.height > 200; })
         .map(f => { try { return { win: f.contentWindow, host: new URL(f.src, location.href).hostname }; } catch (_) { return null; } }).filter(Boolean);
-      const here = new Set();
-      const heard = e => { if (e.data && e.data.jobsmith === "here") here.add(e.source); };
+      const here = new Set(); let forms = 0;
+      const heard = e => { if (e.data && e.data.jobsmith === "here") { here.add(e.source); forms += e.data.application ? 1 : 0; } };
       addEventListener("message", heard);
       for (const f of big) try { f.win.postMessage({ jobsmith: "who" }, "*"); } catch (_) { /* gone */ }
       setTimeout(() => {
         removeEventListener("message", heard);
         reply({ application: looksLikeApplication(fields), fields: fields.length, title: pageTitle(),
-                frames: big.map(f => f.host), bare: big.filter(f => !here.has(f.win)).map(f => f.host) });
+                frames: big.map(f => f.host), bare: big.filter(f => !here.has(f.win)).map(f => f.host), forms });
       }, 250);
       return true;                                   // replying after the frames have had a chance to answer
     }

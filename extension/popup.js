@@ -25,10 +25,15 @@ async function pageScript(tab) {
       return null;                                   // chrome:// pages, the Web Store, PDFs
     }
   }
-  if ((info.frames || []).some(h => JOB_SITES.test(h)))   // read afresh every time the popup opens
+  let now = info;                                    // read afresh every time the popup opens
+  if ((info.frames || []).some(h => JOB_SITES.test(h))) {
+    // Chrome adds it only to the frames the extension may reach; the others are skipped
     await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, files: ["content.js"] })
       .catch(() => { info.reload = true; });
-  if (!info.application && (info.bare || []).some(h => !JOB_SITES.test(h))) info.reload = true;
+    now = await ask().catch(() => info);             // which frames hold a form, now they can say
+  }
+  // A form was reached, so another site's frame beside it (a video, a map) isn't worth a reload.
+  if (!info.application && !now.forms && (now.bare || []).some(h => !JOB_SITES.test(h))) info.reload = true;
   return info;
 }
 
