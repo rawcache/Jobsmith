@@ -3,6 +3,7 @@
     jobsmith demo            a practice copy with a made-up person and jobs, at http://127.0.0.1:8766
     jobsmith demo --setup    the same, starting the website setup from step 1 (nothing filled in yet)
     jobsmith demo --keep     reuse the practice copy as you left it instead of starting over
+    jobsmith demo --no-open  don't open the browser (the install check uses this)
     jobsmith demo stop       stop the practice copy
     jobsmith demo show       a fresh practice copy, then the terminal app plays autopilot on 3 made-up applications
     jobsmith setup           run your real setup again from step 1, in the terminal
@@ -336,7 +337,7 @@ def main(argv: list[str]) -> None:
             _say("The practice copy is still running. Stop it with: jobsmith demo stop")
             return
         setup = "--setup" in rest
-        url = demo(setup=setup, keep="--keep" in rest)
+        url = demo(setup=setup, keep="--keep" in rest, open_browser="--no-open" not in rest)
         _say(f"Practice copy running at {url}\nA made-up person (Alex Rivera) and made-up jobs. Nothing real is opened, "
              "synced or sent.\n"
              + (f"Their resume to upload while testing setup: {DEMO_DIR / 'Alex_Rivera_resume.tex'}\n" if setup

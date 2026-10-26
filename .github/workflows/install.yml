@@ -71,6 +71,23 @@ jobs:
           print(platform.system(), platform.machine(), sys.version.split()[0], 'jobsmith', jobsmith.__version__, 'cryptography', cryptography.__version__)
           "
           jobsmith --help > /dev/null
+      - name: The practice copy starts
+        # The gate is reaching the practice copy, not just installing: start it, wait for it to answer, stop it.
+        # Run outside the checkout, so `python -m jobsmith` imports the installed package, not ./jobsmith.
+        shell: bash
+        working-directory: ${{ runner.temp }}
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          unix() { if command -v cygpath > /dev/null; then cygpath -u "$1"; else echo "$1"; fi; }
+          export PATH="$(unix "$(uv tool dir --bin)"):$PATH"
+          start=$(date +%s)
+          jobsmith demo --no-open
+          for i in $(seq 60); do curl -fs http://127.0.0.1:8766/api/ext/ping > ping.json && break; sleep 1; done
+          cat ping.json; echo
+          grep -q '"resume":"Alex_Rivera_resume.pdf"' ping.json || { echo "::error::The practice copy didn't answer"; exit 1; }
+          echo "The practice copy answered $(( $(date +%s) - start )) s after jobsmith demo"
+          jobsmith demo stop
+          if curl -fs http://127.0.0.1:8766/api/ext/ping > /dev/null; then echo "::error::jobsmith demo stop left it running"; exit 1; fi
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: "install-log-${{ matrix.os }}", path: install.log, if-no-files-found: ignore }
