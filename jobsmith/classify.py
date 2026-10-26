@@ -81,12 +81,51 @@ RULES: list[tuple[str, str]] = [
     (r"zip|postal", "postal_code"),
     (r"^country( of residence| or region)?$|country you (live|reside)", "country"),
     (r"^location|current location|city.*(reside|live)|where (are you|do you) (located|live|based)|"
-     r"^city\b", "location"),
+     r"^city\b|where do you (intend|plan|expect) to work|(list|enter) (your )?city and state", "location"),
 ]
 
 # Questions that look standard but depend on the company — always generated, never reused verbatim.
 COMPANY_SPECIFIC = re.compile(r"why .*(us|company|team|role|position|interest)|what (excites|interests|draws)|"
                               r"interest(ed)? in (this|the|our)|tell us about|describe", re.I)
+
+
+# What shape of answer a question wants, so a reused paragraph never lands in a city box (or "Yes" in an essay).
+PLACE_Q = re.compile(r"\b(city|location|located|based|reside|relocat\w*)\b|(city|country),? (and |or |/)?state|"
+                     r"state (of residence|/province)|(which|what) state|^state$|where (are|do|will|would) you( \w+){0,3} "
+                     r"(live|work|be (located|based|working))|work from|which (office|city)", re.I)
+YES_NO_Q = re.compile(r"^(are|do|did|have|has|will|would|can|could|is|were) (you|your)\b", re.I)
+ESSAY_Q = re.compile(r"\b(why|describe|tell us|explain|walk us through|what (excites|interests|draws|motivates)|"
+                     r"how (have|did|would|do) you (approach|handle|solve|deal|use|apply|go about|define|measure|"
+                     r"balance|prioriti[sz]e|manage|stay|keep))\b", re.I)
+# "Why us" questions: an answer that never names the company is generic. (Not "describe a project": that's yours.)
+WHY_COMPANY = re.compile(r"why (do you want to|would you like to|are you interested|are you applying|us\b|this "
+                         r"(company|role|team|position)|join|work (at|for|with))|interest(ed)? in (this|the|our|joining)|"
+                         r"what (excites|interests|draws|attracts) you (about|to)", re.I)
+# Where you'd work isn't where you live: Jobsmith offers your profile location, for you to check.
+WORK_INTENT = re.compile(r"where do you (intend|plan|expect|want) to work|work from", re.I)
+
+
+def question_kind(label: str, qtype: str, options: list[str] | None = None) -> str:
+    """'choice', 'file', 'location', 'yes_no', 'essay', 'open' or 'short'. Choices are checked against their
+    options elsewhere. The wording decides, not the box: "How did you hear about us?" in a big box is still short
+    to answer, and "Why us?" in a one-line box still wants sentences."""
+    l = " ".join((label or "").split())
+    if qtype == "file":
+        return "file"
+    if options:
+        return "choice"
+    if ESSAY_Q.search(l):                         # "Are you willing to relocate? Explain." wants sentences
+        return "essay"
+    canon = canon_for(l)
+    if canon in ("location", "city", "country"):
+        return "location"
+    if YES_NO_Q.search(l) and qtype != "textarea":                                # "Are you willing to relocate?"
+        return "yes_no"
+    if canon and canon not in ("cover_letter", "resume"):   # a question Jobsmith knows has a short answer, any box size
+        return "short"
+    if PLACE_Q.search(l):
+        return "location"
+    return "open" if qtype == "textarea" else "short"
 
 
 def canon_for(label: str) -> str | None:

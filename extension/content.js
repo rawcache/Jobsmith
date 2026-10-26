@@ -49,6 +49,9 @@
       const type = (el.type || el.tagName).toLowerCase();
       if (["hidden", "submit", "button", "image", "reset", "search", "password"].includes(type)) continue;
       if (!visible(el) && type !== "file") continue;
+      // A hidden copy that custom selects keep for the browser's "required" check (react-select's requiredInput):
+      // not a question, and it borrows the label of whatever fieldset it sits in ("Phone").
+      if (type !== "file" && el.getAttribute("aria-hidden") === "true" && el.tabIndex < 0) continue;
       if (type === "radio" || type === "checkbox") {
         const g = el.name || el.id; if (!g || groups.has(g)) continue; groups.add(g);
         const group = el.name ? [...document.querySelectorAll(`input[name="${CSS.escape(el.name)}"]`)] : [el];
@@ -358,6 +361,21 @@
     return true;
   }
 
+  // A last check on this side, with the engine's own reading of the question (qkind) and the same limits as its
+  // draft.answer_fits: never a paragraph where it asks where, yes or no, or a short line, and never a word or two
+  // where it asks for sentences. tests/test_extension.py checks both sides agree.
+  function fits(qkind, value) {
+    const v = String(value || "").trim(); if (!v || !qkind) return "";
+    const words = v.split(/\s+/).length, sentences = (v.match(/[.!?](\s|$)/g) || []).length;
+    if (qkind === "location" && (words > 8 || sentences > 1 || /^(i|i'm|my|we)\b/i.test(v) || !/\p{L}/u.test(v)))
+      return "asks where, but the answer isn't a place";
+    if (qkind === "yes_no" && !/^(yes|no|n\/?a)\b/i.test(v) && (words > 25 || sentences > 2)) return "asks yes or no, but the answer is a paragraph";
+    if (qkind === "short" && (words > 40 || sentences > 2)) return "a short field, but the answer is a paragraph";
+    if (qkind === "essay" && words < 3 && !/^n\/?a$/i.test(v)) return "asks for a written answer, but the answer is a word or two";
+    return "";
+  }
+  globalThis.__jobsmithFits = fits;
+
   let busy = false;
   async function fill() {
     if (busy) return;
@@ -367,23 +385,28 @@
     const r = await send({ type: "answers", body: { url: location.href, title: pageTitle(), site_name: site(), fields } });
     if (!r.ok) { say(esc(r.error), "warn"); busy = false; return; }
     const { answers, job_id, error, resume } = r.data;
-    let done = 0; const missing = []; let needAi = 0; let noPdf = false;
+    let done = 0; const missing = [], checks = []; let needAi = 0; let noPdf = false;
+    const flag = (id, f) => { const el = els.get(id); const node = Array.isArray(el) ? el[0]?.closest("fieldset") || el[0] : el;
+                              if (node && !f?.filled) node.style.outline = "2px solid #d97706"; };
     for (const a of answers) {
       let ok = false;
       const f = fields.find(x => x.id === a.id);
+      const held = a.hold || fits(a.qkind, a.value);
+      if (held) { if (f && !f.filled) { missing.push(`${f.label}: ${held}`); flag(a.id, f); } continue; }   // never typed in
       if (a.file === "resume" && !resume) noPdf ||= !f?.filled;   // no resume PDF yet: skip the upload, fill the rest
       else try { ok = await fillOne(a.id, a, job_id); } catch (_) { ok = false; }
-      if (ok) done++;
+      if (ok && a.check) { checks.push(`${f?.label || "An answer"}: ${a.check}`); flag(a.id, {}); }   // filled, not counted
+      else if (ok) done++;
       else if (a.file === "resume" && !resume) { /* said once below */ }
-      else if (f && f.required && !f.filled) { missing.push(f.label); if (a.kind === "generated" && !a.value) needAi++; }
-      const el = els.get(a.id); const node = Array.isArray(el) ? el[0]?.closest("fieldset") || el[0] : el;
-      if (node && !ok && f?.required && !f.filled) node.style.outline = "2px solid #d97706";
+      else if (f && f.required && !f.filled) { missing.push(f.label); if (a.kind === "generated" && !a.value) needAi++; flag(a.id, f); }
     }
+    const list = items => `<ul style="margin:4px 0 0 14px;list-style:disc">${items.slice(0, 6).map(m => `<li>${esc(m.slice(0, 110))}</li>`).join("")}</ul>`;
     say(`<b>Filled ${done} of ${fields.length} fields.</b> Check it, then submit when you're ready.` +
       (noPdf ? `<br>Add your resume PDF to attach it (Profile → PDF employers get, in Jobsmith).` : "") +
-      (missing.length ? `<br>Needs you:<ul style="margin:4px 0 0 14px;list-style:disc">${missing.slice(0, 6).map(m => `<li>${esc(m.slice(0, 70))}</li>`).join("")}</ul>` : "") +
+      (missing.length ? `<br>Needs you:${list(missing)}` : "") +
+      (checks.length ? `<br>Check these:${list(checks)}` : "") +
       (needAi ? `<br><span class="small">${needAi} written answer${needAi > 1 ? "s need" : " needs"} an AI. Connect one in Jobsmith's Settings.</span>` :
-       error ? `<br><span class="small">${esc(error)}</span>` : ""), missing.length || noPdf ? "warn" : "");
+       error ? `<br><span class="small">${esc(error)}</span>` : ""), missing.length || checks.length || noPdf ? "warn" : "");
     busy = false; load();
   }
 
@@ -409,13 +432,17 @@
         const help = clean(el.closest("div")?.innerText || "").slice(0, 500);
         const r = await send({ type: "generate", body: { url: location.href, label, title: pageTitle(), site_name: site(), description: help, limit } });
         btn.disabled = false;
+        const held = r.ok && (r.data.hold || fits(r.data.qkind, r.data.text));
+        if (held) { note.textContent = `Held for you: ${held}. Write this one yourself.`; return; }   // never typed in
         if (!r.ok || !r.data.text) {
           const e = r.ok ? (r.data.error || "") : r.error;
           note.textContent = /disabled|no ai|not connected|NoLLM/i.test(e) || (r.ok && !e) ? "No AI connected. Pick one in Jobsmith's Settings (Gemini is free)." : e;
           return;
         }
         setNative(el, r.data.text);
-        note.textContent = r.data.based_on.length ? `Based on: ${r.data.based_on.join(", ")}. Edit freely.` : "Edit freely.";
+        const based = r.data.based_on.length ? `Based on: ${r.data.based_on.join(", ")}. ` : "";
+        const worry = r.data.check ? r.data.check.replace(/: check this$/, "") : (r.data.issues || [])[0];
+        note.textContent = worry ? `${based}Check this: ${String(worry).replace(/\.$/, "")}.` : `${based}Edit freely.`;
       };
       el.insertAdjacentElement("afterend", b);
     }
@@ -446,12 +473,30 @@
     if (r.ok) { state.similar = r.data; state.msg = ""; state.open = true; render(); load(); }
   }
 
+  addEventListener("message", e => {                 // the page above asking whether this frame has Jobsmith
+    if (e.data && e.data.jobsmith === "who" && e.source === window.parent) e.source.postMessage({ jobsmith: "here" }, "*");
+  });
+
   chrome.runtime.onMessage.addListener((msg, _s, reply) => {
     if (msg.type === "fill") { fill(); reply({ ok: true }); }
     if (msg.type === "open" && window.top === window) { openPanel(); reply({ ok: true }); }
     if (msg.type === "info") {
       const fields = scan();
-      reply({ application: looksLikeApplication(fields), fields: fields.length, title: pageTitle() });
+      // Frames big enough to hold a form (not ads or captchas). The popup adds Jobsmith's script to the job-site ones
+      // (running it twice is harmless) and asks for a reload when another site's frame has no script yet; a frame's
+      // script answers "who's there?" below. A page could fake that answer, but all it would hide is the reload hint.
+      const big = [...document.querySelectorAll("iframe[src]")].filter(f => { const r = f.getBoundingClientRect(); return r.width > 200 && r.height > 200; })
+        .map(f => { try { return { win: f.contentWindow, host: new URL(f.src, location.href).hostname }; } catch (_) { return null; } }).filter(Boolean);
+      const here = new Set();
+      const heard = e => { if (e.data && e.data.jobsmith === "here") here.add(e.source); };
+      addEventListener("message", heard);
+      for (const f of big) try { f.win.postMessage({ jobsmith: "who" }, "*"); } catch (_) { /* gone */ }
+      setTimeout(() => {
+        removeEventListener("message", heard);
+        reply({ application: looksLikeApplication(fields), fields: fields.length, title: pageTitle(),
+                frames: big.map(f => f.host), bare: big.filter(f => !here.has(f.win)).map(f => f.host) });
+      }, 250);
+      return true;                                   // replying after the frames have had a chance to answer
     }
     return false;
   });
