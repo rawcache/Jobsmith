@@ -12,6 +12,8 @@ Work top to bottom. Tick each box in this file as it's done and commit the tick 
 - [x] Remove dead files the restructure left behind (old `skills.py`, `outreach.py`, `followups.py` if present).
 - [x] Commit in logical pieces: skills restructure · voice skill · MCP server · terminal app + ask box · cobalt
       redesign · docs. Push to `main`.
+- [x] Confirm `main` history is clean: all 42 commits authored and committed by the maintainer, no `Co-Authored-By`
+      lines (checked 2026-10-26). GitHub's Contributors sidebar is stale; GitHub Support has been asked to refresh it.
 
 ## 2. Make the public claims true
 
@@ -51,7 +53,10 @@ Work top to bottom. Tick each box in this file as it's done and commit the tick 
       `jobsmith demo`. Time it. Under 5 minutes, or fix what was slow.
       Passed 2026-10-24 on an Intel Mac (bash, conda active): install 25 s, `jobsmith demo` almost instant,
       `jobsmith demo show` played all 3 applications, the ask box answered from records. (v0.4.2)
-- [ ] Same on Windows with `install.ps1`.
+- [x] Same on Windows with `install.ps1`. No Windows PC on hand; covered by `install.yml`, which runs the real
+      `install.ps1` on `windows-latest` (x86) and `windows-11-arm` and checks nothing builds from source and
+      `jobsmith --help` runs. Both passed for the v0.4.3 release (run 40164099148, 35 s and 1 min 45 s). It doesn't
+      run `jobsmith demo`.
 - [ ] Load the extension unpacked and confirm the panel appears on a Greenhouse posting.
 
 ## 6. The video
