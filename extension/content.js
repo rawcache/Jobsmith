@@ -206,7 +206,7 @@
   const mark = (px = 18) => `<svg width="${px}" height="${px * 13 / 16}" viewBox="0 0 64 52" fill="currentColor">${MARK.map((r, y) => [...r].map((c, x) => c === "#" ? `<rect x="${x * 4}" y="${y * 4}" width="3" height="3"/>` : "").join("")).join("")}</svg>`;
   const PANEL_CSS = `
     :host{all:initial}
-    .wrap{position:fixed;top:72px;right:0;z-index:2147483646;font:13px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;color:#16161d}
+    .wrap{position:fixed;top:72px;right:0;z-index:2147483647;font:13px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;color:#16161d}
     .tab{display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 6px;background:#f2f0ec;border:1px solid #d9d4ca;border-right:0;
       border-radius:10px 0 0 10px;box-shadow:0 6px 20px rgba(22,22,29,.12);cursor:pointer;color:#c2410c}
     .tab span{writing-mode:vertical-rl;font:600 11px ui-monospace,"SF Mono",Menlo,monospace;color:#16161d;letter-spacing:.02em}
@@ -237,10 +237,50 @@
     .note{background:#fbeee4;border:1px solid #f3c9a8;border-radius:8px;padding:8px 10px;margin-top:8px}
     .warn{background:#fbf3dc;border-color:#ecd9a0}
     .ok{color:#15803d;font-weight:600}
+    .left .tab{border-right:1px solid #d9d4ca;border-left:0;border-radius:0 10px 10px 0}
+    .left .p{border-right:1px solid #d9d4ca;border-left:0;border-radius:0 12px 12px 0}
   `;
   let host, root, state = { open: true, ctx: null, msg: "", tone: "", similar: null };
   const isPosting = () => ATS.test(location.host) || !!document.querySelector('script[type="application/ld+json"]')?.textContent?.includes('"JobPosting"')
     || looksLikeApplication(scan());
+
+  // Other extensions fold into tabs on the right edge too (Simplify's sits there). Jobsmith's tab goes where nothing
+  // else floats, so it never covers theirs and theirs never covers it.
+  function floatsAt(x, y) {
+    // Look through the whole stack: page content can sit over another extension's tab and still hide it.
+    for (const el of document.elementsFromPoint(x, y)) {
+      if (el === host || el === document.documentElement || el === document.body) continue;
+      const r = el.getBoundingClientRect();
+      if (x < r.left || x > r.right || y < r.top || y > r.bottom) return true;   // drawn from inside a shadow root
+      if (r.width > innerWidth / 2 && r.height > innerHeight / 2) continue;      // a page-sized layer, not a tab
+      for (let p = el; p && p !== document.body; p = p.parentElement)
+        if (/fixed|sticky/.test(getComputedStyle(p).position)) return true;
+    }
+    return false;
+  }
+  function freeSpot(w, h) {
+    const clear = (side, top) => [4, w / 2, w - 4].every(dx => {
+      const x = side === "right" ? innerWidth - dx : dx;
+      for (let y = top; y <= top + h; y += 10) if (floatsAt(x, Math.min(y, innerHeight - 1))) return false;
+      return true;
+    });
+    for (const side of ["right", "left"])
+      for (let top = 72; top + h <= innerHeight - 8; top += 20) if (clear(side, top)) return { side, top };
+    return { side: "right", top: 72 };
+  }
+  function place() {
+    if (!host) return;
+    if (host.parentNode !== document.documentElement || host.nextElementSibling) document.documentElement.appendChild(host);
+    const wrap = root.querySelector(".wrap"), tab = root.querySelector(".tab");
+    if (!wrap) return;
+    const r = tab ? tab.getBoundingClientRect() : { width: 330, height: 120 };
+    if (tab) state.spot = freeSpot(r.width, r.height);
+    const s = state.spot || { side: "right", top: 72 };
+    wrap.classList.toggle("left", s.side === "left");
+    wrap.style.top = `${tab ? s.top : 72}px`;          // the open panel starts high so all of it fits
+    wrap.style.right = s.side === "right" ? "0" : "auto";
+    wrap.style.left = s.side === "left" ? "0" : "auto";
+  }
 
   function render() {
     if (!host) {
@@ -251,6 +291,7 @@
     if (!state.open) {
       root.innerHTML = `<style>${PANEL_CSS}</style><div class="wrap"><div class="tab" title="Open Jobsmith">${mark(16)}<span>jobsmith</span>${c && c.people_total ? `<b>${c.people_total}</b>` : ""}</div></div>`;
       root.querySelector(".tab").onclick = () => { state.open = true; chrome.storage.local.set({ panelOpen: true }); render(); };
+      place();
       return;
     }
     const m = c?.match || {}; const score = m.score ?? null;
@@ -277,6 +318,7 @@
       <div class="sec row"><button class="btn save">${c && c.known ? "Open in Jobsmith" : "Save to Jobsmith"}</button>
         ${c && c.known && c.status !== "submitted" ? `<button class="btn auto">Let autopilot apply</button>` : ""}</div>
     </div></div>`;
+    place();
     root.querySelector(".fold").onclick = () => { state.open = false; chrome.storage.local.set({ panelOpen: false }); render(); };
     root.querySelector(".fill").onclick = fill;
     root.querySelector(".outreach")?.addEventListener("click", e => { e.preventDefault(); send({ type: "open", path: `/#/outreach/${encodeURIComponent(c.company)}` }); });
@@ -324,21 +366,24 @@
     say(`Reading ${fields.length} fields and writing answers… Open questions take up to a minute.`);
     const r = await send({ type: "answers", body: { url: location.href, title: pageTitle(), site_name: site(), fields } });
     if (!r.ok) { say(esc(r.error), "warn"); busy = false; return; }
-    const { answers, job_id, error } = r.data;
-    let done = 0; const missing = []; let needAi = 0;
+    const { answers, job_id, error, resume } = r.data;
+    let done = 0; const missing = []; let needAi = 0; let noPdf = false;
     for (const a of answers) {
       let ok = false;
-      try { ok = await fillOne(a.id, a, job_id); } catch (_) { ok = false; }
       const f = fields.find(x => x.id === a.id);
+      if (a.file === "resume" && !resume) noPdf = true;      // no resume PDF yet: skip the upload, fill the rest
+      else try { ok = await fillOne(a.id, a, job_id); } catch (_) { ok = false; }
       if (ok) done++;
+      else if (a.file === "resume" && !resume) { /* said once below */ }
       else if (f && f.required && !f.filled) { missing.push(f.label); if (a.kind === "generated" && !a.value) needAi++; }
       const el = els.get(a.id); const node = Array.isArray(el) ? el[0]?.closest("fieldset") || el[0] : el;
       if (node && !ok && f?.required) node.style.outline = "2px solid #d97706";
     }
     say(`<b>Filled ${done} of ${fields.length} fields.</b> Check it, then submit when you're ready.` +
+      (noPdf ? `<br>Add your resume PDF to attach it (Profile → PDF employers get, in Jobsmith).` : "") +
       (missing.length ? `<br>Needs you:<ul style="margin:4px 0 0 14px;list-style:disc">${missing.slice(0, 6).map(m => `<li>${esc(m.slice(0, 70))}</li>`).join("")}</ul>` : "") +
       (needAi ? `<br><span class="small">${needAi} written answer${needAi > 1 ? "s need" : " needs"} an AI. Connect one in Jobsmith's Settings.</span>` :
-       error ? `<br><span class="small">${esc(error)}</span>` : ""), missing.length ? "warn" : "");
+       error ? `<br><span class="small">${esc(error)}</span>` : ""), missing.length || noPdf ? "warn" : "");
     busy = false; load();
   }
 
@@ -403,12 +448,20 @@
 
   chrome.runtime.onMessage.addListener((msg, _s, reply) => {
     if (msg.type === "fill") { fill(); reply({ ok: true }); }
+    if (msg.type === "open" && window.top === window) { openPanel(); reply({ ok: true }); }
     if (msg.type === "info") {
       const fields = scan();
       reply({ application: looksLikeApplication(fields), fields: fields.length, title: pageTitle() });
     }
     return false;
   });
+
+  function openPanel() {
+    state.open = true; chrome.storage.local.set({ panelOpen: true });
+    const fresh = !host;
+    render();
+    if (fresh) { load(); addWriteButtons(); checkThanks(); }
+  }
 
   async function start() {
     if (window.top !== window) return;               // the panel lives in the top page only
@@ -417,11 +470,14 @@
     if (!ping.ok) return;                            // Jobsmith isn't running: stay out of the way
     const { panelOpen } = await chrome.storage.local.get("panelOpen");
     state.open = panelOpen !== false;
+    if (host) return;                                // the popup opened it while we were asking
     render(); load(); addWriteButtons(); checkThanks();
+    for (const ms of [1500, 4000]) setTimeout(place, ms);   // other extensions add their tabs a moment later
   }
   setTimeout(start, 900);
+  addEventListener("resize", () => place());
   new MutationObserver(() => {
     clearTimeout(window.__jobsmithT);
-    window.__jobsmithT = setTimeout(() => { if (host) { addWriteButtons(); checkThanks(); } else start(); }, 1200);
+    window.__jobsmithT = setTimeout(() => { if (host) { place(); addWriteButtons(); checkThanks(); } else start(); }, 1200);
   }).observe(document.body, { childList: true, subtree: true });
 })();

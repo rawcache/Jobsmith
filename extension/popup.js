@@ -6,7 +6,23 @@ async function activeTab() {
   return tab;
 }
 
+// The page's own Jobsmith script. A tab opened before the extension was loaded (or reloaded) doesn't have one,
+// so add it now: opening this popup grants access to the tab.
+async function pageScript(tab) {
+  const ask = () => chrome.tabs.sendMessage(tab.id, { type: "info" }, { frameId: 0 });
+  try { return await ask(); } catch (_) { /* not there yet */ }
+  try {
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
+    return await ask();
+  } catch (_) {
+    return null;                                     // chrome:// pages, the Web Store, PDFs
+  }
+}
+
 async function init() {
+  const { applyWithAutopilot } = await chrome.storage.local.get("applyWithAutopilot");
+  $("apply").checked = applyWithAutopilot === true;
+
   const ping = await send({ type: "ping" });
   if (!ping.ok) {
     $("dot").className = "dot off";
@@ -16,21 +32,22 @@ async function init() {
   }
   const p = ping.data;
   $("dot").className = "dot ok";
-  $("status").textContent = p.resume
-    ? `Connected. Writing with ${p.ai}${p.ai_ok ? "" : " (not ready)"}.`
-    : "Connected. Add your resume PDF in Jobsmith first, so there's something to attach.";
+  $("status").textContent = `Connected. Writing with ${p.ai}${p.ai_ok ? "" : " (not ready)"}.` +
+    (p.resume ? "" : " Add your resume PDF to attach it; everything else still fills.");
   $("actions").hidden = false;
 
   const tab = await activeTab();
-  let info = null;
-  try { info = await chrome.tabs.sendMessage(tab.id, { type: "info" }); } catch (_) { /* no content script here (e.g. chrome:// pages) */ }
+  const info = await pageScript(tab);
   if (!info) {
     $("fill").disabled = true;
     $("fill").textContent = "Can't fill this page";
-  } else if (!info.application) {
-    $("fill").textContent = `Fill this page (${info.fields} fields)`;
+    return;
   }
+  if (!info.application) $("fill").textContent = `Fill this page (${info.fields} fields)`;
+  chrome.tabs.sendMessage(tab.id, { type: "open" }, { frameId: 0 }).catch(() => {});   // the full panel, on the page
 }
+
+$("apply").addEventListener("change", () => chrome.storage.local.set({ applyWithAutopilot: $("apply").checked }));
 
 $("fill").addEventListener("click", async () => {
   const tab = await activeTab();
