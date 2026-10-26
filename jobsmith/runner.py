@@ -86,8 +86,9 @@ class Browser:
             profile = BROWSER_PROFILE if self.kind == "main" else BROWSER_PROFILE.parent / "browser-profile-window"
             args = ["--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding",
                     "--disable-background-timer-throttling"] if not want else []
+            from .fill.base import browser_args
             kw = dict(user_data_dir=str(profile), headless=want, viewport={"width": 1280, "height": 900},
-                      accept_downloads=True, args=args)
+                      accept_downloads=True, args=args + browser_args())
             if os.environ.get("JOBSMITH_CHROMIUM_PATH"):
                 kw["executable_path"] = os.environ["JOBSMITH_CHROMIUM_PATH"]
             # "chromium" (or your Chrome) runs Chrome's new headless mode: the same browser, not a stripped-down one.

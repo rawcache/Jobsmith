@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from jobsmith import db, draft, jobdetail, profile, runner, sources
-from jobsmith.fill import generic, greenhouse
+from jobsmith.fill import base, generic, greenhouse
 from jobsmith.fill.base import page_confirms_submission, scan_form
 from conftest import FIXTURES
 
@@ -54,7 +54,7 @@ async def page():
     from playwright.async_api import async_playwright
     async with async_playwright() as pw:
         exe = __import__("os").environ.get("JOBSMITH_CHROMIUM_PATH")
-        b = await pw.chromium.launch(headless=True, **({"executable_path": exe} if exe else {}))
+        b = await pw.chromium.launch(headless=True, args=base.browser_args(), **({"executable_path": exe} if exe else {}))
         p = await b.new_page()
         yield p
         await b.close()

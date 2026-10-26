@@ -1035,3 +1035,14 @@ def test_doctor_browser_is_quiet_unless_it_downloads(monkeypatch, capsys, found,
         assert (len(out) == 1) == download_ok
         if not download_ok:
             assert "Run `jobsmith doctor` later to try again" in out[1]
+
+
+@pytest.mark.parametrize("platform, args", [("darwin", ["--use-mock-keychain"]), ("linux", ["--password-store=basic"]),
+                                            ("win32", [])])
+def test_browser_never_asks_for_the_keychain(monkeypatch, platform, args):
+    """No browser launched: on each system (faked), Chromium gets the flags that stop it asking for the login keychain
+    ('Chromium Safe Storage') or a keyring."""
+    import sys
+    from jobsmith.fill.base import browser_args
+    monkeypatch.setattr(sys, "platform", platform)
+    assert browser_args() == args
