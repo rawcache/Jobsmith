@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.4 (2026-10-26)
+
+### Fixed
+- Autofill no longer stops when you haven't added a resume PDF. It fills everything else, skips only the file
+  upload, and says "Add your resume PDF to attach it".
+- The Jobsmith tab on a posting no longer hides under another extension's tab (Simplify's sits on the same right
+  edge). It moves to a free spot on the edge, or to the left edge, and stays clickable.
+- The toolbar popup works on tabs that were open before you loaded the extension, instead of saying "Can't fill this
+  page".
+
+### Changed
+- Clicking the Jobsmith toolbar button also opens the full panel on the page.
+- "and apply with autopilot" under "Send this job to Jobsmith" starts unchecked, and remembers what you chose.
+- The practice copy (`jobsmith demo`) has a made-up resume PDF for Alex Rivera, so autofill attaches a file there.
+
 ## 0.4.3 (2026-10-25)
 
 ### Changed
