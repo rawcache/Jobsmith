@@ -7,12 +7,14 @@ async function activeTab() {
 }
 
 // The page's own Jobsmith script. A tab opened before the extension was loaded (or reloaded) doesn't have one,
-// so add it now: opening this popup grants access to the tab.
+// so add it now, to every frame (company sites embed Greenhouse forms in an iframe). If a frame refuses,
+// the top page alone still gets the panel.
 async function pageScript(tab) {
   const ask = () => chrome.tabs.sendMessage(tab.id, { type: "info" }, { frameId: 0 });
   try { return await ask(); } catch (_) { /* not there yet */ }
   try {
-    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
+    await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, files: ["content.js"] })
+      .catch(() => chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] }));
     return await ask();
   } catch (_) {
     return null;                                     // chrome:// pages, the Web Store, PDFs

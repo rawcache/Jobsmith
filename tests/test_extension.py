@@ -46,7 +46,7 @@ Object.defineProperty(window, "chrome", { configurable: true, value: {
           sendMessage: async (id, msg) => { __calls.push({ tab: msg });
             if (__opts.noReceiver && !injected) throw new Error("Could not establish connection. Receiving end does not exist.");
             return { application: true, fields: 12 }; } },
-  scripting: { executeScript: async t => { __calls.push({ inject: t.files }); injected = true; return []; } },
+  scripting: { executeScript: async t => { __calls.push({ inject: t.files, allFrames: !!t.target.allFrames }); injected = true; return []; } },
 }});
 """
 
@@ -156,6 +156,18 @@ async def test_autofill_without_a_resume_pdf_fills_the_rest(page):
 
 
 @browser
+async def test_autofill_without_a_pdf_leaves_a_resume_you_attached_alone(page):
+    await _load(page, {"panelOpen": True})
+    await page.set_input_files("#resume", files=[{"name": "mine.pdf", "mimeType": "application/pdf", "buffer": b"%PDF-1.4"}])
+    await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
+    note = "document.querySelector('#jobsmith-panel').shadowRoot.querySelector('.note')"
+    await page.wait_for_function(f"{note}?.innerText.includes('Filled')")
+    assert "Add your resume PDF" not in await page.evaluate(f"{note}.innerText")
+    assert await page.evaluate("document.getElementById('resume').files[0].name") == "mine.pdf"
+    assert await page.evaluate("document.getElementById('resume').style.outline") == ""
+
+
+@browser
 async def test_autofill_attaches_the_resume_pdf_when_there_is_one(page):
     await _load(page, {"panelOpen": True}, resume="Alex_Rivera_resume.pdf")
     await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
@@ -192,7 +204,7 @@ async def test_popup_adds_the_page_script_to_a_tab_opened_before_the_extension(p
     await page.add_init_script(_stub({}, noReceiver=True))
     await page.goto((EXT / "popup.html").resolve().as_uri())
     await page.wait_for_function("__calls.some(c => c.tab && c.tab.type === 'open')")
-    assert await page.evaluate("__calls.find(c => c.inject).inject") == ["content.js"]
+    assert await page.evaluate("__calls.find(c => c.inject)") == {"inject": ["content.js"], "allFrames": True}   # iframe forms too
     assert not await page.is_disabled("#fill")
 
 
