@@ -73,12 +73,14 @@ def seed_here(setup: bool = False) -> None:
     assert DEMO, "seed_here only runs in the practice copy"
     resume = Path(__file__).parent / "demo_data" / "resume.tex"
     shutil.copy(resume, DEMO_DIR / "Alex_Rivera_resume.tex")     # to upload yourself when testing setup
+    pdf = resume_pdf(resume, DEMO_DIR / "Alex_Rivera_resume.pdf")
     db.conn()
     outcomes._ensure()
     if setup:
         db.set_settings({"onboarded": False, "setup_step": "", "auto_run": False})
         return
     asyncio.run(profile.ingest_document(resume))
+    asyncio.run(profile.ingest_document(pdf, "resume_pdf"))     # so autofill has a file to attach
     for k in ("first_name", "last_name", "email", "phone", "work_authorized_us", "needs_sponsorship"):
         a = profile.answers().get(k)
         if a and a["value"]:
@@ -151,6 +153,40 @@ def seed_here(setup: bool = False) -> None:
                     "milliseconds at 30 frames per second.", "confidence": 0.85, "rationale": "Your own words, from writing.md"},
     })
     match.rescore()
+
+
+def resume_pdf(tex: Path, out: Path) -> Path:
+    """A plain one-page PDF of a LaTeX resume, so the practice copy has a file to attach without a TeX install.
+    Built from the same parse the profile uses, so it says exactly what the .tex says."""
+    from fpdf import FPDF
+    from .letters import _latin1
+    from .profile import parse_latex
+    parsed = parse_latex(tex.read_text())
+    ident = parsed["identity"]
+    pdf = FPDF(format="Letter")
+    pdf.set_margins(18, 16, 18)
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 18)
+    pdf.cell(0, 9, _latin1(ident.get("name", "")), align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 9.5)
+    contact = " | ".join(ident[k] for k in ("location", "phone", "email", "linkedin", "github", "work_status") if ident.get(k))
+    pdf.multi_cell(0, 5, _latin1(contact), align="C", new_x="LMARGIN", new_y="NEXT")
+    for sec in parsed["sections"]:
+        pdf.ln(3)
+        pdf.set_font("Helvetica", "B", 11.5)
+        pdf.cell(0, 6, _latin1(sec["title"].upper()), new_x="LMARGIN", new_y="NEXT")
+        pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
+        pdf.ln(1.5)
+        for e in sec["entries"]:
+            pdf.set_font("Helvetica", "B", 10)
+            pdf.multi_cell(0, 5, _latin1(e["heading"]), new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font("Helvetica", "", 10)
+            for b in e["bullets"]:
+                pdf.set_x(pdf.l_margin + 4)
+                pdf.multi_cell(0, 5, _latin1(f"- {b}"), new_x="LMARGIN", new_y="NEXT")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    pdf.output(str(out))
+    return out
 
 
 def _add_job(j: dict, when: float) -> None:
