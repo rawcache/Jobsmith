@@ -160,3 +160,14 @@ def test_demo_says_what_to_try_next(monkeypatch, capsys, setup):
     assert "Practice copy running at http://127.0.0.1:8766/#/" in out and "jobsmith demo stop" in out
     assert ("Watch autopilot: jobsmith demo show" in out) != setup
     assert ("Alex_Rivera_resume.tex" in out) == setup
+
+
+def test_demo_can_start_without_opening_a_browser(monkeypatch, capsys):
+    """The install workflow starts the practice copy on machines with no desktop."""
+    from jobsmith import devtools
+    calls = {}
+    monkeypatch.setattr(devtools, "demo", lambda **kw: calls.update(kw) or "http://127.0.0.1:8766/#/")
+    devtools.main(["demo", "--no-open"])
+    assert calls["open_browser"] is False
+    devtools.main(["demo"])
+    assert calls["open_browser"] is True
