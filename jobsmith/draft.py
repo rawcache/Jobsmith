@@ -487,6 +487,66 @@ async def draft_job(job_id: str, research: bool | None = None, log=None) -> dict
     return {"job_id": job_id, "drafted": len(results), "error": gen_error}
 
 
+# --------------------------------------------------------------------------- does the answer fit the question
+_SENTENCE = re.compile(r"[.!?](\s|$)")
+
+
+def answer_fits(field: dict, answer: str) -> str | None:
+    """Why this answer can't go in this field, or None. Matching by words alone once put a 'why us' paragraph
+    in "From where do you intend to work?"; this checks the shape instead: a place, a yes or no, a short line,
+    or an essay."""
+    return shape_fits(classify.question_kind(field.get("label", ""), field.get("qtype", "text"), field.get("options")),
+                      answer)
+
+
+def shape_fits(kind: str, answer: str) -> str | None:
+    """The shape rules for each kind of question. The extension's fits() in content.js applies the same ones to
+    the kind the engine sends; tests/test_extension.py checks they agree."""
+    a = " ".join((answer or "").split())
+    if not a:
+        return None
+    words, sentences = len(a.split()), len(_SENTENCE.findall(a))
+    if kind == "location" and (words > 8 or sentences > 1 or re.match(r"(i|i'm|my|we)\b", a, re.I) or
+                               not re.search(r"[^\W\d_]", a)):                 # a phone number isn't a place
+        return "asks where, but the answer isn't a place"
+    if kind == "yes_no" and not re.match(r"(yes|no|n/?a)\b", a, re.I) and (words > 25 or sentences > 2):
+        return "asks yes or no, but the answer is a paragraph"
+    if kind == "short" and (words > 40 or sentences > 2):
+        return "a short field, but the answer is a paragraph"
+    if kind == "essay" and words < 3 and not re.match(r"n/?a$", a, re.I):
+        return "asks for a written answer, but the answer is a word or two"
+    return None
+
+
+def _why_company(field: dict, job: dict) -> bool:
+    company = (job.get("company") or "").strip()
+    return bool(classify.WHY_COMPANY.search(field.get("label", "")) or
+                (company and re.search(rf"\b{re.escape(company)}\b", field.get("label", ""), re.I)))
+
+
+def _flag(r: dict, note: str, issue: str) -> dict:
+    """Filled, but for you to read first: shown under 'Check these', and an issue, so autopilot won't send it."""
+    return dict(r, check=note, confidence=min(r.get("confidence", 0), 0.5), issues=[issue] + list(r.get("issues") or []))
+
+
+def _checked(field: dict, r: dict, job: dict) -> dict:
+    """Hold an answer that doesn't fit its question; flag a stored 'why us' essay that never names this company,
+    and a home location offered for where you'd work."""
+    why = answer_fits(field, r.get("answer", ""))
+    if why:
+        return dict(r, answer="", confidence=0, held=why, fact_ids=[],
+                    issues=[f"Held for you: {why}."] + list(r.get("issues") or []))
+    answer, company = (r.get("answer") or "").strip(), (job.get("company") or "").strip()
+    if (r.get("kind") in ("voice", "learned") and company and answer and _why_company(field, job)
+            and not re.search(rf"\b{re.escape(company)}\b", answer, re.I)):
+        return _flag(r, f"generic, doesn't mention {company}: check this",
+                     f"Generic: doesn't mention {company}. Check this.")
+    if r.get("canon") == "location" and answer and classify.WORK_INTENT.search(field.get("label", "")):
+        return _flag(r, "your profile location: check it's where you'd work",
+                     "This is where you live, from your profile. Check it's where you'd work.")
+    return r
+
+
 async def answer_fields(job: dict, fields: list[dict], skip_locked: bool = True) -> tuple[dict[str, dict], str | None]:
     """Answer form fields: your profile first, then your past approvals, then one AI call for the rest."""
     existing = {d["field"]: d for d in db.q("SELECT * FROM drafts WHERE job_id=?", (job["id"],))}
@@ -531,7 +591,8 @@ async def answer_fields(job: dict, fields: list[dict], skip_locked: bool = True)
             mine = voice.compose(job, f)
             if mine:
                 results[f["field"]] = mine
-    return results, gen_error
+    by_field = {f["field"]: f for f in fields}
+    return {k: _checked(by_field[k], r, job) if k in by_field else r for k, r in results.items()}, gen_error
 
 
 def save_results(job_id: str, fields: list[dict], results: dict[str, dict], status: str | None = None,

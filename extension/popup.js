@@ -6,19 +6,30 @@ async function activeTab() {
   return tab;
 }
 
-// The page's own Jobsmith script. A tab opened before the extension was loaded (or reloaded) doesn't have one,
-// so add it now, to every frame (company sites embed Greenhouse forms in an iframe). If a frame refuses,
-// the top page alone still gets the panel.
+// Job sites whose frames the extension may reach on its own: the manifest's host_permissions (see SECURITY.md).
+const JOB_SITES = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|myworkdayjobs\.com|icims\.com|smartrecruiters\.com)$/i;
+
+// The page's own Jobsmith script. A tab opened before the extension was loaded (or reloaded) doesn't have one, so
+// add it now: to the top page (opening this popup grants access to it), and to frames from the job sites above
+// (company sites embed Greenhouse forms in a frame). A form in a frame from anywhere else needs a reload, which
+// brings the script back everywhere.
 async function pageScript(tab) {
   const ask = () => chrome.tabs.sendMessage(tab.id, { type: "info" }, { frameId: 0 });
-  try { return await ask(); } catch (_) { /* not there yet */ }
-  try {
-    await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, files: ["content.js"] })
-      .catch(() => chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] }));
-    return await ask();
-  } catch (_) {
-    return null;                                     // chrome:// pages, the Web Store, PDFs
+  let info;
+  try { info = await ask(); } catch (_) { /* not there yet */ }
+  if (!info) {
+    try {
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
+      info = await ask();
+    } catch (_) {
+      return null;                                   // chrome:// pages, the Web Store, PDFs
+    }
   }
+  if ((info.frames || []).some(h => JOB_SITES.test(h)))   // read afresh every time the popup opens
+    await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, files: ["content.js"] })
+      .catch(() => { info.reload = true; });
+  if (!info.application && (info.bare || []).some(h => !JOB_SITES.test(h))) info.reload = true;
+  return info;
 }
 
 async function init() {
@@ -46,6 +57,11 @@ async function init() {
     return;
   }
   if (!info.application) $("fill").textContent = `Fill this page (${info.fields} fields)`;
+  if (info.reload) {
+    $("result").hidden = false;
+    $("result").className = "result warn";
+    $("result").textContent = "Reload this page to fill the form inside it.";
+  }
   chrome.tabs.sendMessage(tab.id, { type: "open" }, { frameId: 0 }).catch(() => {});   // the full panel, on the page
 }
 

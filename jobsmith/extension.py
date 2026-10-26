@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from urllib.parse import urlparse
 
-from . import ats, db, draft, match, profile, sources
+from . import ats, classify, db, draft, match, profile, sources
 
 COMPANY_FROM_URL = [
     r"boards(?:\.eu)?\.greenhouse\.io/([^/?#]+)", r"job-boards(?:\.eu)?\.greenhouse\.io/([^/?#]+)",
@@ -73,7 +73,11 @@ async def answers(url: str, fields: list[dict], title: str = "", company: str = 
             out.append({"id": f["field"], "file": kind, "kind": "file"})
             continue
         out.append({"id": f["field"], "value": r.get("answer", ""), "kind": r.get("kind", ""),
-                    "confidence": r.get("confidence", 0), "issues": r.get("issues", [])})
+                    "confidence": r.get("confidence", 0), "issues": r.get("issues", []),
+                    # held: left blank because the answer didn't fit; check: filled, but you should read it.
+                    # qkind: what the question asks for, so the extension checks the same thing (one set of rules).
+                    "hold": r.get("held"), "check": r.get("check"),
+                    "qkind": classify.question_kind(f["label"], f["qtype"], f["options"])})
     pdf = profile.attachment_file()
     return {"job_id": jid, "company": company, "answers": out, "error": err,
             "resume": pdf.name if pdf else None}
@@ -132,7 +136,9 @@ async def generate(url: str, label: str, title: str = "", site_name: str = "", d
     if limit and len(text) > limit:
         text = text[:limit].rsplit(" ", 1)[0]
     return {"job_id": jid, "text": text, "based_on": list(dict.fromkeys(u.split(" | ")[0] for u in used))[:5],
-            "confidence": r.get("confidence", 0), "error": err if not text else None}
+            "confidence": r.get("confidence", 0), "error": err if not text and not r.get("held") else None,
+            "hold": r.get("held"), "check": r.get("check"), "issues": r.get("issues", []),
+            "qkind": classify.question_kind(f["label"], f["qtype"])}
 
 
 def submitted(url: str, title: str = "", site_name: str = "") -> dict:
