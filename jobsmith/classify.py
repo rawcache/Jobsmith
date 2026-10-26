@@ -97,6 +97,29 @@ YES_NO_Q = re.compile(r"^(are|do|did|have|has|will|would|can|could|is|were) (you
 ESSAY_Q = re.compile(r"\b(why|describe|tell us|explain|walk us through|what (excites|interests|draws|motivates)|"
                      r"how (have|did|would|do) you (approach|handle|solve|deal|use|apply|go about|define|measure|"
                      r"balance|prioriti[sz]e|manage|stay|keep))\b", re.I)
+# "Please tell us your LinkedIn profile URL (so we can reach you)": a polite way to ask for one plain fact. Only
+# these facts, named exactly, count; anything else after "tell us your" may be a story and stays one.
+POLITE = re.compile(r"^(please )?(tell us|share|provide|give us|let us know|enter|list) (your|the) (.+?)"
+                    r"(,? (so|in case|because|for|to) .*)?$", re.I)
+PLAIN_FACTS = re.compile(r"((legal |preferred )?(first|last|full) name|e-?mail( address)?|(mobile |cell )?phone( number)?|"
+                         r"linkedin( profile)?( url| link)?|github( profile)?( url| link)?|(personal )?website( url)?|"
+                         r"portfolio( url| link)?|city|country|(current )?location|city and state|zip code|postal code|"
+                         r"(desired |expected )?salary( expectations?| range)?|(desired|expected) compensation|"
+                         r"compensation expectations?|(desired |expected )pay|pay expectations?|hourly rate|"
+                         r"(earliest )?start date)",
+                         re.I)
+
+
+def plain_fact(label: str) -> str | None:
+    """The fact a politely worded question asks for ("Tell us your country" -> "country"), or None."""
+    plain = " ".join((label or "").split()).strip(" *?:.")
+    note = re.search(r"\s*\(([^)]*)\)$", plain)                  # "(so we can reach you)", but not "(explain how…)"
+    if note and not ESSAY_Q.search(note.group(1)):
+        plain = plain[:note.start()]
+    m = POLITE.match(plain.strip(" *?:."))
+    return m.group(4) if m and PLAIN_FACTS.fullmatch(m.group(4)) else None
+
+
 # "Why us" questions: an answer that never names the company is generic. (Not "describe a project": that's yours.)
 WHY_COMPANY = re.compile(r"why (do you want to|would you like to|are you interested|are you applying|us\b|this "
                          r"(company|role|team|position)|join|work (at|for|with))|interest(ed)? in (this|the|our|joining)|"
@@ -114,12 +137,9 @@ def question_kind(label: str, qtype: str, options: list[str] | None = None) -> s
         return "file"
     if options:
         return "choice"
-    # "Please tell us your LinkedIn URL" asks politely for a fact Jobsmith knows; "Tell us your experience with
-    # Python" and "Tell us about yourself" want sentences.
-    fact = len(l.split()) <= 10 and (canon_for(l) or PLACE_Q.search(l))
-    if ESSAY_Q.search(re.sub(r"\b(tell us|share|provide|let us know) (your|the)\b", "your", l, flags=re.I) if fact else l):
-        return "essay"                            # "Are you willing to relocate? Explain." wants sentences
-    canon = canon_for(l)
+    canon = canon_for(l)                          # "Please tell us your country" is asking for your country
+    if ESSAY_Q.search(l) and not plain_fact(l):   # "Are you willing to relocate? Explain." wants sentences
+        return "essay"
     if canon in ("location", "city", "country"):
         return "location"
     if YES_NO_Q.search(l) and qtype != "textarea":                                # "Are you willing to relocate?"
@@ -132,7 +152,7 @@ def question_kind(label: str, qtype: str, options: list[str] | None = None) -> s
 
 
 def canon_for(label: str) -> str | None:
-    l = " ".join((label or "").lower().split()).strip(" *?:")
+    l = (plain_fact(label) or " ".join((label or "").split())).lower().strip(" *?:")
     for pat, key in RULES:
         if re.search(pat, l):
             return key

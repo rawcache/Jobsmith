@@ -169,10 +169,45 @@ async def test_the_submit_watcher_sees_a_quiet_submit(page, send):
     page._jobsmith_sent.clear()                         # caught; don't fail the fixture for it
 
 
-# Opened as a page, the popup's "active tab" is itself: point it at the only other tab, the careers page.
+@browser
+async def test_autofill_fills_one_step_of_a_job_site_form_in_a_frame_and_nothing_else(page):
+    """Multi-step sites (iCIMS) show one step at a time in a frame: a page with just a phone number to give is still
+    filled. A newsletter frame from another site asks for your email, but isn't an application: never typed into.
+    Neither is a job-site frame that asks for nothing (a video's search box)."""
+    pages = {"https://careers.acme.test/": b"<h1>Careers</h1>" + b"".join(
+                 b"<iframe src='%s' style='width:600px;height:300px'></iframe>" % u.encode()
+                 for u in ("https://careers-acme.icims.com/step", "https://news.acme.test/signup",
+                           "https://careers-acme.icims.com/video")),
+             "https://careers-acme.icims.com/step": b"<form><label for='phone'>Phone*</label><input id='phone' required></form>",
+             "https://news.acme.test/signup": b"<form><label for='email'>Email*</label><input id='email' type='email' required>"
+                                              b"<button>Sign up for news</button></form>",
+             "https://careers-acme.icims.com/video": b"<p>A video</p><input id='q' aria-label='Phone'>"}
+    await page.route("**/*", lambda r: r.fulfill(status=200, content_type="text/html", body=pages.get(r.request.url, b"")))
+    await page.add_init_script(_stub({"panelOpen": False}))
+    await page.goto("https://careers.acme.test/")
+    frames = {f.url.rsplit("/", 1)[1]: f for f in page.frames if f != page.main_frame}
+    await _watch_for_submits(page, frames["step"])
+    for f in frames.values():
+        await f.wait_for_selector("input")
+        await f.add_script_tag(path=str(EXT / "content.js"))
+        await f.evaluate("__listeners.forEach(l => l({type: 'fill'}, {}, () => {})); 0")
+    await frames["step"].wait_for_function("document.getElementById('phone').value === '555-010-2030'")
+    await page.wait_for_timeout(1000)
+    assert await frames["signup"].input_value("#email") == ""
+    assert await frames["video"].input_value("#q") == ""
+    await _never_submitted(page)
+
+
+def test_popup_and_page_script_share_one_list_of_job_sites():
+    find = lambda f: re.search(r"const JOB_SITES = (/.+/i);", (EXT / f).read_text()).group(1)
+    assert find("popup.js") == find("content.js")
+
+
+# Opened as a page, the popup's "active tab" is itself: point it at the careers page, the oldest tab (a setup page
+# that is still closing may be listed too).
 ONLY_THE_CAREERS_TAB = """const q = chrome.tabs.query.bind(chrome.tabs);
     chrome.tabs.query = async () => { const me = await chrome.tabs.getCurrent();
-                                      return (await q({})).filter(t => t.id !== me.id); };"""
+                                      return (await q({})).filter(t => t.id !== me.id).sort((a, b) => a.id - b.id).slice(0, 1); };"""
 
 
 @browser
@@ -455,6 +490,34 @@ async def test_engine_answers_a_form_with_no_resume_pdf():
     assert by["js1"]["value"] == "alex@example.com" and by["js2"]["file"] == "resume"
 
 
+@pytest.mark.parametrize("fact", ["first name", "legal last name", "email address", "mobile phone number",
+                                  "LinkedIn profile URL", "GitHub link", "personal website", "portfolio link", "city",
+                                  "country", "current location", "city and state", "zip code", "salary expectations",
+                                  "expected salary", "compensation expectations", "desired pay", "pay expectation",
+                                  "hourly rate", "earliest start date", "desired compensation", "expected pay",
+                                  "salary range", "desired salary", "expected compensation"])
+def test_every_plain_fact_named_politely_maps_to_a_profile_answer(fact):
+    from jobsmith import classify
+    assert classify.plain_fact(f"Please tell us your {fact}") == fact
+    assert classify.canon_for(f"Please tell us your {fact}") == classify.canon_for(fact) is not None
+
+
+async def test_engine_answers_a_polite_question_for_a_fact_from_the_profile():
+    """"Tell us your first name" is asking for your first name: the confirmed profile answer, no AI. "Tell us your
+    phone troubleshooting process" isn't asking for your phone number."""
+    profile.set_answer("first_name", "Alex", True)
+    profile.set_answer("phone", "555-010-2030", True)
+    r = await extension.answers("https://job-boards.greenhouse.io/acme/jobs/10", [
+        {"id": "js1", "label": "Tell us your first name", "type": "text", "required": True},
+        {"id": "js2", "label": "Please tell us your phone number so we can reach you", "type": "text", "required": True},
+        {"id": "js3", "label": "Tell us your phone troubleshooting process", "type": "textarea", "required": True},
+        {"id": "js4", "label": "Tell us your first name (as on your ID)", "type": "text", "required": True}],
+        title="Intern")
+    by = {a["id"]: a for a in r["answers"]}
+    assert by["js1"]["value"] == "Alex" and by["js2"]["value"] == "555-010-2030" and by["js4"]["value"] == "Alex"
+    assert by["js3"]["value"] != "555-010-2030" and by["js3"]["qkind"] == "essay"
+
+
 def test_practice_copy_resume_pdf_matches_the_tex(tmp_path):
     pdf = devtools.resume_pdf(Path(devtools.__file__).parent / "demo_data" / "resume.tex", tmp_path / "Alex_Rivera_resume.pdf")
     from pypdf import PdfReader
@@ -500,6 +563,20 @@ def test_practice_copy_resume_pdf_matches_the_tex(tmp_path):
     ("Tell us your city and state", "text", "Boston, MA", True),
     ("Tell us about yourself", "textarea", ESSAY, True),
     ("Tell us about yourself", "textarea", "Yes", False),
+    ("Tell us your first name", "text", "Alex", True),
+    ("Tell us your first name", "textarea", "Alex", True),
+    ("Tell us your country", "text", "United States", True),
+    ("Tell us your country", "textarea", "United States", True),
+    ("Please tell us your LinkedIn profile URL so we can contact you", "textarea",
+     "https://linkedin.com/in/alex-rivera", True),
+    ("Please tell us your LinkedIn profile URL (so we can reach you)", "text", "https://linkedin.com/in/alex-rivera", True),
+    ("Tell us your email address (required)", "text", "alex.rivera@example.com", True),
+    ("Tell us your salary expectations", "text", "$45/hour", True),
+    ("Tell us your expected pay", "text", "$45/hour", True),
+    ("Please share your earliest start date", "text", "June 1, 2027", True),
+    ("Tell us your salary expectations (explain how you arrived at this figure)", "text", "$45/hour", False),
+    ("Tell us your phone troubleshooting process", "text", "555-010-2030", False),   # a story that names a fact
+    ("Tell us your city and how you chose it", "text", "Boston, MA", False),
     ("Tell us your experience with Python", "text", "Yes", False),                  # narrative, not a fact
     ("Tell us your experience with Python", "textarea", ESSAY, True),
     ("Tell us the hardest bug you've fixed", "text", ESSAY, True),
