@@ -94,7 +94,8 @@ def browser_check(say=lambda _msg: None) -> str:
     async def try_launch(channel):
         from playwright.async_api import async_playwright
         async with async_playwright() as pw:
-            b = await pw.chromium.launch(headless=True, **({"channel": channel} if channel else {}))
+            from .fill.base import browser_args
+            b = await pw.chromium.launch(headless=True, args=browser_args(), **({"channel": channel} if channel else {}))
             await b.close()
     for ch in ("chrome", "msedge", None):
         try:

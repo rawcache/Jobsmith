@@ -145,6 +145,9 @@ saver (on by default on battery) fills one application at a time and keeps smith
 **Can I try it without my real data?** `jobsmith demo` opens a practice copy with a made-up person and jobs. Nothing
 in it opens a real site or sends anything.
 
+**A keychain prompt appeared.** If macOS asked for your login keychain password for 'Chromium Safe Storage', click
+Deny. Jobsmith's browser doesn't need it, and it never asks for passwords.
+
 ## Contributing
 
 ```bash

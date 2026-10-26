@@ -269,7 +269,8 @@ def screenshots(port: int = DEMO_PORT, out: Path | None = None) -> Path:
     async def go():
         async with async_playwright() as pw:
             exe = os.environ.get("JOBSMITH_CHROMIUM_PATH")
-            b = await pw.chromium.launch(**({"executable_path": exe} if exe else {}))
+            from .fill.base import browser_args
+            b = await pw.chromium.launch(args=browser_args(), **({"executable_path": exe} if exe else {}))
             for size, vp in (("wide", {"width": 1440, "height": 900}), ("phone", {"width": 390, "height": 844})):
                 p = await b.new_page(viewport=vp)
                 p.on("pageerror", lambda e, k=size: errors.setdefault(k, []).append(str(e)))

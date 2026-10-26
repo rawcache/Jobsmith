@@ -3,8 +3,20 @@ from __future__ import annotations
 
 import asyncio
 import re
+import sys
 
 from playwright.async_api import Page, TimeoutError as PWTimeout
+
+
+def browser_args(platform: str | None = None) -> list[str]:
+    """Flags for every Chromium Jobsmith launches, so it never asks for your login keychain password ("Chromium Safe
+    Storage" on macOS) or a Linux keyring. Playwright adds these itself; a direct launch doesn't."""
+    platform = platform or sys.platform
+    if platform == "darwin":
+        return ["--use-mock-keychain"]
+    if platform.startswith("linux"):
+        return ["--password-store=basic"]
+    return []
 
 # Runs in the page. Returns every visible, fillable control with its human label.
 SCAN_JS = r"""
