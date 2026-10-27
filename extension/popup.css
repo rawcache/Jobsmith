@@ -1,5 +1,5 @@
-:root { --accent: #1a5fb4; --line: #d0d7de; --muted: #57606a; --ok: #1d7a4e; --warn: #9a5b00; --bg: #fff; --fg: #1f2328; }
-@media (prefers-color-scheme: dark) { :root { --line: #30363d; --muted: #8b949e; --bg: #161b22; --fg: #e6edf3; --accent: #4f8fe6; --ok: #3fb950; --warn: #d29922; } }
+:root { --accent: #c2410c; --on-accent: #fff; --line: #e0dcd4; --muted: #66615a; --ok: #15803d; --warn: #a16207; --bg: #fbfaf8; --fg: #1c1917; }
+@media (prefers-color-scheme: dark) { :root { --line: #2f2b27; --muted: #a39b90; --bg: #1f1c19; --fg: #ece7df; --accent: #d66638; --on-accent: #161412; --ok: #4ade80; --warn: #facc15; } }
 * { box-sizing: border-box; }
 body { width: 300px; margin: 0; font: 14px/1.45 -apple-system, system-ui, "Segoe UI", sans-serif; background: var(--bg); color: var(--fg); }
 header { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
@@ -8,7 +8,7 @@ header img { width: 20px; height: 20px; }
 .dot.ok { background: var(--ok); } .dot.off { background: var(--warn); }
 main { padding: 12px 14px; }
 button { width: 100%; font: inherit; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--fg); cursor: pointer; margin-top: 8px; }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
 button:disabled { opacity: .6; cursor: default; }
 .hint, .muted { color: var(--muted); font-size: 12.5px; margin: 6px 0 4px; }
 .row { display: flex; gap: 8px; align-items: center; font-size: 13px; margin-top: 6px; color: var(--muted); }
@@ -16,4 +16,4 @@ button:disabled { opacity: .6; cursor: default; }
 .result.warn { color: var(--warn); }
 pre { background: rgba(127,127,127,.12); padding: 6px 10px; border-radius: 6px; }
 footer { padding: 10px 14px; border-top: 1px solid var(--line); font-size: 13px; }
-a { color: var(--accent); }
+a { color: var(--fg); text-decoration: underline; text-underline-offset: 2px; }
