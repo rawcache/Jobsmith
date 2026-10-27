@@ -4,7 +4,7 @@
 Local, free, and built for students applying to software, hardware, data and AI roles.</p>
 
 <p align="center">
-  <a href="https://github.com/rawcache/Jobsmith/releases"><img alt="Release" src="https://img.shields.io/github/v/release/rawcache/Jobsmith?label=release&color=2f5bea&style=flat-square"></a>
+  <a href="https://github.com/rawcache/Jobsmith/releases"><img alt="Release" src="https://img.shields.io/github/v/release/rawcache/Jobsmith?label=release&color=c2410c&style=flat-square"></a>
   <a href="https://github.com/rawcache/Jobsmith/actions/workflows/ci.yml"><img alt="Tests" src="https://img.shields.io/github/actions/workflow/status/rawcache/Jobsmith/ci.yml?label=tests&style=flat-square"></a>
   <img alt="Python" src="https://img.shields.io/badge/python-3.11–3.13-16161d?style=flat-square">
   <img alt="MCP" src="https://img.shields.io/badge/MCP-Claude%20Code%20·%20Codex%20·%20Gemini%20CLI%20·%20Cursor-16161d?style=flat-square">
