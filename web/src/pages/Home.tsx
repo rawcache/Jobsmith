@@ -72,7 +72,7 @@ export default function Home() {
                   ? `${d.applied_today} sent today, ${d.applied_week} this week. ${d.queued} good matches are next.`
                   : `${d.queued} good matches are ready. Turn it on and it applies while you're away.`}</p>
               </div>
-              {on ? <button className="btn" onClick={runNow} disabled={!!busy}>{busy === "run" ? <Dots /> : "Apply to new matches now"}</button>
+              {on ? <button className="btn primary" onClick={runNow} disabled={!!busy}>{busy === "run" ? <Dots /> : "Apply to new matches now"}</button>
                 : <button className="btn primary" onClick={() => setAutopilot(true).then(() => { refresh(); load(); })}>Turn on autopilot</button>}
             </div>
             <Ask onDone={load} />
