@@ -263,7 +263,7 @@ export function Palette() {
   );
 }
 
-// Light by default (cool white and cobalt). Dark, or following the computer, is your choice in the account menu.
+// Light by default (warm paper, like the extension's panel). Dark, or following the computer, is your choice in the account menu.
 export function applyTheme() {
   const t = pref("js-theme", "light");
   document.documentElement.dataset.theme = t;
