@@ -94,8 +94,8 @@ DEFAULT_SETTINGS: dict = {
     "exclude_companies": [],
     "min_fit_score": 40,
     # --- Limits -----------------------------------------------------------
-    "max_applications_per_day": 0,      # 0 = no limit (you can set one in Settings)
-    "max_applications_per_company": 0,
+    "max_applications_per_day": 20,     # autopilot's caps (see guardrails.py); 0 = no limit
+    "max_applications_per_company": 3,  # to one company in 7 days
     "concurrency": 3,                  # applications filled at the same time
     "power_mode": "auto",              # auto: battery saver when unplugged | saver: always | full: never
     "on_battery": "slow",              # slow: one application at a time | pause: autopilot waits for the charger

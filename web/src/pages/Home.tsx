@@ -9,7 +9,7 @@ import Live from "../components/Live";
 type Item = { key: string; label: string; detail?: string; done: boolean; href: string; points?: number };
 type HomeData = {
   applied_today: number; applied_week: number; applied_total: number; in_progress: number; queued: number;
-  daily_cap: number; remaining_today: number; autonomy: string; auto_run: boolean; next_run: number | null;
+  sent_today: number; daily_cap: number; company_cap: number; remaining_today: number; autonomy: string; auto_run: boolean; next_run: number | null;
   last_summary: string; min_fit: number; network: number; first_name: string;
   review: { id: string; company: string; title: string; status: string; hold_reason: string | null; error: string | null; updated_at: number }[];
   recent: { id: string; company: string; title: string; outcome: string | null; finished_at: number }[];
@@ -69,7 +69,7 @@ export default function Home() {
               <div className="grow">
                 <h2>{on ? "Autopilot is applying for you" : "Autopilot is off"}</h2>
                 <p className="muted">{on
-                  ? `${d.applied_today} sent today, ${d.applied_week} this week. ${d.queued} good matches are next.`
+                  ? `${d.daily_cap > 0 ? `${d.sent_today} of ${d.daily_cap} today` : `${d.sent_today} sent today`}, ${d.applied_week} this week. ${d.remaining_today === 0 ? "Today's cap is reached; autopilot starts again tomorrow." : `${d.queued} good matches are next.`}`
                   : `${d.queued} good matches are ready. Turn it on and it applies while you're away.`}</p>
               </div>
               {on ? <button className="btn primary" onClick={runNow} disabled={!!busy}>{busy === "run" ? <Dots /> : "Apply to new matches now"}</button>

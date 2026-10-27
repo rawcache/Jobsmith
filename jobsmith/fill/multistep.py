@@ -140,7 +140,7 @@ async def run(page: Page, url: str, *, answer: Callable, files: dict, log: Calla
         nxt = await _first_visible(page, NEXT_BUTTONS)
         sub = await submit_button(page)
         if sub and not nxt:
-            if allow_submit() and not issues:
+            if not issues and allow_submit():      # asked last: it counts the submission toward the caps
                 log("Review page reached and everything is trusted: submitting.")
                 await sub.click()
                 await page.wait_for_timeout(4000)
