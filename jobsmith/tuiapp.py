@@ -31,15 +31,21 @@ from textual.css.query import NoMatches
 from textual.screen import ModalScreen, Screen
 from textual.widgets import DataTable, Footer, Input, Static, TextArea
 
-EMBER = "#7aa2ff"     # cobalt: the accent (named after the forge)
-EMBER_HI = "#c7d7ff"
-EMBER_LO = "#3554c9"
-STEEL = "#8b98b2"
-INK = "#e8edf7"
-DIM = "#5d6a85"
-FAINT = "#2b3a5c"
-BG = "#0b1220"
-SPARK = "#a5f3fc"
+# Warm charcoal like the dashboard's dark theme. EMBER is the extension panel's orange lifted for a dark background
+# (same hue), kept for the logo, "autopilot on", where you are, focus and progress; everything else is ink or grey.
+EMBER = "#d66638"     # the accent (named after the forge)
+EMBER_HI = "#ece7df"
+EMBER_LO = "#a39b90"
+STEEL = "#a39b90"
+INK = "#ece7df"
+DIM = "#8a8378"
+FAINT = "#403a34"
+BG = "#161412"
+CARD = "#1f1c19"
+WARN = "#facc15"
+OK = "#4ade80"
+BAD = "#fb7185"
+SPARK = "#ece7df"
 SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 STAR = "·✢✳✶✻✽✻✶✳✢"
 VERBS = ["Forging", "Hammering", "Tempering", "Smelting", "Annealing", "Quenching", "Riveting", "Smithing", "Shaping", "Polishing"]
@@ -62,7 +68,7 @@ LOGO = [
      "    ▀▀▀▀███████▀▀  ",
      "      ▗███████▖    "],
 ]
-WOOD = "#94a3b8"
+WOOD = "#a39b90"
 
 
 def logo_text(frame: int, glint: int = -1) -> Text:
@@ -131,7 +137,7 @@ class AskLine(ModalScreen[str]):
     """One line of input: a code, a key (hidden), a value."""
     DEFAULT_CSS = f"""
     AskLine {{ align: center middle; background: {BG} 60%; }}
-    #dlg {{ width: 70; height: auto; padding: 1 2; border: round {EMBER}; background: #111a2e; }}
+    #dlg {{ width: 70; height: auto; padding: 1 2; border: round {EMBER}; background: {CARD}; }}
     #hint {{ color: {DIM}; margin-top: 1; }}
     """
 
@@ -156,7 +162,7 @@ class AskLine(ModalScreen[str]):
 class EditAnswer(ModalScreen[str | None]):
     DEFAULT_CSS = f"""
     EditAnswer {{ align: center middle; background: {BG} 60%; }}
-    #dlg {{ width: 90%; height: 80%; padding: 1 2; border: round {EMBER}; background: #111a2e; }}
+    #dlg {{ width: 90%; height: 80%; padding: 1 2; border: round {EMBER}; background: {CARD}; }}
     #q {{ margin-bottom: 1; }}
     TextArea {{ height: 1fr; }}
     #hint {{ color: {DIM}; margin-top: 1; }}
@@ -215,17 +221,17 @@ class View(Screen):
     BINDINGS = [Binding("escape", "app.pop_screen", "Back")]
     DEFAULT_CSS = f"""
     View {{ background: {BG}; }}
-    .title {{ height: 1; padding: 0 1; background: #111a2e; }}
-    .panel {{ border: round #1e2a44; border-title-color: {STEEL}; padding: 0 1; background: {BG}; }}
+    .title {{ height: 1; padding: 0 1; background: {CARD}; }}
+    .panel {{ border: round #2f2b27; border-title-color: {STEEL}; padding: 0 1; background: {BG}; }}
     .panel:focus-within {{ border: round {EMBER}; border-title-color: {EMBER}; }}
     DataTable {{ background: {BG}; height: 1fr; scrollbar-size-horizontal: 0; scrollbar-size-vertical: 1;
                  scrollbar-color: {FAINT}; scrollbar-background: {BG}; }}
-    DataTable > .datatable--cursor {{ background: #1b2741; color: #f1f5ff; }}
+    DataTable > .datatable--cursor {{ background: #2a2622; color: {INK}; }}
     DataTable > .datatable--header {{ color: {DIM}; background: {BG}; }}
     .detail {{ height: 1fr; }}
     .fill {{ height: 1fr; }}
     #jobs {{ height: 1fr; }}
-    Footer {{ background: #111a2e; }}
+    Footer {{ background: {CARD}; }}
     """
 
     @property
@@ -291,7 +297,7 @@ class Review(View):
         keep = t.cursor_row
         t.clear()
         for r in rows:
-            mark = Text("✗", style="red") if r["status"] == "error" else Text("!", style="yellow")
+            mark = Text("✗", style=BAD) if r["status"] == "error" else Text("!", style=WARN)
             t.add_row(mark, Text(r["company"][:20], style="bold"), (r.get("hold_reason") or r.get("error") or "ready to submit")[:40], key=r["id"])
         self.query_one("#t", Static).update(self.heading((f"Review  {len(rows)} waiting for you", "bold"),
                                                        ("   a approve · e edit · s submit · k skip · esc back", DIM)))
@@ -327,8 +333,8 @@ class Review(View):
         t.clear()
         for x in self.drafts:
             val = (x.get("final_answer") or x.get("answer") or "").replace("\n", " ")
-            mark = (Text("✓", style="green") if x["verdict"] == "green" or x.get("final_answer") else
-                    Text("!", style="yellow") if self._problem(x, blockers) else Text("·", style=DIM))
+            mark = (Text("✓", style=OK) if x["verdict"] == "green" or x.get("final_answer") else
+                    Text("!", style=WARN) if self._problem(x, blockers) else Text("·", style=DIM))
             t.add_row(mark, x["label"][:46], Text(val[:60] or "(empty)", style=INK if val else "italic " + DIM), key=str(x["id"]))
         t.border_title = (f"{self.job['company']} · {self.job['title']}"[:70] +
                           ("   no answers yet" if not self.drafts else f"   {len(blockers)} to check" if blockers else "   ready to submit"))
@@ -338,7 +344,7 @@ class Review(View):
         else:
             why = self.job.get("hold_reason") or self.job.get("error") or ""
             self.query_one("#detail", Static).update(Group(
-                Text(why, style="yellow") if why else Text(""), Text(""),
+                Text(why, style=WARN) if why else Text(""), Text(""),
                 Text("Jobsmith hasn't drafted answers for this one yet. Press s to fill it in the browser; "
                      "it comes back here if anything needs you.", style=STEEL)))
 
@@ -368,7 +374,7 @@ class Review(View):
         if meta:
             parts += [Text(""), Text(" · ".join(meta), style=DIM)]
         for i in x.get("issues") or []:
-            parts.append(Text(f"! {i}", style="yellow"))
+            parts.append(Text(f"! {i}", style=WARN))
         if x.get("facts"):
             parts += [Text(""), Text("Based on", style=DIM)] + [Text(f"  {f.get('text', '')[:140]}", style=DIM) for f in x["facts"][:4]]
         self.query_one("#detail", Static).update(Group(*parts))
@@ -458,7 +464,7 @@ class Matches(View):
         self.rows = {r["id"]: r for r in rows}
         for j in rows:
             fit = round(j.get("fit_score") or 0)
-            t.add_row(Text(f"{fit:>3}", style=EMBER if fit >= 70 else INK if fit >= 50 else DIM), Text(j["company"][:22], style="bold"),
+            t.add_row(Text(f"{fit:>3}", style=f"bold {INK}" if fit >= 70 else INK if fit >= 50 else DIM), Text(j["company"][:22], style="bold"),
                       j["title"][:46], (j.get("locations") or [""])[0][:22], j.get("pay") or "", ago(j.get("date_posted")), key=j["id"])
         self.query_one("#t", Static).update(self.heading((f"Matches  {len(rows)}", "bold"), ("   enter apply · f fill only · x not for me · o open · esc back", DIM)))
         t.focus()
@@ -531,7 +537,7 @@ class Outreach(View):
                 dr = next((x for x in c["drafts"] if x["person"] == name), None)
                 k = f"{c['job_id']}|{name}"
                 self.rows[k] = {"company": c["company"], "job_id": c["job_id"], "person": p, "draft": dr}
-                status = Text("sent", style="green") if dr and dr["sent_at"] else Text("drafted", style=EMBER) if dr else Text("")
+                status = Text("sent", style=OK) if dr and dr["sent_at"] else Text("drafted", style=STEEL) if dr else Text("")
                 t.add_row(Text(c["company"][:22], style="bold"), name, (p.get("position") or "")[:34], status, key=k)
         self.query_one("#t", Static).update(self.heading(("Outreach", "bold"), ("   r referral ask · n recruiter note · y copy · s I sent it · esc back", DIM)))
         if not self.rows:
@@ -566,7 +572,7 @@ class Outreach(View):
         r = self.sel()
         if not r:
             return
-        self.app.call_from_thread(self.query_one("#detail", Static).update, Text("Drafting…", style=EMBER))
+        self.app.call_from_thread(self.query_one("#detail", Static).update, Text("Drafting…", style=STEEL))
         d = self.send("POST", "/api/outreach/draft", {"job_id": r["job_id"], "person": r["person"], "kind": kind}, timeout=120)
         self.last = d if not d.get("error") else {}
         self.app.call_from_thread(self.load)
@@ -685,7 +691,7 @@ class Settings(View):
             shown = ("set" if v else "not set") if opts is None else str(v if v not in (None, "") else "auto")
             if k == "autopilot_min_confidence" and v not in (None, ""):
                 shown = f"{round(float(v) * 100)}% confident"
-            t.add_row(Text(label, style="bold"), Text(shown, style=EMBER if opts is None and v else INK), Text("enter to change", style=DIM), key=k)
+            t.add_row(Text(label, style="bold"), Text(shown, style=f"bold {INK}" if opts is None and v else INK), Text("enter to change", style=DIM), key=k)
         t.move_cursor(row=min(keep, t.row_count - 1))
         t.focus()
         self.query_one("#t", Static).update(self.heading(("Settings", "bold"), ("   enter change · esc back", DIM)))
@@ -753,7 +759,7 @@ class Board(View):
             tab = tabs.get(jid, {})
             pr = (st.get("progress") or {}).get(jid) or {"step": 0, "total": 5, "label": ""}
             ph = tab.get("phase") or st["active"].get(jid, "")
-            mark = (Text("✓", style="green") if ph == "submitted" else Text("!", style="yellow") if ph in ("code", "review", "error")
+            mark = (Text("✓", style=OK) if ph == "submitted" else Text("!", style=WARN) if ph in ("code", "review", "error")
                     else Text(SPIN[self.app.frame % len(SPIN)], style=EMBER))
             company, title = self.app.job_name(jid, tab)
             t.add_row(mark, Text(company, style="bold"), title[:40], bar(pr["step"], pr["total"]),
@@ -765,13 +771,13 @@ class Board(View):
         k2 = n.cursor_row
         n.clear()
         for r in (home or {}).get("review", [])[:30]:
-            n.add_row(Text("!", style="yellow"), Text(r["company"], style="bold"), (r.get("hold_reason") or r.get("error") or "ready")[:60], key=r["id"])
+            n.add_row(Text("!", style=WARN), Text(r["company"], style="bold"), (r.get("hold_reason") or r.get("error") or "ready")[:60], key=r["id"])
         n.move_cursor(row=min(k2, max(0, n.row_count - 1)))
         b = self.query_one("#bell", DataTable)
         k3 = b.cursor_row
         b.clear()
         for it in (notes or {}).get("items", [])[:30]:
-            mark = Text("●", style=EMBER) if it.get("urgent") else Text("•", style=EMBER if it.get("unread") else FAINT)
+            mark = Text("●", style=WARN) if it.get("urgent") else Text("•", style=INK if it.get("unread") else DIM)
             b.add_row(mark, it["title"][:60], time.strftime("%I:%M", time.localtime(it["at"])).lstrip("0") if it.get("at") else "", key=it["id"])
         b.move_cursor(row=min(k3, max(0, b.row_count - 1)))
         self.query_one("#t", Static).update(self.heading(("Board", "bold"), ("   live from your engine · r review · w watch · t take over · esc back", DIM)))
@@ -833,18 +839,18 @@ class Prompt(Input):
 class Jobsmith(App):
     TITLE = "jobsmith"
     CSS = f"""
-    Screen {{ background: {BG}; color: #c3ccdd; layers: base; }}
+    Screen {{ background: {BG}; color: #d2ccc2; layers: base; }}
     #chat {{ height: 1fr; padding: 0 1; scrollbar-size-vertical: 1; scrollbar-color: {FAINT}; scrollbar-background: {BG}; }}
     #welcome {{ height: auto; border: round {EMBER_LO}; border-title-color: {EMBER}; border-title-style: bold; padding: 0 1; margin: 1 0; }}
     #logo {{ width: 21; height: 5; }}
     #hello {{ width: 1fr; height: auto; padding-left: 1; }}
-    .you {{ color: {STEEL}; background: #111a2e; padding: 0 1; margin-top: 1; }}
+    .you {{ color: {STEEL}; background: {CARD}; padding: 0 1; margin-top: 1; }}
     .blk {{ height: auto; }}
     .gap {{ margin-top: 1; }}
     #think {{ height: auto; padding: 0 1; display: none; }}
     #live {{ height: auto; padding: 0 1; display: none; }}
     #menu {{ height: auto; padding: 0 2; display: none; }}
-    #prompt {{ height: 3; border: round #2b3a5c; background: {BG}; margin: 0 1; padding: 0 1; }}
+    #prompt {{ height: 3; border: round {FAINT}; background: {BG}; margin: 0 1; padding: 0 1; }}
     #prompt:focus {{ border: round {STEEL}; }}
     #status {{ height: 1; padding: 0 2; }}
     """
@@ -923,8 +929,8 @@ class Jobsmith(App):
                           ("Autopilot " + ("on" if on else "off"), EMBER if on else STEEL), (" · " + " · ".join(bits) if home else "", STEEL), "\n",
                           (" · ".join(more), DIM), "\n",
                           ("Ask anything about your job hunt, or say where to apply.", INK), "\n",
-                          ("/help", EMBER), (" commands · ", DIM), ("shift+tab", EMBER), (" autopilot · ", DIM), ("ctrl+o", EMBER), (" board", DIM),
-                          ("   practice copy" if st.get("demo") else "", EMBER))
+                          ("/help", INK), (" commands · ", DIM), ("shift+tab", INK), (" autopilot · ", DIM), ("ctrl+o", INK), (" board", DIM),
+                          ("   practice copy" if st.get("demo") else "", STEEL))
         self.query_one("#hello", Static).update(t)
 
     # ------------------------------------------------------------------ the conversation
@@ -937,19 +943,19 @@ class Jobsmith(App):
         self.mount_block(Text.assemble(("> ", DIM), (text, INK)), "you")
 
     def say(self, markup: str) -> None:
-        self.mount_block(Text.assemble(("⏺ ", EMBER), Text.from_markup(markup)), "blk gap")
+        self.mount_block(Text.assemble(("⏺ ", STEEL), Text.from_markup(markup)), "blk gap")
 
     def render_block(self, b: dict, first: bool) -> Text | Table:
         t = b.get("t")
         lead = ("  ⎿  " if first else "     ", DIM)
         if t == "head":
             title, _, count = b["text"].partition("  ")
-            return Text.assemble(("⏺ ", EMBER), (title, "bold"), (f"  {count}" if count else "", STEEL))
+            return Text.assemble(("⏺ ", STEEL), (title, "bold"), (f"  {count}" if count else "", STEEL))
         if t == "item":
-            mark = ("! ", "yellow") if b.get("urgent") else (SPIN[self.frame % len(SPIN)] + " ", EMBER) if b.get("live") else ("", "")
+            mark = ("! ", WARN) if b.get("urgent") else (SPIN[self.frame % len(SPIN)] + " ", EMBER) if b.get("live") else ("", "")
             return Text.assemble(lead, mark, (b["text"], "bold " + INK), ("  " + b.get("meta", ""), STEEL) if b.get("meta") else "")
         if t == "stat":
-            return Text.assemble(lead, (f"{b['text']:>5}", f"bold {EMBER}"), ("  " + b.get("meta", ""), INK))
+            return Text.assemble(lead, (f"{b['text']:>5}", f"bold {INK}"), ("  " + b.get("meta", ""), INK))
         if t == "qa":
             return Text.assemble(lead, (b["text"], "bold"), "\n", ("       " + b.get("meta", "").replace("\n", "\n       "), STEEL))
         if t == "example":
@@ -993,7 +999,7 @@ class Jobsmith(App):
         if self.cancel:
             self.call_from_thread(self.mount_block, Text("  ⎿  Interrupted", style=DIM))
         elif n:
-            self.call_from_thread(self.mount_block, Text(f"     {time.time() - t0:.1f}s · from your records, no AI", style=FAINT))
+            self.call_from_thread(self.mount_block, Text(f"     {time.time() - t0:.1f}s · from your records, no AI", style=DIM))
 
     _last_t = ""
 
@@ -1146,9 +1152,9 @@ class Jobsmith(App):
 
     def show_help(self, short: bool = False) -> None:
         if short:
-            self.mount_block(Text.assemble(("  shift+tab ", EMBER), ("autopilot on/off   ", DIM), ("ctrl+o ", EMBER), ("board   ", DIM),
-                                           ("/ ", EMBER), ("commands   ", DIM), ("↑ ", EMBER), ("history   ", DIM), ("esc ", EMBER), ("cancel   ", DIM),
-                                           ("ctrl+c ", EMBER), ("twice to quit", DIM)), "blk gap")
+            self.mount_block(Text.assemble(("  shift+tab ", INK), ("autopilot on/off   ", DIM), ("ctrl+o ", INK), ("board   ", DIM),
+                                           ("/ ", INK), ("commands   ", DIM), ("↑ ", INK), ("history   ", DIM), ("esc ", INK), ("cancel   ", DIM),
+                                           ("ctrl+c ", INK), ("twice to quit", DIM)), "blk gap")
             return
         self.say("[b]Ask[/] anything about your job hunt. Answers come from your records, instantly, with no AI:")
         from .ask import EXAMPLES
@@ -1156,7 +1162,7 @@ class Jobsmith(App):
             self.mount_block(Text.assemble(("  ⎿  " if i == 0 else "     ", DIM), ("“" + ex + "”", EMBER_HI)))
         self.say("[b]Tell it where to apply[/]: a company and role, a job link, or a GitHub list.")
         t = Table.grid(padding=(0, 2))
-        t.add_column(style=EMBER, no_wrap=True)
+        t.add_column(style=INK, no_wrap=True)
         t.add_column(style=STEEL, no_wrap=True)
         t.add_column(style=INK)
         for name, args, what in COMMANDS:
@@ -1366,16 +1372,16 @@ class Jobsmith(App):
         left = Text.assemble(("⏵⏵ autopilot on", f"bold {EMBER}") if on else ("⏸ autopilot off", STEEL), (" (shift+tab to toggle)", DIM))
         right = []
         if time.time() - self.ctrl_c_at < 1.5:
-            right = [("Press ctrl+c again to exit", "yellow")]
+            right = [("Press ctrl+c again to exit", WARN)]
         else:
             if st.get("needs_you"):
-                right += [(f"▲ {st['needs_you']} need you", "yellow"), ("  ", "")]
+                right += [(f"▲ {st['needs_you']} need you", WARN), ("  ", "")]
             if notes.get("unread"):
-                right += [(f"● {notes['unread']} new", EMBER), ("  ", "")]
+                right += [(f"● {notes['unread']} new", INK), ("  ", "")]
             if self.connected is False:
-                right += [("engine offline", "red"), ("  ", "")]
+                right += [("engine offline", BAD), ("  ", "")]
             if st.get("demo"):
-                right += [("practice copy", EMBER), ("  ", "")]
+                right += [("practice copy", STEEL), ("  ", "")]
             right += [("? for shortcuts", DIM)]
         r = Text.assemble(*right)
         w = max(10, self.size.width - 4 - len(left) - len(r))
@@ -1422,7 +1428,7 @@ class Jobsmith(App):
                 tab = tabs.get(jid, {})
                 pr = (st.get("progress") or {}).get(jid) or {"step": 0, "total": 5, "label": ""}
                 ph = tab.get("phase") or st.get("active", {}).get(jid, "")
-                mark = (("✓", "green") if ph == "submitted" else ("!", "yellow") if ph in ("code", "review", "error")
+                mark = (("✓", OK) if ph == "submitted" else ("!", WARN) if ph in ("code", "review", "error")
                         else (SPIN[(self.frame + i) % len(SPIN)], EMBER))
                 t.append("\n")
                 t.append_text(Text.assemble(("  ⎿  " if i == 0 else "     ", DIM), mark, " ", (f"{self.job_name(jid, tab)[0][:22]:<23}", "bold " + INK),
