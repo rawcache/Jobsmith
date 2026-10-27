@@ -81,8 +81,9 @@ async def page_errors(page: Page) -> list[str]:
 
 
 async def run(page: Page, url: str, *, answer: Callable, files: dict, log: Callable, wait_for_user: Callable,
-              allow_submit: bool, max_pages: int = 15) -> dict:
-    """answer(fields) -> {field: value}; wait_for_user(message, check) waits until check() is true."""
+              allow_submit: Callable, max_pages: int = 15, on_page: Callable | None = None) -> dict:
+    """answer(fields) -> {field: value}; wait_for_user(message, check) waits until check() is true.
+    on_page(text) gets each page's text once it's filled, before allow_submit() is asked on that page."""
     await page.goto(url, wait_until="domcontentloaded", timeout=60000)
     await page.wait_for_timeout(2500)
     filled_total, issues = 0, []
@@ -132,7 +133,10 @@ async def run(page: Page, url: str, *, answer: Callable, files: dict, log: Calla
                     issues.append(f"{f['label']}: {e.__class__.__name__}")
 
         try:
-            if CONFIRM_RE.search(await page.locator("body").inner_text(timeout=3000)):
+            body = await page.locator("body").inner_text(timeout=3000)
+            if on_page:
+                on_page(body)
+            if CONFIRM_RE.search(body):
                 return {"status": "submitted", "filled": filled_total, "issues": issues}
         except Exception:
             pass

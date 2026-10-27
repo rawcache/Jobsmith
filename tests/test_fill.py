@@ -395,3 +395,48 @@ async def test_no_submit_button_means_no_submission_counted(fake_llm, tmp_path, 
     assert db.q1("SELECT hold_reason FROM jobs WHERE id=?", (jid,))["hold_reason"] == "couldn't find the Submit button"
     assert guardrails.sent_today() == 0 and not guardrails._submitting
     assert runner.LIVE[jid]["phase"] == "review"       # waiting for you, so the off switch leaves its tab open
+
+
+async def test_runner_holds_when_the_employer_asks_for_no_ai(fake_llm, tmp_path, monkeypatch):
+    jid = await _green_job(fake_llm, tmp_path, monkeypatch)
+    db.x("UPDATE jobs SET description=? WHERE id=?",
+         ("<p>Jetson work.</p><p>Please do not use AI tools to write your answers.</p>", jid))
+    try:
+        await runner.fill(jid, submit=True)
+    finally:
+        await runner.browser.close()
+    job = db.q1("SELECT status, hold_reason FROM jobs WHERE id=?", (jid,))
+    assert job["status"] == "filled"
+    assert job["hold_reason"].startswith('Acme Robotics asks applicants not to use AI or automated tools: '
+                                         '"Please do not use AI tools to write your answers."')
+    assert not db.q("SELECT 1 FROM runs WHERE job_id=? AND kind='submit'", (jid,))
+
+
+async def test_multistep_shows_every_page_to_the_policy_check_before_submit(fake_llm, tmp_path, page):
+    from jobsmith.fill import multistep
+    await profile.ingest_document(FIXTURES / "sample_resume.tex")
+    profile.set_answer("how_heard", "LinkedIn")
+    jid = sources.add_job_url("https://acme.wd1.myworkdayjobs.com/x/job/2", "Acme", "Hardware Intern")
+    job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,)))
+    jetson = [f["id"] for f in profile.facts() if "Jetson" in f["text"]]
+    fake_llm(lambda s, p: {"answers": [{"field": "#why", "answer": "I deployed a detection model on NVIDIA Jetson Nano.",
+                                        "fact_ids": jetson, "confidence": 0.9}] if "#why" in p.split("QUESTIONS TO ANSWER:")[1] else []})
+
+    async def answer(fields):
+        results, _ = await draft.answer_fields(job, fields)
+        return {k: v.get("answer", "") for k, v in results.items()}
+
+    async def wait_for_user(msg, check, negate=False):
+        await page.fill("#em", "alex@example.edu")
+        await page.click("#signin")
+        return not await check() if negate else await check()
+
+    pdf = tmp_path / "r.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    seen, asked_with = [], []
+    url = (FIXTURES / "mock_multistep.html").resolve().as_uri()
+    res = await multistep.run(page, url, answer=answer, files={"resume": str(pdf)}, log=lambda m: None,
+                              wait_for_user=wait_for_user, on_page=seen.append,
+                              allow_submit=lambda: asked_with.append("\n".join(seen)) or False)
+    assert res["status"] == "review", res
+    assert asked_with and "My Information" in asked_with[-1] and "Review" in asked_with[-1]
