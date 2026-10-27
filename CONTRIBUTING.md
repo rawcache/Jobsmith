@@ -53,6 +53,15 @@ command: jobsmith prep       # optional terminal command
 
 Pull requests that break one of these are closed, however useful they are otherwise.
 
+## Before you commit
+
+- Use the practice copy's made-up person, Alex Rivera, for tests, fixtures and screenshots. Never commit a real
+  resume, cover letter, profile, or a saved page that shows a real applicant's details.
+- Saved job forms in `tests/fixtures/` must be blank or filled with Alex's details.
+- No keys, tokens, cookies or `.env` files. `.gitignore` keeps the common ones out, and the `secrets` check
+  (gitleaks) fails a push or pull request that contains a recognisable key or token. It can't catch everything,
+  so look at `git status` before you commit.
+
 ## Pull requests
 
 - One change per pull request, with a test.

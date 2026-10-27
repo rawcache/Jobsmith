@@ -14,3 +14,12 @@ downloaded_simplify/
 
 # built wheels (attached to releases, never committed)
 dist/
+
+# secrets and personal files that could land outside data/
+.env
+.env.*
+*.db
+*.sqlite*
+*.pdf
+cookies*
+.claude/settings.local.json
