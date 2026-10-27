@@ -47,7 +47,7 @@ async def sweep(page, job: dict, log=None) -> dict:
     fields = [f for f in await scan_form(page)
               if f["required"] and not f.get("value") and f["qtype"] not in ("file", "hidden")]
     if not fields:
-        return {"filled": [], "failed": []}
+        return {"filled": [], "failed": [], "sent": []}
     for f in fields:
         f.setdefault("options", [])
     results: dict[str, dict] = {}
@@ -62,7 +62,7 @@ async def sweep(page, job: dict, log=None) -> dict:
     if rest:
         more, _err = await draft.answer_fields(job, rest, skip_locked=False)
         results.update(more)
-    filled, failed = [], []
+    filled, failed, sent = [], [], []
     for f in fields:
         val = (results.get(f["field"]) or {}).get("answer", "")
         if not val:
@@ -75,9 +75,10 @@ async def sweep(page, job: dict, log=None) -> dict:
             if log:
                 log(f"  {f['label']}: {e.__class__.__name__}")
         (filled if ok else failed).append((f["label"], "ok") if ok else (f["label"], f"couldn't set \"{val[:40]}\""))
+        sent += [f["field"]] if ok else []
     draft.save_results(job["id"], [f for f in fields if f["field"] in results],
                        {k: v for k, v in results.items()})
     if log and fields:
         log(f"Second pass over the page: filled {len(filled)} more field{'s' if len(filled) != 1 else ''}"
             + (f", {len(failed)} still need you" if failed else ""))
-    return {"filled": filled, "failed": failed}
+    return {"filled": filled, "failed": failed, "sent": sent}

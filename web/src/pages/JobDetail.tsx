@@ -3,6 +3,7 @@ import { ago, api, companyHref, Draft, Job, LiveTab, Match, OUTCOME_LABEL, Perso
 import { friendly } from "./Tracker";
 import { StatusCtx } from "../main";
 import { Dots, Icon, Logo, MatchText, Modal, useTick, poll } from "../ui";
+import AuditTrail from "../components/AuditTrail";
 
 type Section = { heading: string; kind: string; items: string[] };
 type Resp = { job: Job; drafts: Draft[]; runs: Run[]; readiness: { ready: boolean; blockers: string[] } | null;
@@ -291,6 +292,7 @@ export default function JobPage({ id, embedded = false }: { id: string; embedded
               <p><a href={companyHref(job.company)}>Every role at {job.company}</a></p>
             </section>)}
           {tab === "application" && <>
+          <AuditTrail id={id} refresh={job.status} />
           <section className="block">
             <div className="sub-h"><h3>Your answers{drafts.length - (cover ? 1 : 0) ? ` (${drafts.length - (cover ? 1 : 0)})` : ""}</h3>
               {drafts.length > 0 && !r.busy && <button className="link small" onClick={() => act("prepare")}>Redraft</button>}</div>

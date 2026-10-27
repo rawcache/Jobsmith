@@ -221,6 +221,10 @@ def deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | Non
         return None
     value, confirmed = _derived(canon, ans, job)
     sensitive = canon in profile.SENSITIVE_KEYS
+    if canon in profile.EEO_KEYS and value and not confirmed:
+        # Demographics are never on a resume, so an unconfirmed one has nothing behind it: never filled (rule 2).
+        return {"kind": "answer_bank", "canon": canon, "answer": "", "confidence": 0.0,
+                "issues": ["Confirm your demographic answers on the Profile page (or 'Decline to self-identify')"]}
     if canon in ("acknowledge_notices", "ai_tools_consent") and value.lower() != "yes":
         return {"kind": "answer_bank", "canon": canon, "answer": "", "confidence": 1.0,
                 "issues": ["Asks you to agree to something; you chose to answer these yourself"] if field["required"] else []}

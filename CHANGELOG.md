@@ -12,6 +12,20 @@
   answers", "AI-generated responses will be rejected"), autopilot fills it but never sends it. It waits under "Needs
   you" with the employer's own sentence quoted, and the job's page shows the same line.
 
+### Added
+- Every submission keeps an audit trail: each field, the answer sent, where it came from (your resume, profile,
+  writing, an answer you approved before, something you typed, or a file you added) and whether the answer was the
+  right kind for the question. See it under "What was sent" on the application's page, or export it as JSON.
+  Answers that don't trace back to you are marked in red. If autopilot clicked Submit but never saw a confirmation
+  page, it says so, the application still counts toward your limits, and autopilot never sends it again.
+
+### Fixed
+- Greenhouse's Hispanic/Latino question and the phone country box are filled only from answers you confirmed on
+  the Profile page. Before, an answer Jobsmith had inferred (like U.S. citizenship from your resume) could fill
+  them before you confirmed it.
+- A demographic answer you haven't confirmed (gender, race, Hispanic/Latino, veteran, disability and the like) is
+  never filled into a form. It's listed under "Needs you" until you confirm it or choose "Decline to self-identify".
+
 ## 0.4.6 (2026-10-26)
 
 ### Changed

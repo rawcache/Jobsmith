@@ -41,7 +41,7 @@ def _file_key(d: dict) -> str:
 
 
 async def fill(page: Page, drafts: list[dict], files: dict[str, str]) -> dict:
-    filled, failed = [], []
+    filled, failed, sent = [], [], []    # sent: the field ids actually set, for the audit trail
     for d in drafts:
         value = d["value"]
         fp = None
@@ -61,6 +61,7 @@ async def fill(page: Page, drafts: list[dict], files: dict[str, str]) -> dict:
                 continue
             ok = await fill_field(page, sel, d["qtype"], value, fp)
             (filled if ok else failed).append((d["label"], "ok" if ok else "could not set value"))
+            sent += [d["field"]] if ok else []
         except Exception as e:
             failed.append((d["label"], f"{e.__class__.__name__}: {str(e)[:120]}"))
-    return {"filled": filled, "failed": failed}
+    return {"filled": filled, "failed": failed, "sent": sent}

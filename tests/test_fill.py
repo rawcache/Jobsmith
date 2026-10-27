@@ -69,6 +69,10 @@ async def test_greenhouse_fill_stops_before_submit(fake_llm, tmp_path, page):
     extras = {"country": "United States", "hispanic_latino": "No", "location_full": "Boston, Massachusetts, United States"}
     res = await greenhouse.fill(page, drafts, {"resume": str(tmp_path / "resume.pdf"), "cover_letter": str(cover)}, extras)
     failed = dict(res["failed"])
+    # The audit trail's "sent" is exactly the fields that filled: one id per success, none for a failure.
+    assert len(res["sent"]) + len(res["implicit"]) == len(res["filled"]) and len(set(res["sent"])) == len(res["sent"])
+    assert {i["label"] for i in res["implicit"]} == {"Phone country", "Hispanic/Latino"}
+    assert not set(res["sent"]) & {d["field"] for d in drafts if d["label"] in failed}
     assert await page.input_value("#first_name") == "Alex"
     assert await page.input_value("#email") == "alex.rivera@example.edu"
     assert await _shown(page, "#question_1002") == "3.5 - 3.79"        # combobox
@@ -127,7 +131,7 @@ async def test_lever_generic_fill_stops_before_submit(tmp_path, page):
     result = await generic.fill(page, drafts, {"resume": str(resume)})
 
     assert not result["failed"], result
-    assert len(result["filled"]) == len(fields)
+    assert len(result["filled"]) == len(fields) == len(result["sent"])
     for selector, expected in values.items():
         if "demo-question-2" in selector:
             assert await page.locator(selector + ":checked").input_value() == expected
@@ -159,6 +163,15 @@ async def test_runner_fill_and_detect_submission(fake_llm, tmp_path):
     from jobsmith import guardrails
     assert not guardrails._submitting           # counted as sent now, not in flight
     assert [r["status"] for r in runs if r["kind"] == "submit"] == ["done"]     # confirmed, not "unconfirmed"
+    from jobsmith import audit
+    [sub] = audit.for_job(jid)                 # the trail is what this fill set, sent by autopilot
+    assert sub["sent_by"] == "autopilot" and sub["basis"] == "filled" and sub["fields"]
+    # Everything traces except the AI's "No" about outstanding offers: it cites nothing, even though you approved it.
+    untraced = [f for f in sub["fields"] if not f["traces"]]
+    assert [(f["field"], f["source"], f["approved"]) for f in untraced] == [("question_1005", "none", True)]
+    implicit = {f["label"]: f for f in sub["fields"] if f["field"] in ("country", "hispanic_ethnicity")}
+    assert implicit["Hispanic/Latino"]["detail"][0]["ref"].startswith("Profile: ") and implicit["Hispanic/Latino"]["traces"]
+    assert implicit["Phone country"]["answer"] == "United States +1"          # what the box shows
 
 
 async def test_runner_holds_at_the_daily_cap(fake_llm, tmp_path, monkeypatch):
@@ -251,6 +264,7 @@ async def test_generic_fills_ashby_style_form_stops_before_submit(page, tmp_path
 
     res = await generic.fill(page, drafts, {"resume": str(resume)})
     assert not res["failed"], res
+    assert len(res["sent"]) == len(res["filled"])
 
     assert await page.input_value("#_systemfield_name") == "Alex Rivera"
     assert await page.input_value("#_systemfield_email") == "alex.rivera@example.edu"
@@ -433,10 +447,26 @@ async def test_multistep_shows_every_page_to_the_policy_check_before_submit(fake
 
     pdf = tmp_path / "r.pdf"
     pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
-    seen, asked_with = [], []
+    seen, asked_with, set_ = [], [], []
     url = (FIXTURES / "mock_multistep.html").resolve().as_uri()
     res = await multistep.run(page, url, answer=answer, files={"resume": str(pdf)}, log=lambda m: None,
-                              wait_for_user=wait_for_user, on_page=seen.append,
+                              wait_for_user=wait_for_user, on_page=seen.append, on_filled=set_.append,
                               allow_submit=lambda: asked_with.append("\n".join(seen)) or False)
     assert res["status"] == "review", res
     assert asked_with and "My Information" in asked_with[-1] and "Review" in asked_with[-1]
+    assert "#why" in set_ and len(set_) == len(set(set_))       # each field it actually set, once
+
+
+async def test_unconfirmed_demographic_answers_are_never_filled(fake_llm, tmp_path, monkeypatch):
+    import json as j
+    jid = await _green_job(fake_llm, tmp_path, monkeypatch)
+    profile.set_answer("hispanic_latino", "No", confirmed=False)      # inferred, not yet confirmed by you
+    try:
+        await runner.fill(jid, submit=False)
+        page = runner.LIVE[jid]["page"]
+        assert "No" != await _shown(page, "#hispanic_ethnicity")
+    finally:
+        runner.live_drop(jid)
+        await runner.browser.close()
+    pending = j.loads(db.q1("SELECT fields FROM audit_pending WHERE job_id=?", (jid,))["fields"])
+    assert "Hispanic/Latino" not in {f["label"] for f in pending}

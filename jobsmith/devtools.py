@@ -154,6 +154,27 @@ def seed_here(setup: bool = False) -> None:
                     "side: I trained the detector, squeezed it onto an NVIDIA Jetson Nano, and kept tuning until inference ran under 200 "
                     "milliseconds at 30 frames per second.", "confidence": 0.85, "rationale": "Your own words, from writing.md"},
     })
+    # A sent application with its audit trail, so the job page's "What was sent" has something to show.
+    from . import audit, profile
+    pipeline = [f["id"] for f in profile.facts() if "600,000" in f["text"]]
+    sent = [{"field": f, "label": l, "qtype": q, "required": True} for f, l, q in (
+        ("first_name", "First Name", "text"), ("email", "Email", "text"), ("resume", "Resume/CV", "file"),
+        ("authorized", "Are you legally authorized to work in the United States?", "select"),
+        ("data", "Tell us about a data pipeline you've built.", "textarea"), ("heard", "How did you hear about us?", "text"))]
+    draft.save_results("demo-soylent", sent, {
+        "first_name": {"kind": "answer_bank", "canon": "first_name", "answer": "Alex", "confidence": 1},
+        "email": {"kind": "answer_bank", "canon": "email", "answer": "alex.rivera@example.com", "confidence": 1},
+        "resume": {"kind": "file", "canon": "resume", "answer": "primary resume", "confidence": 1},
+        "authorized": {"kind": "answer_bank", "canon": "work_authorized_us", "answer": "Yes", "confidence": 1},
+        "data": {"kind": "generated", "answer": "At Northwind Labs I built an image pipeline that ingested 600,000+ images "
+                 "and caught duplicates with 94% precision, which cut manual review by about 80%.",
+                 "fact_ids": pipeline, "confidence": 0.9, "model": "gemini"},
+        "heard": {"kind": "learned", "answer": "LinkedIn", "confidence": 0.9,
+                  "rationale": "Reused your approved answer (Globex)"},
+    })
+    run = db.q1("SELECT id FROM runs WHERE job_id='demo-soylent' AND kind='submit'")
+    if run:
+        audit.record("demo-soylent", run["id"], "autopilot")
     match.rescore()
 
 

@@ -68,8 +68,13 @@ async def fill_implicit(page: Page, extras: dict) -> list[tuple[str, str]]:
 
 async def fill(page: Page, drafts: list[dict], files: dict[str, str], extras: dict | None = None) -> dict:
     """files: {'resume': path, 'cover_letter': path}. Returns per-field results."""
-    filled, failed = [], []
-    filled += await fill_implicit(page, extras or {})
+    filled, failed, sent = [], [], []    # sent: the field ids actually set, for the audit trail
+    done = await fill_implicit(page, extras or {})
+    filled += done
+    implicit = [{"field": control, "label": label, "canon": canon, "profile": (extras or {}).get(canon, "")}
+                for label, canon, control in (("Phone country", "country", "country"),
+                                              ("Hispanic/Latino", "hispanic_latino", "hispanic_ethnicity"))
+                if (label, "ok") in done]
     for d in drafts:
         value = d["value"]
         if d["qtype"] == "file":
@@ -99,9 +104,16 @@ async def fill(page: Page, drafts: list[dict], files: dict[str, str], extras: di
                 ok = await fill_combobox(page, sel, (extras or {}).get("location_full") or value, query=city,
                                          wait_ms=10000)
                 (filled if ok else failed).append((d["label"], "ok") if ok else (d["label"], "pick your city"))
+                sent += [d["field"]] if ok else []
                 continue
             ok = await fill_field(page, sel, d["qtype"], value, fp)
             (filled if ok else failed).append((d["label"], "ok") if ok else (d["label"], f"no option matched \"{value[:40]}\""))
+            sent += [d["field"]] if ok else []
         except Exception as e:
             failed.append((d["label"], f"{e.__class__.__name__}: {str(e)[:120]}"))
-    return {"filled": filled, "failed": failed}
+    # Filled from your profile without a draft, so the audit trail records them too, with what the box shows
+    # (the option picked, like "United States +1"). One a draft later filled again is that draft's.
+    implicit = [i for i in implicit if i["field"] not in sent]
+    for i in implicit:
+        i["answer"] = await combobox_text(page, f'#{i["field"]}') or i["profile"]
+    return {"filled": filled, "failed": failed, "sent": sent, "implicit": implicit}
