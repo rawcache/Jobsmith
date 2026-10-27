@@ -17,6 +17,7 @@ function stateLine(j: Job, busy?: string) {
   if (j.status === "error") return <span className="warn-text">Needs you</span>;
   if (j.status === "skipped") return <span className="muted" title={j.hold_reason ?? ""}>Skipped{j.eligibility && j.eligibility.ok === false ? ": may not qualify" : ""}</span>;
   if (j.eligibility && j.eligibility.ok === false) return <span className="muted" title={(j.eligibility.reasons ?? []).join(" ")}>May not qualify</span>;
+  if (j.gate && !j.gate.passed) return <span className="muted" title={j.gate.summary}>{j.gate.score == null ? "Not scored yet" : "Under your fit bar"}</span>;
   return null;
 }
 

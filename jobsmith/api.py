@@ -807,7 +807,9 @@ def list_jobs(status: str = "", category: str = "", ats_name: str = "", min_scor
     ai_blocked = {r["job_id"] for r in db.q(
         f"SELECT DISTINCT job_id FROM drafts WHERE issues LIKE '%Needs your AI%' AND job_id IN ({','.join('?' * len(ids))})",
         ids)} if ids else set()
+    bar = float(db.get_setting("min_fit_score") or 40)
     for r in rows:
+        r["gate"] = guardrails.fit_gate(r, bar)
         r["ai_blocked"] = r["id"] in ai_blocked
         r["tokens"] = tok.get(r["id"], 0)
         km = insights.keyword_match({"title": r["title"], "description": descs.get(r["id"], "")}, resume)
@@ -847,6 +849,7 @@ def get_job(job_id: str):
             "match": insights.keyword_match(j), "connections": network.at_company(j["company"], 8),
             "sections": insights.posting_sections(j.get("description") or ""), "facts": insights.job_facts(j),
             "eligibility": eligibility.check(j), "ai_policy": guardrails.policy_reason(j),
+            "gate": guardrails.fit_gate(j),
             "readiness": draft.readiness(job_id) if drafts else None,
             "busy": runner.active().get(job_id), "can_fill": runner.can_fill(j["ats"])}
 

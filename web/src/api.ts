@@ -9,7 +9,9 @@ export type Job = {
   pay?: string; updated_at?: number;
   eligibility?: { ok?: boolean; reasons?: string[]; notes?: string[] };
   ai_blocked?: boolean;
+  gate?: FitGate;
 };
+export type FitGate = { passed: boolean; score: number | null; threshold: number; summary: string; for: string[]; against: string[] };
 export type Research = {
   summary?: string; what_the_team_builds?: string; tech_stack?: string[];
   recent_news?: { headline: string; url: string }[];

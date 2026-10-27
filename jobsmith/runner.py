@@ -846,6 +846,11 @@ async def autopilot(job_ids: list[str], force: bool = False, submit: bool | None
     autonomous = applies_on_own() if submit is None else submit
 
     async def one(jid):
+        if not force:            # the fit gate: autopilot's own picks only, never one you chose
+            gate = guardrails.fit_gate(db.q1("SELECT fit_score, fit_reasons FROM jobs WHERE id=?", (jid,)) or {})
+            if not gate["passed"]:
+                db.x("UPDATE jobs SET hold_reason=?, updated_at=? WHERE id=?", (gate["summary"], db.now(), jid))
+                return
         if autonomous and not force:
             capped = guardrails.cap_reason(db.q1("SELECT id, company FROM jobs WHERE id=?", (jid,)) or {"id": jid})
             if capped:          # left as it is: autopilot picks it up again once there's room

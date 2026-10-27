@@ -96,13 +96,15 @@ async def test_autopilot_leaves_capped_jobs_for_later_but_your_pick_still_fills(
     db.set_settings({"max_applications_per_day": 1, "autonomy": "autopilot"})
     _sent("Acme", 1)
     jid = _job("Beta", 2)
+    db.x("UPDATE jobs SET fit_score=90 WHERE id=?", (jid,))   # clears the fit gate: only the cap stops it
     prepared = []
 
     async def fake_prepare(j, research=None):
         prepared.append(j)
     monkeypatch.setattr(runner, "prepare", fake_prepare)
     await runner.autopilot([jid])
-    assert prepared == [] and db.q1("SELECT status FROM jobs WHERE id=?", (jid,))["status"] == "new"
+    row = db.q1("SELECT status, hold_reason FROM jobs WHERE id=?", (jid,))
+    assert prepared == [] and row["status"] == "new" and "bar" not in (row["hold_reason"] or "")
     await runner.autopilot([jid], force=True)       # you picked it: filled, then held at Submit with the reason
     assert prepared == [jid]
 
@@ -288,3 +290,44 @@ def test_an_unclear_they_holds():
               "Candidates are eligible only if they do not use AI to complete this application.",
               "They do not use AI to evaluate applications."):      # unclear who: held, one click for you
         assert guardrails.ai_policy(s) == s, s
+
+
+def test_fit_gate_says_why_a_match_passes_or_not():
+    db.set_settings({"min_fit_score": 40})
+    ok = guardrails.fit_gate({"fit_score": 62, "fit_reasons": '["+ season match", "+ skills: python", "- location"]'})
+    assert ok["passed"] and ok["summary"] == "Fit 62 clears your bar of 40: autopilot applies."
+    assert ok["for"] == ["season match", "skills: python"] and ok["against"] == ["location"]
+    edge = guardrails.fit_gate({"fit_score": 40, "fit_reasons": []})
+    assert edge["passed"]                                            # at the bar counts
+    low = guardrails.fit_gate({"fit_score": 39.6, "fit_reasons": ["- older than 60 days"]})
+    assert not low["passed"] and low["summary"].startswith("Fit 39 is under your bar of 40")
+    assert not guardrails.fit_gate({"fit_score": None})["passed"]
+
+
+async def test_autopilot_only_applies_at_or_above_the_bar_unless_you_picked_it(monkeypatch):
+    db.set_settings({"min_fit_score": 50, "max_applications_per_day": 0})
+    low, high = _job("Low", 1), _job("High", 2)
+    db.x("UPDATE jobs SET fit_score=30 WHERE id=?", (low,))
+    db.x("UPDATE jobs SET fit_score=70 WHERE id=?", (high,))
+    prepared = []
+
+    async def fake_prepare(j, research=None):
+        prepared.append(j)
+    monkeypatch.setattr(runner, "prepare", fake_prepare)
+    await runner.autopilot([low, high])
+    assert prepared == [high]
+    assert db.q1("SELECT hold_reason FROM jobs WHERE id=?", (low,))["hold_reason"].startswith("Fit 30 is under your bar of 50")
+    await runner.autopilot([low], force=True)
+    assert prepared == [high, low]
+
+
+def test_every_match_carries_its_gate():
+    from fastapi.testclient import TestClient
+    from jobsmith.api import app
+    db.set_settings({"min_fit_score": 50})
+    jid = _job("Acme", 1)
+    db.x("UPDATE jobs SET fit_score=30, fit_reasons='[\"- location\"]' WHERE id=?", (jid,))
+    c = TestClient(app)
+    [row] = c.get("/api/jobs?min_score=0").json()["jobs"]
+    assert row["gate"]["passed"] is False and row["gate"]["against"] == ["location"]
+    assert c.get(f"/api/jobs/{jid}").json()["gate"]["summary"].startswith("Fit 30 is under your bar of 50")
