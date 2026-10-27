@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.6 (2026-10-26)
 
 ### Changed
 - The dashboard, website, terminal app and extension popup now look like the extension's on-page panel: warm
@@ -11,6 +11,10 @@
 - "Apply to new matches now" is the home page's main button.
 - The website's anvil drawing uses even characters so it reads as an anvil, and it shows whole from the first
   frame; only the sparks twinkle.
+- The practice copy's made-up Alex Rivera has a confirmed country (United States), so forms' Country questions are
+  answered from the profile instead of inferred from the city.
+- Contributors: `.gitignore` keeps `.env` files, databases, PDFs and cookie files out of git, and every push and pull
+  request is scanned for keys and tokens.
 
 ## 0.4.5 (2026-10-26)
 
