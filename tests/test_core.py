@@ -736,13 +736,6 @@ def test_setup_checklist_says_what_autopilot_still_needs():
     assert onboarding.profile_ready() == all(c["done"] for c in items.values() if c["required"])
 
 
-def test_no_application_caps_by_default():
-    from jobsmith import commands, config, runner
-    assert config.DEFAULT_SETTINGS["max_applications_per_day"] == 0
-    assert commands._remaining_today() > 1000
-    assert runner.limit_check({"id": "x", "company": "Anything"}) is None
-
-
 async def test_watching_an_application_before_its_form_opens():
     """Press a number in the terminal while it's still researching: the window comes up when the form opens."""
     from jobsmith import runner

@@ -12,7 +12,7 @@ import time
 import traceback
 from pathlib import Path
 
-from . import db, draft, jobdetail, profile
+from . import db, draft, guardrails, jobdetail, profile
 from .config import BROWSER_PROFILE, RUNS_DIR
 
 MULTI_STEP = {"workday", "icims", "oracle", "taleo", "successfactors", "eightfold"}
@@ -476,7 +476,7 @@ async def stop(everything: bool = False) -> dict:
                 pass
             live_drop(jid)
         st = (db.q1("SELECT status FROM jobs WHERE id=?", (jid,)) or {}).get("status")
-        if st in ("filling", "fetched", "new", "drafted"):
+        if st in ("filling", "fetched", "new", "drafted") and not guardrails.maybe_sent(jid):
             db.x("UPDATE jobs SET status=?, hold_reason=?, updated_at=? WHERE id=?",
                  ("drafted" if st in ("filling", "drafted") else st, "Stopped by you", db.now(), jid))
     db.x("UPDATE runs SET status='error', log=log || ?, finished_at=? WHERE status='running'",
@@ -535,20 +535,6 @@ def _set_status(job_id: str, status: str, error: str | None = None) -> None:
     if status == "submitted":
         db.x("UPDATE jobs SET hold_reason=NULL WHERE id=?", (job_id,))
     db.x("UPDATE jobs SET status=?, error=?, updated_at=? WHERE id=?", (status, error, db.now(), job_id))
-
-
-# --------------------------------------------------------------------------- limits
-def limit_check(job: dict) -> str | None:
-    s = db.get_settings()
-    day_ago = time.time() - 86400
-    today = db.q1("SELECT COUNT(*) n FROM runs WHERE kind='submit' AND status='done' AND finished_at>?", (day_ago,))["n"]
-    if 0 < int(s.get("max_applications_per_day") or 0) <= today:
-        return f"Daily limit reached ({today}/{s['max_applications_per_day']})"
-    same = db.q1("SELECT COUNT(*) n FROM jobs WHERE company=? AND status='submitted' AND id!=?",
-                 (job["company"], job["id"]))["n"]
-    if 0 < int(s.get("max_applications_per_company") or 0) <= same:
-        return f"Already applied to {same} roles at {job['company']} (limit {s['max_applications_per_company']})"
-    return None
 
 
 # --------------------------------------------------------------------------- steps
@@ -632,12 +618,6 @@ async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None
         run.done("done")
         await fill_multistep(job_id, submit)
         return
-    blocked = limit_check(job)
-    if blocked:
-        run.log(blocked)
-        run.done("error")
-        _set_status(job_id, job["status"], blocked)
-        return
     resume = profile.attachment_file()
     if not resume:
         run.log("Upload a PDF resume in Profile first (it's what gets attached).")
@@ -709,20 +689,34 @@ async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None
             shot = run_dir / "filled.png"
             await _shot(page, shot)
             ready = draft.readiness(job_id)
-            auto = submit and ready["ready"] and not result["failed"]
+            capped = guardrails.cap_reason(job) if submit else None
+            auto = submit and ready["ready"] and not result["failed"] and not capped
             if submit and not auto:
-                why = (ready["blockers"] or [])[:3] + [f"{f[0]}: couldn't fill it" for f in result["failed"]][:3]
+                why = ([capped] if capped else []) + (ready["blockers"] or [])[:3] + \
+                    [f"{f[0]}: couldn't fill it" for f in result["failed"]][:3]
                 run.log("Held for your review: " + "; ".join(why))
                 db.x("UPDATE jobs SET hold_reason=? WHERE id=?", ("; ".join(why)[:500], job_id))
             if auto:
                 run.log("All answers trusted; submitting…")
                 live_set(job_id, phase="submitting")
+                btn = None
                 for sel in SUBMIT_SELECTORS:
-                    btn = page.locator(sel).first
-                    if await btn.count() and await btn.is_visible():
-                        await btn.click()
+                    b = page.locator(sel).first
+                    if await b.count() and await b.is_visible():
+                        btn = b
                         break
-                await page.wait_for_timeout(4000)
+                # Checked again with nothing awaited before the claim, so tabs finishing together can't pass a cap.
+                late = guardrails.cap_reason(job) if btn else "couldn't find the Submit button"
+                if late:
+                    run.log("Held for your review: " + late)
+                    db.x("UPDATE jobs SET hold_reason=? WHERE id=?", (late, job_id))
+                    live_set(job_id, phase="review", note=late[:120])
+                    auto = False
+                else:
+                    guardrails.claim(job_id)   # counted toward the caps from the click on
+                    await btn.click()
+                    await page.wait_for_timeout(4000)
+            if auto:
                 if await captcha_visible(page):
                     run.log("CAPTCHA shown: solve it in the browser window; Jobsmith is waiting.")
                     live_set(job_id, phase="review", note="CAPTCHA to solve: take over to finish it")
@@ -737,10 +731,14 @@ async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None
             _set_status(job_id, "filled")
             run.done("waiting_user")
             watch = True
+        except asyncio.CancelledError:
+            guardrails.abandon(job_id, "stopped while submitting")
+            raise
         except Exception as e:
             run.log("ERROR " + "".join(traceback.format_exception_only(type(e), e)).strip())
             run.done("error")
-            _set_status(job_id, "error", str(e)[:500])
+            if not guardrails.abandon(job_id, f"stopped by an error: {e.__class__.__name__}"):
+                _set_status(job_id, "error", str(e)[:500])   # (if it may have been sent, it waits for you instead)
             live_set(job_id, phase="error", note=str(e)[:120])
             try:
                 await _shot(page, run_dir / "error.png", full=False)
@@ -754,20 +752,28 @@ async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None
 async def watch_tab(job_id: str, page, run_dir: Path, run: Run) -> None:
     """Outside the concurrency slot: watch the tab until you (or Jobsmith) submit. Spots the
     'we emailed you a code' step and asks you for the code instead of leaving you guessing."""
+    job = db.q1("SELECT company, title FROM jobs WHERE id=?", (job_id,)) or {}
+    deadline = time.time() + 45 * 60
+    try:
+        await _watch(job_id, page, run_dir, run, job, deadline)
+    finally:
+        guardrails.abandon(job_id, "no confirmation page before the tab closed")   # no-op unless autopilot clicked Submit and nothing confirmed
+
+
+async def _watch(job_id: str, page, run_dir: Path, run: Run, job: dict, deadline: float) -> None:
     from .fill.base import page_confirms_submission, security_code_prompt
     from .scheduler import notify
-    job = db.q1("SELECT company, title FROM jobs WHERE id=?", (job_id,)) or {}
     from . import outcomes
     asked = notified = False
     asked_at = last_mail = 0.0
     tried: set[str] = set()
-    deadline = time.time() + 45 * 60
     while time.time() < deadline:
         try:
             if page.is_closed():
                 break
             if await page_confirms_submission(page):
                 await _shot(page, run_dir / "confirmation.png")
+                guardrails.release(job_id)
                 sub = Run(job_id, "submit")
                 sub.log("Confirmation page detected.")
                 sub.done("done", screenshot=str(run_dir / "confirmation.png"),
@@ -811,6 +817,7 @@ async def watch_tab(job_id: str, page, run_dir: Path, run: Run) -> None:
 
 
 def mark_submitted(job_id: str) -> None:
+    guardrails.release(job_id)
     sub = Run(job_id, "submit")
     sub.log("Marked submitted by you.")
     sub.done("done")
@@ -824,6 +831,10 @@ async def autopilot(job_ids: list[str], force: bool = False, submit: bool | None
     autonomous = applies_on_own() if submit is None else submit
 
     async def one(jid):
+        if autonomous and not force:
+            capped = guardrails.cap_reason(db.q1("SELECT id, company FROM jobs WHERE id=?", (jid,)) or {"id": jid})
+            if capped:          # left as it is: autopilot picks it up again once there's room
+                return
         await prepare(jid)
         full = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,)))
         el = eligibility.check(full)
@@ -855,17 +866,26 @@ async def fill_multistep(job_id: str, submit: bool = False) -> None:
     from .scheduler import notify
     job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (job_id,)))
     run = Run(job_id, "fill")
-    blocked = limit_check(job)
-    if blocked:
-        run.log(blocked)
-        run.done("error")
-        return
     resume = profile.attachment_file()
     files = {"resume": str(resume)} if resume else {}
     tr = profile.transcript_file()
     if tr:
         files["transcript"] = str(tr)
     trust = {"ok": True}
+    held: list[str] = []
+
+    def may_submit() -> bool:
+        """Checked at the review page, right before the Submit click."""
+        if not (submit and trust["ok"]):
+            return False
+        capped = guardrails.cap_reason(job)
+        if capped:
+            held.append(capped)
+            run.log("Held for your review: " + capped)
+            db.x("UPDATE jobs SET hold_reason=? WHERE id=?", (capped, job_id))
+            return False
+        guardrails.claim(job_id)
+        return True
     threshold = int(db.get_setting("trust_threshold") or 3)
 
     async def answer(fields: list[dict]) -> dict:
@@ -904,7 +924,7 @@ async def fill_multistep(job_id: str, submit: bool = False) -> None:
             run.log(f"Opening {job.get('referral_url') or job['url']} (multi-page beta)")
             res = await multistep.run(page, job.get("referral_url") or job["url"], answer=answer, files=files,
                                       log=run.log, wait_for_user=wait_for_user,
-                                      allow_submit=lambda: submit and trust["ok"])
+                                      allow_submit=may_submit)
             shot = run_dir / "filled.png"
             await _shot(page, shot)
             db.x("UPDATE runs SET screenshot=? WHERE id=?", (str(shot), run.id))
@@ -913,6 +933,7 @@ async def fill_multistep(job_id: str, submit: bool = False) -> None:
             if res["status"] in ("submitted", "submitted_clicked"):
                 from .fill.base import page_confirms_submission
                 if res["status"] == "submitted" or await page_confirms_submission(page):
+                    guardrails.release(job_id)
                     sub = Run(job_id, "submit")
                     sub.log("Submitted through the multi-page flow.")
                     sub.done("done", screenshot=str(shot))
@@ -931,7 +952,11 @@ async def fill_multistep(job_id: str, submit: bool = False) -> None:
             t = asyncio.create_task(watch_tab(job_id, page, run_dir, run))
             _tasks.add(t)
             t.add_done_callback(_tasks.discard)
+        except asyncio.CancelledError:
+            guardrails.abandon(job_id, "stopped while submitting")
+            raise
         except Exception as e:
             run.log("ERROR " + "".join(traceback.format_exception_only(type(e), e)).strip())
             run.done("error")
-            _set_status(job_id, "error", str(e)[:500])
+            if not guardrails.abandon(job_id, f"stopped by an error: {e.__class__.__name__}"):
+                _set_status(job_id, "error", str(e)[:500])   # (if it may have been sent, it waits for you instead)

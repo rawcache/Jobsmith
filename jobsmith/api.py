@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import (ats, claude_login, commands, db, eligibility, onboarding, outcomes, power, scheduler, smith, draft, insights, learn, llm, match, network,
+from . import (ats, claude_login, commands, db, eligibility, guardrails, onboarding, outcomes, power, scheduler, smith, draft, insights, learn, llm, match, network,
                profile, runner, sources)
 from . import __version__
 from .config import BUILD, DEMO, UPLOADS_DIR, WEB_DIST
@@ -1072,7 +1072,7 @@ async def home():
             "in_progress": len(runner.active()), "review": review, "recent": recent, "sources": srcs,
             "queued": db.q1("""SELECT COUNT(*) n FROM jobs WHERE active=1 AND status IN ('new','fetched') AND verdict IS NULL
                                AND COALESCE(fit_score,0) >= ?""", (s.get("min_fit_score") or 40,))["n"],
-            "daily_cap": s["max_applications_per_day"], "remaining_today": commands._remaining_today(),
+            **guardrails.summary(),
             "autonomy": s.get("autonomy"), "auto_run": bool(s.get("auto_run")), "next_run": scheduler.state["next_run"],
             "last_summary": scheduler.state["last_summary"], "min_fit": s.get("min_fit_score") or 40,
             "network": network.summary()["total"],

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import re
-import time
 
 from . import db, jobdetail, llm, match, profile, runner, sources
 from .llm import LLMError, complete_json
@@ -28,11 +27,8 @@ def history(n: int = 10) -> list[dict]:
 
 
 def _remaining_today() -> int:
-    s = db.get_settings()
-    day_ago = time.time() - 86400
-    done = db.q1("SELECT COUNT(*) n FROM runs WHERE kind='submit' AND status='done' AND finished_at>?", (day_ago,))["n"]
-    cap = int(s.get("max_applications_per_day") or 0)
-    return 10**6 if cap <= 0 else max(0, cap - done)
+    from . import guardrails
+    return guardrails.remaining_today()
 
 
 def queue(job_ids: list[str], force: bool = False, mode: str | None = None) -> list[str]:

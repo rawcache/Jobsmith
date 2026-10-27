@@ -66,6 +66,11 @@ export default function Settings({ focus }: { focus?: string }) {
             onChange={v => setAutopilot(v).then(m => { setSaved(m); load(); refresh(); })} /></div>
         <div className="set-row"><div><strong>How picky</strong><p>Which matches autopilot applies to.</p></div>
           {seg("min_fit_score", [[60, "Strong fits"], [40, "Good fits"], [20, "Anything I qualify for"]], picky)}</div>
+        <div className="set-row"><div><strong>Limits</strong><p>Autopilot stops at these and says which one. You can still submit yourself. Blank means no limit.</p></div>
+          <div className="grid-2 tight caps">
+            <label className="field">Most a day<input type="number" min={0} placeholder="No limit" value={s.max_applications_per_day || ""} onChange={num("max_applications_per_day")} /></label>
+            <label className="field">Per company each week<input type="number" min={0} placeholder="No limit" value={s.max_applications_per_company || ""} onChange={num("max_applications_per_company")} /></label>
+          </div></div>
         <div className="set-row"><div><strong>Applications at once</strong><p>More is faster; each one opens its own tab.</p></div>
           {seg("concurrency", [[1, "1"], [3, "3"], [5, "5"]], [1, 3, 5].includes(s.concurrency) ? s.concurrency : 3)}</div>
         <div className="set-row"><div><strong>Check for new roles</strong><p>While Jobsmith is open and your computer is awake.</p></div>
@@ -136,10 +141,6 @@ export default function Settings({ focus }: { focus?: string }) {
 
       <details className="card more">
         <summary><h2>More options</h2></summary>
-        <div className="grid-2 tight">
-          <label className="field">Most applications per day<input type="number" min={0} placeholder="No limit" value={s.max_applications_per_day || ""} onChange={num("max_applications_per_day")} /></label>
-          <label className="field">Most per company<input type="number" min={0} placeholder="No limit" value={s.max_applications_per_company || ""} onChange={num("max_applications_per_company")} /></label>
-        </div>
         <label className="check"><input type="checkbox" checked={s.multistep_beta} onChange={e => save({ multistep_beta: e.target.checked })} />
           <span>Multi-page sites like Workday (beta). You sign in yourself; Jobsmith never types passwords.</span></label>
         <label className="check"><input type="checkbox" checked={s.tailor_resume} onChange={e => save({ tailor_resume: e.target.checked })} />

@@ -156,6 +156,28 @@ async def test_runner_fill_and_detect_submission(fake_llm, tmp_path):
     runs = db.q("SELECT kind, status, log FROM runs WHERE job_id=? ORDER BY id", (jid,))
     assert job["status"] == "submitted", runs
     assert any(r["kind"] == "submit" and r["status"] == "done" for r in runs)
+    from jobsmith import guardrails
+    assert not guardrails._submitting           # counted as sent now, not in flight
+    assert [r["status"] for r in runs if r["kind"] == "submit"] == ["done"]     # confirmed, not "unconfirmed"
+
+
+async def test_runner_holds_at_the_daily_cap(fake_llm, tmp_path, monkeypatch):
+    async def no_watch(*a):         # a held tab is watched for 45 minutes while you finish it; not in a test
+        return None
+    monkeypatch.setattr(runner, "watch_tab", no_watch)
+    jid, _ = await _job_with_drafts(fake_llm, tmp_path)
+    db.set_settings({"browser_channel": "", "headless": True, "autonomy": "autonomous", "trust_threshold": 0,
+                     "max_applications_per_day": 1})
+    runner.mark_submitted(sources.add_job_url("https://job-boards.greenhouse.io/other/jobs/1", "Other", "Intern"))
+    for d in draft.drafts_for(jid):
+        db.x("UPDATE drafts SET verdict='green' WHERE id=?", (d["id"],))
+    try:
+        await runner.fill(jid, submit=True)
+    finally:
+        await runner.browser.close()
+    job = db.q1("SELECT status, hold_reason FROM jobs WHERE id=?", (jid,))
+    assert job["status"] == "filled"                  # filled, waiting for you, not sent
+    assert job["hold_reason"].startswith("Daily cap reached: 1 of 1 sent today")
 
 
 async def test_multistep_signin_handoff_and_review(fake_llm, tmp_path, page):
@@ -309,3 +331,67 @@ async def test_second_pass_fills_employment_section_the_api_missed(page):
     assert vals["sm"] == "May" and vals["sy"] == "2025"
     assert vals["ey"] == "2027"                     # same label, Education section: your graduation
     assert not r["failed"]
+
+
+async def test_a_fill_stopped_while_submitting_still_counts(fake_llm, tmp_path, monkeypatch):
+    import asyncio
+    from jobsmith import guardrails
+    jid, _ = await _job_with_drafts(fake_llm, tmp_path)
+    db.set_settings({"browser_channel": "", "headless": True, "autonomy": "autonomous", "trust_threshold": 0})
+    for d in draft.drafts_for(jid):
+        db.x("UPDATE drafts SET verdict='green' WHERE id=?", (d["id"],))
+    real_claim = guardrails.claim
+
+    def claim_then_stop(j):          # autopilot is switched off the moment it claims the slot
+        real_claim(j)
+        raise asyncio.CancelledError
+    monkeypatch.setattr(guardrails, "claim", claim_then_stop)
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await runner.fill(jid, submit=True)
+    finally:
+        await runner.browser.close()
+    assert jid not in guardrails._submitting
+    # It may have gone through, so it still counts, on disk, and says so.
+    assert db.q1("SELECT status FROM runs WHERE job_id=? AND kind='submit'", (jid,))["status"] == "unconfirmed"
+    assert guardrails.sent_today() == 1
+    assert "never saw a confirmation page" in db.q1("SELECT hold_reason FROM jobs WHERE id=?", (jid,))["hold_reason"]
+
+
+async def _green_job(fake_llm, tmp_path, monkeypatch):
+    async def no_watch(*a):
+        return None
+    monkeypatch.setattr(runner, "watch_tab", no_watch)
+    jid, _ = await _job_with_drafts(fake_llm, tmp_path)
+    db.set_settings({"browser_channel": "", "headless": True, "autonomy": "autonomous", "trust_threshold": 0})
+    for d in draft.drafts_for(jid):
+        db.x("UPDATE drafts SET verdict='green' WHERE id=?", (d["id"],))
+    return jid
+
+
+async def test_an_error_after_clicking_submit_says_it_may_have_been_sent(fake_llm, tmp_path, monkeypatch):
+    jid = await _green_job(fake_llm, tmp_path, monkeypatch)
+
+    async def broken(page):
+        raise RuntimeError("page went away")
+    monkeypatch.setattr(base, "captcha_visible", broken)
+    try:
+        await runner.fill(jid, submit=True)
+    finally:
+        await runner.browser.close()
+    job = db.q1("SELECT status, hold_reason FROM jobs WHERE id=?", (jid,))
+    assert job["status"] == "filled"                                # Needs you, not "error, try again"
+    assert "never saw a confirmation page" in job["hold_reason"]
+
+
+async def test_no_submit_button_means_no_submission_counted(fake_llm, tmp_path, monkeypatch):
+    from jobsmith import guardrails
+    jid = await _green_job(fake_llm, tmp_path, monkeypatch)
+    monkeypatch.setattr(base, "SUBMIT_SELECTORS", ["#no-such-button"])
+    try:
+        await runner.fill(jid, submit=True)
+    finally:
+        await runner.browser.close()
+    assert db.q1("SELECT hold_reason FROM jobs WHERE id=?", (jid,))["hold_reason"] == "couldn't find the Submit button"
+    assert guardrails.sent_today() == 0 and not guardrails._submitting
+    assert runner.LIVE[jid]["phase"] == "review"       # waiting for you, so the off switch leaves its tab open

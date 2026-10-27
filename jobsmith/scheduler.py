@@ -44,26 +44,39 @@ def pick_new_jobs(limit: int) -> list[str]:
     s = db.get_settings()
     rows = db.q("""SELECT id, company, ats, fit_score FROM jobs WHERE active=1 AND status IN ('new','fetched','drafted')
                    AND verdict IS NULL AND COALESCE(fit_score,0) >= ? AND eligibility NOT LIKE '%"ok": false%'
+                   AND id NOT IN (SELECT job_id FROM runs WHERE kind='submit')
                    ORDER BY status='drafted' DESC, fit_score DESC, date_posted DESC LIMIT 400""", (s.get("min_fit_score") or 40,))
     # Network hiccups ("too slow", "couldn't reach") get two more tries, an hour apart.
     rows += db.q("""SELECT j.id, j.company, j.ats, j.fit_score FROM jobs j WHERE j.active=1 AND j.status='error'
                     AND j.updated_at < ? AND (j.error LIKE '%imeout%' OR j.error LIKE '%nodename%' OR j.error LIKE '%ERR_%'
                          OR j.error LIKE '%onnect%' OR j.error LIKE '%name or service%')
-                    AND (SELECT COUNT(*) FROM runs r WHERE r.job_id=j.id AND r.status='error') < 3""",
+                    AND (SELECT COUNT(*) FROM runs r WHERE r.job_id=j.id AND r.status='error') < 3
+                    AND j.id NOT IN (SELECT job_id FROM runs WHERE kind='submit')""",
                  (time.time() - 3600,))
+    # The company cap is per week: what was sent in the last 7 days (sent_to_company counts submissions in flight)
+    # plus applications being worked on right now. A filled one waiting for you doesn't hold a slot: autopilot
+    # won't send it, and you sending it yourself is always allowed.
+    from . import guardrails
+    cap = int(s.get("max_applications_per_company") or 0)
+    busy: dict[str, int] = {}
+    working = [j for j in runner.active() if j not in guardrails._submitting]
+    rows = [r for r in rows if r["id"] not in runner.active()]     # already being worked on: not a new pick
+    if working:
+        marks = ",".join("?" * len(working))
+        for r in db.q(f"SELECT company FROM jobs WHERE id IN ({marks})", working):
+            busy[r["company"].strip().lower()] = busy.get(r["company"].strip().lower(), 0) + 1
     per_company: dict[str, int] = {}
-    for r in db.q("SELECT company, COUNT(*) n FROM jobs WHERE status IN ('submitted','filling','filled','drafted') "
-                  "GROUP BY company"):
-        per_company[r["company"]] = r["n"]
     out = []
     # fillable sites first; multi-step sites only get drafted
     rows.sort(key=lambda r: (not runner.can_fill(r["ats"]), -(r["fit_score"] or 0)))
     for r in rows:
-        cap = int(s.get("max_applications_per_company") or 0)
-        if cap > 0 and per_company.get(r["company"], 0) >= cap:
+        co = r["company"].strip().lower()
+        if co not in per_company:
+            per_company[co] = guardrails.sent_to_company(r["company"]) + busy.get(co, 0)
+        if cap > 0 and per_company[co] >= cap:
             continue
         out.append(r["id"])
-        per_company[r["company"]] = per_company.get(r["company"], 0) + 1
+        per_company[co] += 1
         if len(out) >= limit:
             break
     return out

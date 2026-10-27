@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- Autopilot has limits on by default: 20 applications a day and 3 to one company a week. Change them under
+  Settings → Applying (blank means no limit). Home shows "12 of 20 today". At a limit, autopilot stops before
+  Submit and says which limit it hit; the application waits under "Needs you" and you can still send it yourself.
+  Applications you send yourself count toward the limits too. Before, there were no limits unless you set them,
+  and the per-company limit never reset.
+
 ## 0.4.6 (2026-10-26)
 
 ### Changed
