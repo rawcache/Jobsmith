@@ -103,8 +103,10 @@ def abandon(job_id: str, why: str) -> bool:
     sends it again. True when it recorded one."""
     if job_id not in _submitting:
         return False
-    db.x("INSERT INTO runs(job_id, kind, status, log, started_at, finished_at) VALUES(?,?,?,?,?,?)",
-         (job_id, "submit", "unconfirmed", why, db.now(), db.now()))
+    run_id = db.x("INSERT INTO runs(job_id, kind, status, log, started_at, finished_at) VALUES(?,?,?,?,?,?)",
+                  (job_id, "submit", "unconfirmed", why, db.now(), db.now()))
+    from . import audit
+    audit.record(job_id, run_id, "autopilot")             # what it may have sent, in case it did
     db.x("UPDATE jobs SET status='filled', error=NULL, hold_reason=?, updated_at=? WHERE id=?",
          ("Autopilot clicked Submit but never saw a confirmation page. Check your email or the site to see if it "
           f"went through ({why}).", db.now(), job_id))

@@ -661,8 +661,10 @@ async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None
                 from .draft import state_from_location
                 loc = v("location")
                 st = state_from_location(loc)
-                extras = {"country": v("country") or ("United States" if v("us_citizen").lower() == "yes" else ""),
-                          "hispanic_latino": v("hispanic_latino"),
+                # Country (from citizenship) and Hispanic/Latino come only from answers you confirmed (rule 2).
+                ok = lambda k: v(k) if (ans.get(k) or {}).get("confirmed") else ""
+                extras = {"country": ok("country") or ("United States" if ok("us_citizen").lower() == "yes" else ""),
+                          "hispanic_latino": ok("hispanic_latino"),
                           "location_full": f"{loc.split(',')[0].strip()}, {st}, United States" if st else loc}
                 result = await adapter.fill(page, drafts_, files, extras)
                 live_set(job_id, phase="filling", note="checking the page for anything else")
@@ -671,8 +673,9 @@ async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None
                     more = await asyncio.wait_for(sweep(page, job, run.log), timeout=150)
                 except Exception as e:  # a second pass is a bonus, never a reason to fail
                     run.log(f"Second pass skipped ({e.__class__.__name__})")
-                    more = {"filled": [], "failed": []}
+                    more = {"filled": [], "failed": [], "sent": []}
                 result["filled"] += more["filled"]
+                result["sent"] = result.get("sent", []) + more.get("sent", [])
                 # a field the main pass missed but the sweep filled isn't a failure anymore
                 done = {l for l, _ in more["filled"]}
                 result["failed"] = [x for x in result["failed"] if x[0] not in done] + more["failed"]
@@ -681,6 +684,8 @@ async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None
             for label, why in result["failed"]:
                 run.log(f"  ✗ {label}: {why}")
             run.log(f"Filled {len(result['filled'])} fields, {len(result['failed'])} need you")
+            from . import audit
+            audit.capture(job_id, set(result.get("sent", [])), result.get("implicit"))   # what this fill set
             live_set(job_id, phase="review",
                      note=(f"{len(result['failed'])} field(s) need you: " + ", ".join(f[0] for f in result["failed"][:3]))
                      if result["failed"] else "all fields filled")
@@ -779,12 +784,8 @@ async def _watch(job_id: str, page, run_dir: Path, run: Run, job: dict, deadline
                 break
             if await page_confirms_submission(page):
                 await _shot(page, run_dir / "confirmation.png")
-                guardrails.release(job_id)
-                sub = Run(job_id, "submit")
-                sub.log("Confirmation page detected.")
-                sub.done("done", screenshot=str(run_dir / "confirmation.png"),
-                         snapshot=str(run_dir / "answers.json"))
-                _set_status(job_id, "submitted")
+                record_submission(job_id, "Confirmation page detected.", screenshot=str(run_dir / "confirmation.png"),
+                                  snapshot=str(run_dir / "answers.json"))
                 live_set(job_id, phase="submitted", needs_code=False, note="")
                 run.log("Submitted ✓")
                 await live_shot(job_id)
@@ -822,12 +823,20 @@ async def _watch(job_id: str, page, run_dir: Path, run: Run, job: dict, deadline
         await asyncio.sleep(2)
 
 
-def mark_submitted(job_id: str) -> None:
-    guardrails.release(job_id)
+def record_submission(job_id: str, note: str, **files) -> None:
+    """Every submission goes through here: counted toward the caps, logged, and its audit trail written from the
+    answers as they stood when it was sent."""
+    from . import audit
+    by = "autopilot" if guardrails.release(job_id) else "you"
     sub = Run(job_id, "submit")
-    sub.log("Marked submitted by you.")
-    sub.done("done")
+    sub.log(note)
+    sub.done("done", **files)
+    audit.record(job_id, sub.id, by)
     _set_status(job_id, "submitted")
+
+
+def mark_submitted(job_id: str) -> None:
+    record_submission(job_id, "Marked submitted by you.")
 
 
 async def autopilot(job_ids: list[str], force: bool = False, submit: bool | None = None) -> None:
@@ -880,6 +889,7 @@ async def fill_multistep(job_id: str, submit: bool = False) -> None:
     trust = {"ok": True}
     held: list[str] = []
     seen: list[str] = []            # every page's text, for the employer's AI policy
+    sent: set[str] = set()          # every field actually set, for the audit trail
 
     def may_submit() -> bool:
         """Checked at the review page, right before the Submit click."""
@@ -892,6 +902,8 @@ async def fill_multistep(job_id: str, submit: bool = False) -> None:
             db.x("UPDATE jobs SET hold_reason=? WHERE id=?", (capped, job_id))
             return False
         guardrails.claim(job_id)
+        from . import audit
+        audit.capture(job_id, sent)      # exactly the fields it set, on every page
         return True
     threshold = int(db.get_setting("trust_threshold") or 3)
 
@@ -931,20 +943,19 @@ async def fill_multistep(job_id: str, submit: bool = False) -> None:
             run.log(f"Opening {job.get('referral_url') or job['url']} (multi-page beta)")
             res = await multistep.run(page, job.get("referral_url") or job["url"], answer=answer, files=files,
                                       log=run.log, wait_for_user=wait_for_user,
-                                      allow_submit=may_submit, on_page=seen.append)
+                                      allow_submit=may_submit, on_page=seen.append, on_filled=sent.add)
             shot = run_dir / "filled.png"
             await _shot(page, shot)
             db.x("UPDATE runs SET screenshot=? WHERE id=?", (str(shot), run.id))
+            if res["status"] == "review":         # every page answered: keep what was put in, for when you submit
+                from . import audit
+                audit.capture(job_id, sent)
             for i in res["issues"][:6]:
                 run.log(f"  ✗ {i}")
             if res["status"] in ("submitted", "submitted_clicked"):
                 from .fill.base import page_confirms_submission
                 if res["status"] == "submitted" or await page_confirms_submission(page):
-                    guardrails.release(job_id)
-                    sub = Run(job_id, "submit")
-                    sub.log("Submitted through the multi-page flow.")
-                    sub.done("done", screenshot=str(shot))
-                    _set_status(job_id, "submitted")
+                    record_submission(job_id, "Submitted through the multi-page flow.", screenshot=str(shot))
                     notify("Jobsmith: submitted", f"{job['company']}: {job['title']}")
                     live_set(job_id, phase="submitted", note="")
                     run.done("done")

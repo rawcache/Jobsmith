@@ -81,9 +81,11 @@ async def page_errors(page: Page) -> list[str]:
 
 
 async def run(page: Page, url: str, *, answer: Callable, files: dict, log: Callable, wait_for_user: Callable,
-              allow_submit: Callable, max_pages: int = 15, on_page: Callable | None = None) -> dict:
+              allow_submit: Callable, max_pages: int = 15, on_page: Callable | None = None,
+              on_filled: Callable | None = None) -> dict:
     """answer(fields) -> {field: value}; wait_for_user(message, check) waits until check() is true.
-    on_page(text) gets each page's text once it's filled, before allow_submit() is asked on that page."""
+    on_page(text) gets each page's text once it's filled, before allow_submit() is asked on that page;
+    on_filled(field) each field it actually set (the audit trail records only those)."""
     await page.goto(url, wait_until="domcontentloaded", timeout=60000)
     await page.wait_for_timeout(2500)
     filled_total, issues = 0, []
@@ -126,6 +128,8 @@ async def run(page: Page, url: str, *, answer: Callable, files: dict, log: Calla
             try:
                 ok = await fill_field(page, css_for(f["field"]), f["qtype"], val, fp)
                 filled_total += int(bool(ok))
+                if ok and on_filled:
+                    on_filled(f["field"])
                 if not ok and f["required"]:
                     issues.append(f"{f['label']}: couldn't set '{val[:40]}'")
             except Exception as e:

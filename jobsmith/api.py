@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import (ats, claude_login, commands, db, eligibility, guardrails, onboarding, outcomes, power, scheduler, smith, draft, insights, learn, llm, match, network,
+from . import (ats, audit, claude_login, commands, db, eligibility, guardrails, onboarding, outcomes, power, scheduler, smith, draft, insights, learn, llm, match, network,
                profile, runner, sources)
 from . import __version__
 from .config import BUILD, DEMO, UPLOADS_DIR, WEB_DIST
@@ -849,6 +849,22 @@ def get_job(job_id: str):
             "eligibility": eligibility.check(j), "ai_policy": guardrails.policy_reason(j),
             "readiness": draft.readiness(job_id) if drafts else None,
             "busy": runner.active().get(job_id), "can_fill": runner.can_fill(j["ats"])}
+
+
+@app.get("/api/jobs/{job_id}/audit")
+def job_audit(job_id: str):
+    """What was sent in each submission of this application, field by field, and where each answer came from."""
+    job_or_404(job_id)
+    return {"submissions": audit.for_job(job_id)}
+
+
+@app.get("/api/jobs/{job_id}/audit.json")
+def job_audit_json(job_id: str):
+    import re as _re
+    j = job_or_404(job_id)
+    name = _re.sub(r"[^A-Za-z0-9]+", "-", f"{j['company']}-{j['title']}").strip("-")[:60] or job_id
+    return JSONResponse(audit.export(job_id),
+                        headers={"Content-Disposition": f'attachment; filename="jobsmith-audit-{name}.json"'})
 
 
 @app.post("/api/jobs/{job_id}/prepare")
