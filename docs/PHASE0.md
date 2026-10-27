@@ -90,4 +90,4 @@ Work top to bottom. Tick each box in this file as it's done and commit the tick 
 - [ ] Capture a sanitized real Ashby application form and test the generic filler against it. Tracked in
       [#18](https://github.com/rawcache/Jobsmith/issues/18).
 
-Phase 0 is done when every box is ticked and the gate passes. Then start Phase 1 (`docs/PHASE1.md`, to be written).
+Phase 0 is done when every box is ticked and the gate passes. Then start Phase 1 ([`docs/PHASE1.md`](PHASE1.md)).
