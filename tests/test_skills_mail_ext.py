@@ -147,3 +147,5 @@ def test_practice_copy_seeds_in_its_own_folder(tmp_path):
     assert con.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] > 40
     assert con.execute("SELECT COUNT(*) FROM jobs WHERE status='submitted'").fetchone()[0] >= 4
     assert (tmp_path / "demo" / "Alex_Rivera_resume.tex").exists()
+    # Alex's country is a confirmed answer, so a form's Country box gets it from the profile
+    assert con.execute("SELECT value, confirmed FROM answers WHERE key='country'").fetchone() == ("United States", 1)
