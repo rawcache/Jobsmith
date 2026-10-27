@@ -11,7 +11,7 @@ import json
 import re
 
 from .skills import voice
-from . import classify, db, jobdetail, learn, profile
+from . import classify, db, jobdetail, learn, profile, traps
 from . import llm
 from .llm import LLMError, complete_json
 
@@ -64,8 +64,10 @@ async def research_job(job_id: str) -> dict:
         data = dict(json.loads(recent[0]["research"]), _reused_from=recent[0]["title"])
         db.x("UPDATE jobs SET research=?, updated_at=? WHERE id=?", (db.enc(data), db.now(), job_id))
         return data
+    # A posting with a line aimed at AI isn't handed to a web-searching AI to read for itself.
+    url = "" if traps.found(job) else f"Posting URL: {job['url']}\n"
     prompt = (f"Company: {job['company']}\nRole: {job['title']}\nLocations: {', '.join(job['locations'])}\n"
-              f"Posting URL: {job['url']}\n\nJob description (truncated):\n{job['description'][:5000]}\n\n"
+              f"{url}\nJob description (truncated):\n{traps.redact(job['description'][:5000])}\n\n"
               f"APPLICANT FACTS (cite ids in fit_angles):\n{profile.facts_prompt_block(6000)}")
     with llm.usage_for(job_id, "research"):
         data = await complete_json(RESEARCH_SYSTEM, prompt, schema=RESEARCH_SCHEMA, web=True)
@@ -297,9 +299,10 @@ def build_prompt(job: dict, fields: list[dict]) -> str:
     parts = [f"JOB: {job['title']} at {job['company']} ({', '.join(job['locations'])})"]
     if job.get("referral_name"):
         parts.append(f"REFERRAL: The applicant was referred by {job['referral_name']}.")
-    parts.append("JOB DESCRIPTION:\n" + (job.get("description") or "(not available)")[:6000])
+    parts.append("JOB DESCRIPTION:\n" + traps.redact((job.get("description") or "(not available)")[:6000]))
     if job.get("research"):
-        r = {k: v for k, v in job["research"].items() if not k.startswith("_") and k not in ("people", "sources")}
+        r = traps.redact_obj({k: v for k, v in job["research"].items()
+                              if not k.startswith("_") and k not in ("people", "sources")})
         parts.append("COMPANY RESEARCH (use fit_angles and talking_points to make answers specific):\n" +
                      json.dumps(r, ensure_ascii=False)[:4000])
     parts.append("FACTS (cite by id):\n" + profile.facts_prompt_block())
@@ -322,9 +325,9 @@ def build_prompt(job: dict, fields: list[dict]) -> str:
             f"Q: {e['label']}\nBEFORE: {e['answer'][:500]}\nAFTER: {e['final_answer'][:500]}" for e in edits))
     qs = []
     for f in fields:
-        q = {"field": f["field"], "question": f["label"], "type": f["qtype"], "required": f["required"]}
+        q = {"field": f["field"], "question": traps.redact(f["label"]), "type": f["qtype"], "required": f["required"]}
         if f.get("description"):
-            q["help_text"] = f["description"][:400]
+            q["help_text"] = traps.redact(f["description"][:400])
         if f["options"]:
             q["options"] = f["options"]
         lim = _limit(f)

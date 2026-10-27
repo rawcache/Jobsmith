@@ -12,7 +12,7 @@ import time
 import traceback
 from pathlib import Path
 
-from . import db, draft, guardrails, jobdetail, profile
+from . import db, draft, guardrails, jobdetail, profile, traps
 from .config import BROWSER_PROFILE, RUNS_DIR
 
 MULTI_STEP = {"workday", "icims", "oracle", "taleo", "successfactors", "eightfold"}
@@ -700,7 +700,12 @@ async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None
                     page_text = await page.locator("body").inner_text(timeout=5000)
                 except Exception:
                     page_text = ""
-                capped = guardrails.policy_reason(job, page_text) or guardrails.cap_reason(job)
+                try:
+                    nodes = await page.evaluate(traps.PAGE_JS)     # with what's hidden, as the browser lays it out
+                except Exception:
+                    nodes = []
+                capped = traps.trap_reason(job, nodes, page_text) or guardrails.policy_reason(job, page_text) \
+                    or guardrails.cap_reason(job)
             auto = submit and ready["ready"] and not result["failed"] and not capped
             if submit and not auto:
                 why = ([capped] if capped else []) + (ready["blockers"] or [])[:3] + \
@@ -894,13 +899,15 @@ async def fill_multistep(job_id: str, submit: bool = False) -> None:
     trust = {"ok": True}
     held: list[str] = []
     seen: list[str] = []            # every page's text, for the employer's AI policy
+    nodes: list[dict] = []          # every page's text with what's hidden, for lines aimed at AI
     sent: set[str] = set()          # every field actually set, for the audit trail
 
     def may_submit() -> bool:
         """Checked at the review page, right before the Submit click."""
         if not (submit and trust["ok"]):
             return False
-        capped = guardrails.policy_reason(job, "\n".join(seen)) or guardrails.cap_reason(job)
+        capped = traps.trap_reason(job, nodes) or guardrails.policy_reason(job, "\n".join(seen)) or \
+            guardrails.cap_reason(job)
         if capped:
             held.append(capped)
             run.log("Held for your review: " + capped)
@@ -948,7 +955,8 @@ async def fill_multistep(job_id: str, submit: bool = False) -> None:
             run.log(f"Opening {job.get('referral_url') or job['url']} (multi-page beta)")
             res = await multistep.run(page, job.get("referral_url") or job["url"], answer=answer, files=files,
                                       log=run.log, wait_for_user=wait_for_user,
-                                      allow_submit=may_submit, on_page=seen.append, on_filled=sent.add)
+                                      allow_submit=may_submit, on_page=seen.append, on_filled=sent.add,
+                                      on_nodes=nodes.extend)
             shot = run_dir / "filled.png"
             await _shot(page, shot)
             db.x("UPDATE runs SET screenshot=? WHERE id=?", (str(shot), run.id))

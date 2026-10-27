@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import (ats, audit, claude_login, commands, db, eligibility, guardrails, onboarding, outcomes, power, scheduler, smith, draft, insights, learn, llm, match, network,
-               profile, runner, sources)
+               profile, runner, sources, traps)
 from . import __version__
 from .config import BUILD, DEMO, UPLOADS_DIR, WEB_DIST
 from . import skills
@@ -849,6 +849,7 @@ def get_job(job_id: str):
             "match": insights.keyword_match(j), "connections": network.at_company(j["company"], 8),
             "sections": insights.posting_sections(j.get("description") or ""), "facts": insights.job_facts(j),
             "eligibility": eligibility.check(j), "ai_policy": guardrails.policy_reason(j),
+            "trap": traps.trap_reason(j),
             "gate": guardrails.fit_gate(j),
             "readiness": draft.readiness(job_id) if drafts else None,
             "busy": runner.active().get(job_id), "can_fill": runner.can_fill(j["ats"])}

@@ -19,7 +19,7 @@ try:                                    # mcp 2.x
 except ImportError:                     # mcp 1.x
     from mcp.server.fastmcp import FastMCP
 
-from . import db, draft, eligibility, insights, network, outcomes, profile
+from . import db, draft, eligibility, insights, network, outcomes, profile, traps
 from .skills import voice
 
 mcp = FastMCP("jobsmith", instructions=(
@@ -62,7 +62,8 @@ def _post(path: str, body: dict) -> dict:
 
 
 def _j(x) -> str:
-    return json.dumps(x, ensure_ascii=False, default=str)
+    """Every response, with any line from a posting aimed at AI removed: the user's agent is an AI too."""
+    return json.dumps(traps.redact_obj(json.loads(json.dumps(x, default=str))), ensure_ascii=False)
 
 
 @mcp.tool()

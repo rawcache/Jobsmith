@@ -7,7 +7,7 @@ import re
 import httpx
 from bs4 import BeautifulSoup
 
-from . import ats, db
+from . import ats, db, traps
 
 UA = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
                     "(KHTML, like Gecko) Chrome/129.0 Safari/537.36"}
@@ -20,7 +20,8 @@ GH_TYPES = {
 
 
 def html_to_text(s: str) -> str:
-    s = html.unescape(s or "")
+    """What a person reads: text hidden from view (often a line aimed at AI) is left out."""
+    s = traps.visible_html(html.unescape(s or ""))
     soup = BeautifulSoup(s, "html.parser")
     for li in soup.find_all("li"):
         li.insert_before("\n• ")
@@ -135,6 +136,9 @@ async def fetch_greenhouse(url: str, client: httpx.AsyncClient, company: str = "
         "title": data.get("title"),
         "company": data.get("company_name"),
         "description": html_to_text(data.get("content", "")),
+        "html": "\n".join([html.unescape(data.get("content", "") or ""), *(
+            f"<p>{q.get('label') or ''}</p><div>{html.unescape(q.get('description') or '')}</div>"
+            for q in data.get("questions") or [] if isinstance(q, dict))]),
         "questions": normalize_greenhouse(data),
         "apply_url": f"https://{domain}/{board}/jobs/{job_id}",
         "location": (data.get("location") or {}).get("name"),
@@ -150,11 +154,14 @@ async def fetch_lever(url: str, client: httpx.AsyncClient) -> dict:
     r = await client.get(f"https://api.lever.co/v0/postings/{company}/{pid}")
     r.raise_for_status()
     d = r.json()
-    parts = [d.get("descriptionPlain", "")]
+    # From the HTML, not Lever's plain-text copies, so text hidden from a person is left out.
+    parts = [html_to_text(d["description"]) if d.get("description") else d.get("descriptionPlain", "")]
     for lst in d.get("lists", []):
         parts.append(lst.get("text", "") + "\n" + html_to_text(lst.get("content", "")))
-    parts.append(d.get("additionalPlain", ""))
-    return {"title": d.get("text"), "description": "\n\n".join(p for p in parts if p), "questions": []}
+    parts.append(html_to_text(d["additional"]) if d.get("additional") else d.get("additionalPlain", ""))
+    raw = "\n".join([d.get("description") or "", *(lst.get("content", "") for lst in d.get("lists", [])),
+                     d.get("additional") or ""])
+    return {"title": d.get("text"), "description": "\n\n".join(p for p in parts if p), "questions": [], "html": raw}
 
 
 async def fetch_ashby(url: str, client: httpx.AsyncClient) -> dict:
@@ -163,19 +170,20 @@ async def fetch_ashby(url: str, client: httpx.AsyncClient) -> dict:
     r.raise_for_status()
     for j in r.json().get("jobs", []):
         if j.get("id") == pid:
-            return {"title": j.get("title"), "description": j.get("descriptionPlain") or html_to_text(j.get("descriptionHtml", "")),
-                    "questions": []}
+            raw = j.get("descriptionHtml") or ""
+            return {"title": j.get("title"), "description": html_to_text(raw) if raw else j.get("descriptionPlain") or "",
+                    "questions": [], "html": raw or j.get("descriptionPlain") or ""}
     raise ValueError("Posting not found on Ashby board (may be closed)")
 
 
 async def fetch_generic(url: str, client: httpx.AsyncClient) -> dict:
     r = await client.get(url)
     r.raise_for_status()
-    soup = BeautifulSoup(r.text, "html.parser")
+    soup = BeautifulSoup(traps.visible_html(r.text), "html.parser")
     for t in soup(["script", "style", "nav", "footer", "header", "noscript"]):
         t.decompose()
     text = re.sub(r"\n\s*\n+", "\n\n", soup.get_text("\n")).strip()
-    return {"title": None, "description": text[:20000], "questions": []}
+    return {"title": None, "description": text[:20000], "questions": [], "html": r.text}
 
 
 async def fetch_job(job_id: str) -> dict:
@@ -195,7 +203,10 @@ async def fetch_job(job_id: str) -> dict:
             info = await fetch_ashby(job["url"], client)
         else:
             info = await fetch_generic(job["url"], client)
-    sets = {"description": info.get("description") or "", "questions": db.enc(info.get("questions") or [])}
+    sets = {"description": info.get("description") or "", "questions": db.enc(info.get("questions") or []),
+            # before any AI sees it: lines aimed at AI, hidden or not, from the posting as served
+            "traps": db.enc(traps.unique(traps.scan_html(info.get("html") or "") +
+                                         traps.scan_text(info.get("description") or "")))}
     if info.get("apply_url"):
         sets["url"] = info["apply_url"]
     if job["title"].startswith("(") and info.get("title"):

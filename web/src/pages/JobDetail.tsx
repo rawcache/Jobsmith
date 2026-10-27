@@ -9,7 +9,7 @@ type Section = { heading: string; kind: string; items: string[] };
 type Resp = { job: Job; drafts: Draft[]; runs: Run[]; readiness: { ready: boolean; blockers: string[] } | null;
   busy?: string; can_fill: boolean; usage: Usage; match: Match; connections: Person[]; sections: Section[];
   eligibility: { ok: boolean; reasons: string[]; notes: string[] };
-  ai_policy: string | null; gate: FitGate;
+  ai_policy: string | null; trap: string | null; gate: FitGate;
   facts: { pay: string; level: string; mode: string; category: string; sponsorship: string; degree: string } };
 
 const SOURCE: Record<string, string> = {
@@ -186,7 +186,7 @@ export default function JobPage({ id, embedded = false }: { id: string; embedded
   if (err) return <div className="jobview"><p>{err}</p></div>;
   if (!r) return <div className="jobview"><p className="muted"><Dots />Loading</p></div>;
 
-  const { job, drafts, runs, readiness, usage, match, connections, sections, eligibility, ai_policy, gate } = r;
+  const { job, drafts, runs, readiness, usage, match, connections, sections, eligibility, ai_policy, trap, gate } = r;
   const unsure = eligibility && !eligibility.ok;
   const res = job.research ?? {};
   const act = async (path: string, body?: object) => { await api.post(`/api/jobs/${id}/${path}`, body); refresh(); load(); };
@@ -250,6 +250,7 @@ export default function JobPage({ id, embedded = false }: { id: string; embedded
             {gate.against.map(x => <li key={"-" + x}><span className="warn-text" aria-label="counts against">−</span> {x}</li>)}
           </ul> : <p className="small muted">No reasons recorded yet.</p>}
         </details>)}
+      {trap && !applied && !(job.hold_reason ?? "").includes(trap) && <p className="note warn">{trap}</p>}
       {ai_policy && !applied && !(job.hold_reason ?? "").includes(ai_policy) && <p className="note warn">{ai_policy}</p>}
       {job.hold_reason && job.status === "filled" && <p className="note warn">Held for you: {job.hold_reason}</p>}
       {job.error && !/connect/i.test(job.error) && <p className="note warn">{friendly(job.error)}</p>}
