@@ -26,7 +26,11 @@ Work top to bottom. Tick each box in this file as it's done and commit the tick 
       generically". Added `tests/fixtures/lever_form.html` (sanitized real capture) and
       `tests/fixtures/ashby_style_form.html` (hand-written, modeled on Ashby's layout) + tests through
       `fill/generic.py`, stopping before Submit.
-- [ ] Same check for the numbers in the README (tests count, sites, sources).
+- [x] Same check for the numbers in the README (tests count, sites, sources). Checked 2026-10-26; none were off.
+      The README states no test count or install time (the tests and release badges are live). Python 3.11–3.13
+      matches `requires-python`, and the suite passes on 3.11 and 3.12 locally as well as 3.13 in CI (267 passed,
+      21 platform skips). The six platforms match `install.yml`'s machines, smith's memory tiers match
+      `smith.py`, and "Greenhouse end to end; Lever, Ashby … generically" matches `ats.SUPPORTED` and the tests.
 
 ## 3. CI and release
 
