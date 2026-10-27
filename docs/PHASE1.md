@@ -30,15 +30,22 @@ issue), and commit the tick with the work.
 
 ## 1. Guardrails (before any new site)
 
-- [ ] Default caps: 20 submissions a day and 3 per company per week. Editable in settings and shown on the dashboard
+- [x] Default caps: 20 submissions a day and 3 per company per week. Editable in settings and shown on the dashboard
       ("12 of 20 today"). Autopilot stops at a cap and says which one.
-- [ ] Employer AI policies: detect postings and forms that say not to use AI or automated tools. Autopilot never
+      Evidence: [1810a1b](https://github.com/rawcache/Jobsmith/commit/1810a1b), `tests/test_guardrails.py` (caps, scheduler, cancel, unconfirmed submits),
+      CI passed.
+- [x] Employer AI policies: detect postings and forms that say not to use AI or automated tools. Autopilot never
       auto-submits those; they go to "Needs you" with the quoted line.
-- [ ] Per-application audit trail: for every submission, store each field, the answer sent, where it came from
+      Evidence: [095bc86](https://github.com/rawcache/Jobsmith/commit/095bc86), `tests/test_guardrails.py` (policy and not-policy wording, multi-page forms),
+      CI passed.
+- [x] Per-application audit trail: for every submission, store each field, the answer sent, where it came from
       (resume line, profile field, writing sample, user-typed) and the kind check's result. Viewable per
       application on the dashboard and exportable as JSON.
-- [ ] Visible fit gate: autopilot applies only at or above the user's fit threshold, and each match shows why it
+      Evidence: [3e37ee1](https://github.com/rawcache/Jobsmith/commit/3e37ee1), `tests/test_audit.py`, audit assertions in `tests/test_fill.py`,
+      [CI run](https://github.com/rawcache/Jobsmith/actions/runs/40461438613).
+- [x] Visible fit gate: autopilot applies only at or above the user's fit threshold, and each match shows why it
       passed or failed.
+      Evidence: [7d7cdb4](https://github.com/rawcache/Jobsmith/commit/7d7cdb4), fit-gate tests in `tests/test_guardrails.py`, [CI run](https://github.com/rawcache/Jobsmith/actions/runs/40462725556).
 
 ## 2. Fit breakdown, plus [#20](https://github.com/rawcache/Jobsmith/issues/20)
 
