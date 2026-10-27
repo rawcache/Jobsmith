@@ -11,6 +11,7 @@ TRAPS = FIXTURES / "traps"
 EXPECT = {
     "white_text": "white text on a white page", "display_none": "display:none", "tiny_text": "tiny text (1px)",
     "aria_hidden": "visible, but hidden from screen readers", "offscreen": "moved off-screen", "opacity": "opacity:0",
+    "visibility_hidden": "visibility:hidden",
     "sr_only": "hidden by class “sr-only”", "comment": "an HTML comment", "font_white": "white text on a white page",
     "visible": "visible",
 }
