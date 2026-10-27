@@ -159,6 +159,8 @@ def conn() -> sqlite3.Connection:
                 c.execute(f"ALTER TABLE jobs ADD COLUMN {col} TEXT")
         if "eligibility" not in cols:
             c.execute("ALTER TABLE jobs ADD COLUMN eligibility TEXT NOT NULL DEFAULT '{}'")
+        if "traps" not in cols:        # lines in the posting aimed at AI, found when it was fetched
+            c.execute("ALTER TABLE jobs ADD COLUMN traps TEXT NOT NULL DEFAULT '[]'")
         dcols = {r[1] for r in c.execute("PRAGMA table_info(drafts)").fetchall()}
         if "model" not in dcols:
             c.execute("ALTER TABLE drafts ADD COLUMN model TEXT")
@@ -243,7 +245,7 @@ def now() -> float:
 # ---------------------------------------------------------------- JSON helpers
 JSON_COLS = {
     "locations", "terms", "degrees", "questions", "research", "fit_reasons",
-    "options", "fact_ids", "issues", "eligibility",
+    "options", "fact_ids", "issues", "eligibility", "traps",
 }
 
 

@@ -82,9 +82,10 @@ async def page_errors(page: Page) -> list[str]:
 
 async def run(page: Page, url: str, *, answer: Callable, files: dict, log: Callable, wait_for_user: Callable,
               allow_submit: Callable, max_pages: int = 15, on_page: Callable | None = None,
-              on_filled: Callable | None = None) -> dict:
+              on_filled: Callable | None = None, on_nodes: Callable | None = None) -> dict:
     """answer(fields) -> {field: value}; wait_for_user(message, check) waits until check() is true.
     on_page(text) gets each page's text once it's filled, before allow_submit() is asked on that page;
+    on_nodes(nodes) the same page's text with what's hidden (traps.PAGE_JS), for lines aimed at AI;
     on_filled(field) each field it actually set (the audit trail records only those)."""
     await page.goto(url, wait_until="domcontentloaded", timeout=60000)
     await page.wait_for_timeout(2500)
@@ -144,6 +145,13 @@ async def run(page: Page, url: str, *, answer: Callable, files: dict, log: Calla
                 return {"status": "submitted", "filled": filled_total, "issues": issues}
         except Exception:
             pass
+
+        if on_nodes:
+            from ..traps import PAGE_JS
+            try:
+                on_nodes(await page.evaluate(PAGE_JS))
+            except Exception:
+                pass
 
         nxt = await _first_visible(page, NEXT_BUTTONS)
         sub = await submit_button(page)

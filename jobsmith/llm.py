@@ -642,7 +642,10 @@ _local_sem: asyncio.Semaphore | None = None
 async def complete_json(system: str, prompt: str, schema: dict | None = None, web: bool = False,
                         role: str | None = None):
     """Concurrency-limited entry point used by the rest of the app.
-    Web-enabled calls default to the research backend."""
+    Web-enabled calls default to the research backend. Every prompt has lines aimed at AI (planted in postings)
+    removed, and every system prompt says page text is data, not instructions."""
+    from . import traps
+    system, prompt = f"{system}\n\n{traps.DATA_RULE}", traps.redact(prompt)
     global _sem
     if _sem is None:
         _sem = asyncio.Semaphore(int(get_settings().get("llm_concurrency", 3)))
