@@ -8,6 +8,7 @@ type Section = { heading: string; kind: string; items: string[] };
 type Resp = { job: Job; drafts: Draft[]; runs: Run[]; readiness: { ready: boolean; blockers: string[] } | null;
   busy?: string; can_fill: boolean; usage: Usage; match: Match; connections: Person[]; sections: Section[];
   eligibility: { ok: boolean; reasons: string[]; notes: string[] };
+  ai_policy: string | null;
   facts: { pay: string; level: string; mode: string; category: string; sponsorship: string; degree: string } };
 
 const SOURCE: Record<string, string> = {
@@ -184,7 +185,7 @@ export default function JobPage({ id, embedded = false }: { id: string; embedded
   if (err) return <div className="jobview"><p>{err}</p></div>;
   if (!r) return <div className="jobview"><p className="muted"><Dots />Loading</p></div>;
 
-  const { job, drafts, runs, readiness, usage, match, connections, sections, eligibility } = r;
+  const { job, drafts, runs, readiness, usage, match, connections, sections, eligibility, ai_policy } = r;
   const unsure = eligibility && !eligibility.ok;
   const res = job.research ?? {};
   const act = async (path: string, body?: object) => { await api.post(`/api/jobs/${id}/${path}`, body); refresh(); load(); };
@@ -241,6 +242,7 @@ export default function JobPage({ id, embedded = false }: { id: string; embedded
 
       {status && !status.llm.ok && <p className="note warn">No AI is connected, so only answers from your profile get filled. <a href="#/settings">Choose an AI</a>.</p>}
       {unsure && !applied && <p className="note warn"><strong>You may not qualify.</strong> {eligibility.reasons.join(" ")} Autopilot skips roles like this; Apply anyway is your call.</p>}
+      {ai_policy && !applied && !(job.hold_reason ?? "").includes(ai_policy) && <p className="note warn">{ai_policy}</p>}
       {job.hold_reason && job.status === "filled" && <p className="note warn">Held for you: {job.hold_reason}</p>}
       {job.error && !/connect/i.test(job.error) && <p className="note warn">{friendly(job.error)}</p>}
 

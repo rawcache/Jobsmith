@@ -8,6 +8,9 @@
   Submit and says which limit it hit; the application waits under "Needs you" and you can still send it yourself.
   Applications you send yourself count toward the limits too. Before, there were no limits unless you set them,
   and the per-company limit never reset.
+- When a posting or its form asks applicants not to use AI or automated tools ("Please do not use AI to write your
+  answers", "AI-generated responses will be rejected"), autopilot fills it but never sends it. It waits under "Needs
+  you" with the employer's own sentence quoted, and the job's page shows the same line.
 
 ## 0.4.6 (2026-10-26)
 

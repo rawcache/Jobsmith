@@ -846,7 +846,7 @@ def get_job(job_id: str):
     return {"job": j, "drafts": drafts, "runs": runner.latest_runs(job_id), "usage": job_usage(job_id),
             "match": insights.keyword_match(j), "connections": network.at_company(j["company"], 8),
             "sections": insights.posting_sections(j.get("description") or ""), "facts": insights.job_facts(j),
-            "eligibility": eligibility.check(j),
+            "eligibility": eligibility.check(j), "ai_policy": guardrails.policy_reason(j),
             "readiness": draft.readiness(job_id) if drafts else None,
             "busy": runner.active().get(job_id), "can_fill": runner.can_fill(j["ats"])}
 

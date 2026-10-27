@@ -689,7 +689,13 @@ async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None
             shot = run_dir / "filled.png"
             await _shot(page, shot)
             ready = draft.readiness(job_id)
-            capped = guardrails.cap_reason(job) if submit else None
+            capped = None
+            if submit:
+                try:
+                    page_text = await page.locator("body").inner_text(timeout=5000)
+                except Exception:
+                    page_text = ""
+                capped = guardrails.policy_reason(job, page_text) or guardrails.cap_reason(job)
             auto = submit and ready["ready"] and not result["failed"] and not capped
             if submit and not auto:
                 why = ([capped] if capped else []) + (ready["blockers"] or [])[:3] + \
@@ -873,12 +879,13 @@ async def fill_multistep(job_id: str, submit: bool = False) -> None:
         files["transcript"] = str(tr)
     trust = {"ok": True}
     held: list[str] = []
+    seen: list[str] = []            # every page's text, for the employer's AI policy
 
     def may_submit() -> bool:
         """Checked at the review page, right before the Submit click."""
         if not (submit and trust["ok"]):
             return False
-        capped = guardrails.cap_reason(job)
+        capped = guardrails.policy_reason(job, "\n".join(seen)) or guardrails.cap_reason(job)
         if capped:
             held.append(capped)
             run.log("Held for your review: " + capped)
@@ -924,7 +931,7 @@ async def fill_multistep(job_id: str, submit: bool = False) -> None:
             run.log(f"Opening {job.get('referral_url') or job['url']} (multi-page beta)")
             res = await multistep.run(page, job.get("referral_url") or job["url"], answer=answer, files=files,
                                       log=run.log, wait_for_user=wait_for_user,
-                                      allow_submit=may_submit)
+                                      allow_submit=may_submit, on_page=seen.append)
             shot = run_dir / "filled.png"
             await _shot(page, shot)
             db.x("UPDATE runs SET screenshot=? WHERE id=?", (str(shot), run.id))
