@@ -795,7 +795,14 @@ async def test_popup_reaches_a_job_site_form_in_a_frame_opened_before_the_extens
             for p in ctx.pages:
                 if p is not tab:
                     await p.close()                                      # Chrome's blank start tab
-            await tab.goto(careers_url)
+            for attempt in range(3):             # a just-started Chrome can cut off its first load (seen on Windows)
+                try:
+                    await tab.goto(careers_url)
+                    break
+                except Exception as e:
+                    if "ERR_ABORTED" not in str(e) or attempt == 2:
+                        raise
+                    await asyncio.sleep(0.5)
             frame = tab.frame(url=form_url)
             await frame.wait_for_selector("#first_name")
             ext_id = (await (await b.new_browser_cdp_session()).send(
