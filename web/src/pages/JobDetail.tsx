@@ -1,5 +1,5 @@
 import { useContext, useEffect, useState } from "react";
-import { ago, api, companyHref, Draft, Job, LiveTab, Match, OUTCOME_LABEL, Person, Run, tok, Usage } from "../api";
+import { ago, api, companyHref, Draft, FitGate, Job, LiveTab, Match, OUTCOME_LABEL, Person, Run, tok, Usage } from "../api";
 import { friendly } from "./Tracker";
 import { StatusCtx } from "../main";
 import { Dots, Icon, Logo, MatchText, Modal, useTick, poll } from "../ui";
@@ -9,7 +9,7 @@ type Section = { heading: string; kind: string; items: string[] };
 type Resp = { job: Job; drafts: Draft[]; runs: Run[]; readiness: { ready: boolean; blockers: string[] } | null;
   busy?: string; can_fill: boolean; usage: Usage; match: Match; connections: Person[]; sections: Section[];
   eligibility: { ok: boolean; reasons: string[]; notes: string[] };
-  ai_policy: string | null;
+  ai_policy: string | null; gate: FitGate;
   facts: { pay: string; level: string; mode: string; category: string; sponsorship: string; degree: string } };
 
 const SOURCE: Record<string, string> = {
@@ -186,7 +186,7 @@ export default function JobPage({ id, embedded = false }: { id: string; embedded
   if (err) return <div className="jobview"><p>{err}</p></div>;
   if (!r) return <div className="jobview"><p className="muted"><Dots />Loading</p></div>;
 
-  const { job, drafts, runs, readiness, usage, match, connections, sections, eligibility, ai_policy } = r;
+  const { job, drafts, runs, readiness, usage, match, connections, sections, eligibility, ai_policy, gate } = r;
   const unsure = eligibility && !eligibility.ok;
   const res = job.research ?? {};
   const act = async (path: string, body?: object) => { await api.post(`/api/jobs/${id}/${path}`, body); refresh(); load(); };
@@ -243,6 +243,13 @@ export default function JobPage({ id, embedded = false }: { id: string; embedded
 
       {status && !status.llm.ok && <p className="note warn">No AI is connected, so only answers from your profile get filled. <a href="#/settings">Choose an AI</a>.</p>}
       {unsure && !applied && <p className="note warn"><strong>You may not qualify.</strong> {eligibility.reasons.join(" ")} Autopilot skips roles like this; Apply anyway is your call.</p>}
+      {gate && !applied && job.status !== "skipped" && (
+        <details className="note gate"><summary>{gate.summary}</summary>
+          {gate.for.length + gate.against.length > 0 ? <ul className="gate-why">
+            {gate.for.map(x => <li key={"+" + x}><span className="ok-text" aria-label="counts for">+</span> {x}</li>)}
+            {gate.against.map(x => <li key={"-" + x}><span className="warn-text" aria-label="counts against">−</span> {x}</li>)}
+          </ul> : <p className="small muted">No reasons recorded yet.</p>}
+        </details>)}
       {ai_policy && !applied && !(job.hold_reason ?? "").includes(ai_policy) && <p className="note warn">{ai_policy}</p>}
       {job.hold_reason && job.status === "filled" && <p className="note warn">Held for you: {job.hold_reason}</p>}
       {job.error && !/connect/i.test(job.error) && <p className="note warn">{friendly(job.error)}</p>}

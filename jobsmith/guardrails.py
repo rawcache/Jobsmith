@@ -205,3 +205,25 @@ def policy_reason(job: dict, page_text: str = "") -> str | None:
                     f"tools: \"{line}\" Autopilot won't send it. Review it and submit it yourself if you're "
                     "comfortable.")
     return None
+
+
+# --------------------------------------------------------------------------- the fit gate
+def fit_gate(job: dict, threshold: float | None = None) -> dict:
+    """Whether autopilot would apply to this match on fit alone, and why, in words for the match's page."""
+    if threshold is None:
+        threshold = float(db.get_setting("min_fit_score") or 40)
+    score = job.get("fit_score")
+    reasons = job.get("fit_reasons") or []
+    if isinstance(reasons, str):
+        import json
+        reasons = json.loads(reasons or "[]")
+    plus = [r[2:] for r in reasons if r.startswith("+ ")]
+    minus = [r[2:] for r in reasons if r.startswith("- ")]
+    passed = score is not None and score >= threshold
+    import math
+    s, t = (round if passed else math.floor)(score or 0), round(threshold)   # never "40 is under your bar of 40"
+    summary = (f"Fit {s} clears your bar of {t}: autopilot applies." if passed else
+               "Not scored yet: autopilot waits until it is." if score is None else
+               f"Fit {s} is under your bar of {t}: autopilot skips it. Apply yourself if you want it.")
+    return {"passed": passed, "score": score, "threshold": threshold, "summary": summary,
+            "for": plus, "against": minus}

@@ -78,6 +78,11 @@ code { font: 12.5px var(--mono); background: var(--line-2); padding: 1px 5px; bo
 .warn-text { color: var(--warn); }
 .bad-text { color: var(--bad); }
 .clamp3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.note.gate { display: block; }
+.note.gate summary { cursor: pointer; }
+.gate-why { list-style: none; margin: 6px 0 0; padding: 0; font-size: 13px; }
+.gate-why li { padding: 1px 0; }
+.gate-why span { display: inline-block; width: 1em; font-weight: 600; }
 .audit details > summary { cursor: pointer; font-size: 13.5px; padding: 6px 0; }
 .audit-scroll { overflow-x: auto; }
 .audit-t { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 560px; }

@@ -18,6 +18,8 @@
   right kind for the question. See it under "What was sent" on the application's page, or export it as JSON.
   Answers that don't trace back to you are marked in red. If autopilot clicked Submit but never saw a confirmation
   page, it says so, the application still counts toward your limits, and autopilot never sends it again.
+- Each match says whether it clears your fit bar and why, with what counts for it and against it. Matches under the
+  bar show "Under your fit bar" and autopilot skips them; pick one yourself and it still applies.
 
 ### Fixed
 - Greenhouse's Hispanic/Latino question and the phone country box are filled only from answers you confirmed on
