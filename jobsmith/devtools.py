@@ -86,6 +86,7 @@ def seed_here(setup: bool = False) -> None:
         a = profile.answers().get(k)
         if a and a["value"]:
             profile.set_answer(k, a["value"], confirmed=True)
+    profile.set_answer("country", "United States", confirmed=True)   # forms' Country boxes, from the profile, not a guess
     now = time.time()
     db.set_settings({"onboarded": True, "setup_step": "done", "goals": ["internship", "newgrad"], "prefs_saved": True,
                      "auto_run": True, "auto_last_run": now, "autonomy": "autopilot", "values": ["Hard technical problems", "Path to a full-time offer"],
