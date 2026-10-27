@@ -30,12 +30,20 @@ Work top to bottom. Tick each box in this file as it's done and commit the tick 
 
 ## 3. CI and release
 
-- [ ] Make `.github/workflows/ci.yml` pass on ubuntu, macOS and Windows. Fix Windows failures or mark the specific
-      tests `skipif` with a reason and an issue link.
-- [ ] Turn on GitHub Pages (Settings → Pages → Source: GitHub Actions) so `pages.yml` publishes `site/`.
+- [x] Make `.github/workflows/ci.yml` pass on ubuntu, macOS and Windows. Fix Windows failures or mark the specific
+      tests `skipif` with a reason and an issue link. All three pass, plus the dashboard build
+      ([run 40434098779](https://github.com/rawcache/Jobsmith/actions/runs/40434098779)). The only skips are
+      platform ones (`install.sh` tests off Windows, `install.ps1` tests on it, browser tests with no Chromium), not
+      hidden failures.
+- [x] Turn on GitHub Pages (Settings → Pages → Source: GitHub Actions) so `pages.yml` publishes `site/`.
+      Live at https://rawcache.github.io/Jobsmith/, published by
+      [run 40431888492](https://github.com/rawcache/Jobsmith/actions/runs/40431888492).
 - [x] Bump the version to 0.4.0 in `pyproject.toml`, `jobsmith/__init__.py`, `extension/manifest.json`.
 - [x] Fill in `CHANGELOG.md` 0.4.0 from the commits.
-- [ ] Follow `docs/RELEASING.md` to tag `v0.4.0` and publish the GitHub release.
+- [x] Follow `docs/RELEASING.md` to tag `v0.4.0` and publish the GitHub release. Done for v0.4.0 and every release
+      since; the latest is [v0.4.5](https://github.com/rawcache/Jobsmith/releases/tag/v0.4.5), whose install run
+      starts the practice copy on all six machines
+      ([run 40422272957](https://github.com/rawcache/Jobsmith/actions/runs/40422272957)).
 
 ## 4. Contributor on-ramp
 
@@ -59,7 +67,13 @@ Work top to bottom. Tick each box in this file as it's done and commit the tick 
       it also starts `jobsmith demo`, waits for :8766 to answer and stops it, on all six machines: on Windows the
       practice copy answered in 8 s (x86) and 10 s (ARM)
       ([run 40422272957](https://github.com/rawcache/Jobsmith/actions/runs/40422272957)).
-- [ ] Load the extension unpacked and confirm the panel appears on a Greenhouse posting.
+- [x] Load the extension unpacked and confirm the panel appears on a Greenhouse posting. Retested v0.4.5 on Figma's
+      Greenhouse posting with Simplify installed (2026-10-26): the panel sits clear of Simplify's tab, autopilot
+      starts unticked, the resume PDF attaches, nothing was submitted and there was no keychain prompt. "From where
+      do you intend to work?" got the profile location under "Check these", the "why Figma" answer was flagged
+      generic, and "Needs you" listed Country, Location (City), work authorization and "worked at Figma before".
+      Country and Location are Greenhouse dropdowns the extension can't open yet
+      ([#19](https://github.com/rawcache/Jobsmith/issues/19)).
 
 ## 6. The video
 
@@ -69,6 +83,7 @@ Work top to bottom. Tick each box in this file as it's done and commit the tick 
 
 ## Carry to Phase 1
 
-- [ ] Capture a sanitized real Ashby application form and test the generic filler against it.
+- [ ] Capture a sanitized real Ashby application form and test the generic filler against it. Tracked in
+      [#18](https://github.com/rawcache/Jobsmith/issues/18).
 
 Phase 0 is done when every box is ticked and the gate passes. Then start Phase 1 (`docs/PHASE1.md`, to be written).
