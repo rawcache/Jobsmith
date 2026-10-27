@@ -55,8 +55,10 @@ Work top to bottom. Tick each box in this file as it's done and commit the tick 
       `jobsmith demo show` played all 3 applications, the ask box answered from records. (v0.4.2)
 - [x] Same on Windows with `install.ps1`. No Windows PC on hand; covered by `install.yml`, which runs the real
       `install.ps1` on `windows-latest` (x86) and `windows-11-arm` and checks nothing builds from source and
-      `jobsmith --help` runs. Both passed for the v0.4.3 release (run 40164099148, 35 s and 1 min 45 s). It doesn't
-      run `jobsmith demo`.
+      `jobsmith --help` runs. Both passed for the v0.4.3 release (run 40164099148, 35 s and 1 min 45 s). Since v0.4.5
+      it also starts `jobsmith demo`, waits for :8766 to answer and stops it, on all six machines: on Windows the
+      practice copy answered in 8 s (x86) and 10 s (ARM)
+      ([run 40422272957](https://github.com/rawcache/Jobsmith/actions/runs/40422272957)).
 - [ ] Load the extension unpacked and confirm the panel appears on a Greenhouse posting.
 
 ## 6. The video
