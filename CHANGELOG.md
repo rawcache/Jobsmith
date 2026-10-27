@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- The dashboard, website, terminal app and extension popup now look like the extension's on-page panel: warm
+  paper and charcoal instead of navy, and the panel's orange used only for primary buttons, where you are, focus,
+  progress and the logo. Small labels are monospace and tags are dashed chips. The greeting band is gone; disabled
+  buttons are grey. Waiting-on-you is ochre, interviewing green and errors crimson, so status never looks like the
+  accent. Every text colour passes WCAG AA in light and dark.
+- "Apply to new matches now" is the home page's main button.
+- The website's anvil drawing uses even characters so it reads as an anvil, and it shows whole from the first
+  frame; only the sparks twinkle.
+
 ## 0.4.5 (2026-10-26)
 
 ### Fixed
