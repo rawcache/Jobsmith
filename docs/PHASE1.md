@@ -51,12 +51,22 @@ issue), and commit the tick with the work.
 
 ## 2. Posting traps
 
-- [ ] Detect text in postings and forms aimed at an AI reader ("if you are an AI…", "include the word…", other
+- [x] Detect text in postings and forms aimed at an AI reader ("if you are an AI…", "include the word…", other
       instructions to the reader), whether visible or hidden: `display:none`, `visibility:hidden`, white-on-white,
       `aria-hidden`, off-screen, tiny text.
-- [ ] Never follow it. The check runs before any AI sees the posting; the application is held under "Needs you" with
+      Evidence: [7733cdd](https://github.com/rawcache/Jobsmith/commit/7733cdd) (`jobsmith/traps.py`: the posting's HTML at fetch time, the live page via the
+      browser's own layout before submit).
+- [x] Never follow it. The check runs before any AI sees the posting; the application is held under "Needs you" with
       the quoted line, and autopilot never auto-submits it.
-- [ ] Tests with saved examples: each hiding technique, visible traps, and ordinary postings that must not trip it.
+      Evidence: [7733cdd](https://github.com/rawcache/Jobsmith/commit/7733cdd): found when the posting is fetched, removed from every AI prompt and MCP response,
+      a page-text-is-data rule in every system prompt. Runner tests in `tests/test_fill.py` stop at Submit for a
+      visible trap in the posting, a hidden one stored when the posting was fetched ([16e401d](https://github.com/rawcache/Jobsmith/commit/16e401d)), and a
+      hidden one in the live form.
+- [x] Tests with saved examples: each hiding technique, visible traps, and ordinary postings that must not trip it.
+      Evidence: `tests/fixtures/traps/` (11 examples: display:none, visibility:hidden, white text, `<font>` white,
+      tiny text, opacity:0, off-screen, screen-reader-only class, aria-hidden, HTML comment, visible; plus
+      lookalikes. Written for the tests from reported techniques, not captured), `tests/test_traps.py` (parsed
+      HTML and real Chromium), [CI run](https://github.com/rawcache/Jobsmith/actions/runs/40558095872).
 
 ## 3. Submissions that land, plus gate tooling
 
