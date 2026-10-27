@@ -17,8 +17,9 @@ issue), and commit the tick with the work.
 
 - Sign-ins, account creation, CAPTCHAs and emailed codes are always handed to the user. Never type a password or
   create an account.
-- Touching a live job site is read-only: headless, every non-GET request blocked. Never submit to a real posting in
-  tests or CI.
+- When developing, capturing fixtures, testing or running canaries, touching a live job site is read-only: headless,
+  every non-GET request blocked. Never submit to a real posting in tests or CI. (Only the user's own autopilot
+  submits for real.)
 - Fixtures are saved real forms, sanitized, filled only with Alex Rivera. No real applicant's details, ever.
 - No LinkedIn automation.
 - Every new site gets a fixture in `tests/fixtures/`, a `tests/test_fill.py` test (filled fields and what lands under
@@ -101,7 +102,8 @@ then `ats.SUPPORTED` and the README.
 
 - [ ] `jobsmith audit` samples N submitted applications (default 50) and prints each answer with its source fact and
       whether it traces. Anything that doesn't trace is flagged in red.
-- [ ] `jobsmith stats` reports the share of good matches submitted without the user.
+- [ ] `jobsmith stats` reports the share of good matches submitted without the user over a period. The denominator
+      is every good match autopilot considered in that period, including ones held, capped or failed.
 - [ ] Both run on the practice copy, with the output shown. The real gate numbers come from the maintainer's own
       search.
 
