@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.4.5 (2026-10-26)
+
+### Fixed
+- Autofill never puts an answer in a field that asks for something else. With no AI connected, "From where do you
+  intend to work?" on a Figma application got a paragraph about why you want to join; now Jobsmith checks that the
+  answer is the right kind (a place, a yes or no, a short line or written sentences). If it isn't, the field is left
+  blank and listed under "Needs you", and autopilot won't send it.
+- "From where do you intend to work?" and similar questions are offered your profile location, listed under "Check
+  these" so you confirm it's where you'd work.
+- A saved answer to a "why us" question that never names the company is filled but listed as "generic, check this",
+  isn't counted as filled, and holds autopilot.
+- In a tab opened before the extension was loaded, the toolbar button now reaches an application form that a
+  company's careers page shows in a frame from Greenhouse, Lever, Ashby, Workday, iCIMS or SmartRecruiters. The
+  extension asks for access to those six job sites only (see SECURITY.md). A form in a frame from any other site
+  says "Reload this page"; another site's frame beside a form that was reached (a video, a map) is just skipped.
+- Autofill fills one step of an application shown in a job-site frame (iCIMS-style multi-step forms), and never
+  types into a frame that isn't an application, like a newsletter sign-up beside the form.
+- "Tell us your first name", "Please share your earliest start date" and similar politely worded questions get your
+  profile answer instead of being held as essay questions. "Tell us your experience with…" still wants sentences.
+- The phone number no longer lands in the hidden box behind the Phone country select on Greenhouse forms, and a
+  country question never takes a phone number: it gets your profile country or is listed under "Needs you".
+- "Write with Jobsmith" says when it held an answer back, wrote something generic, or used a fact it couldn't find
+  in your profile, instead of "Edit freely".
+- Short questions in large boxes ("How did you hear about us?") no longer take a paragraph, and "Explain"
+  questions take sentences even when they start like a yes-or-no question.
+- Jobsmith's browser never asks for your macOS login keychain password ("Chromium Safe Storage"). If you saw that
+  prompt, click Deny.
+
+### Changed
+- `jobsmith demo --no-open` starts the practice copy without opening a browser.
+- The install check on every system now starts the practice copy, waits for it to answer, and stops it.
+
 ## 0.4.4 (2026-10-26)
 
 ### Fixed
