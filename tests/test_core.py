@@ -736,7 +736,7 @@ def test_setup_checklist_says_what_autopilot_still_needs():
     assert onboarding.profile_ready() == all(c["done"] for c in items.values() if c["required"])
 
 
-async def test_watching_an_application_before_its_form_opens():
+async def test_watching_an_application_before_its_form_opens(monkeypatch):
     """Press a number in the terminal while it's still researching: the window comes up when the form opens."""
     from jobsmith import runner
     shown = []
@@ -749,18 +749,33 @@ async def test_watching_an_application_before_its_form_opens():
         def is_closed(self):
             return False
 
-    orig = runner.browser.set_window
-    runner.browser.set_window = fake_set_window
-    try:
-        assert await runner.live_show("job-early") == "pending" and "job-early" in runner.WATCH
-        runner.live_set("job-early", Page(), phase="opening")
-        await asyncio.sleep(0.05)
-        assert shown == ["normal"] and "job-early" not in runner.WATCH and runner.browser.shown
-    finally:
-        runner.browser.set_window = orig
-        runner.browser.shown = False
-        runner.browser.focus_job = None
-        runner.live_drop("job-early")
+    # Its own browser state: a headed window nobody is watching yet, whatever earlier tests left behind.
+    monkeypatch.setattr(runner, "browser", runner.Browser())
+    monkeypatch.setattr(runner.browser, "ctx_headless", False)
+    monkeypatch.setattr(runner.browser, "set_window", fake_set_window)
+    monkeypatch.setattr(runner, "LIVE", {})
+    monkeypatch.setattr(runner, "WATCH", set())
+    assert await runner.live_show("job-early") == "pending" and "job-early" in runner.WATCH
+    runner.live_set("job-early", Page(), phase="opening")
+    await asyncio.sleep(0.05)
+    assert shown == ["normal"] and "job-early" not in runner.WATCH and runner.browser.shown
+
+
+def test_a_closed_browser_is_not_headless():
+    """Closing the background browser forgets that it was headless, so "Show" never takes the take-over path
+    for a browser that no longer exists."""
+    from jobsmith import runner
+    b = runner.Browser()
+    b.ctx_headless, b.ua = True, "ua"
+    asyncio.run(b._close_ctx())
+    assert b.ctx is None and b.ctx_headless is None and b.ua is None
+
+    old, new = object(), object()                 # Chrome closing the window itself
+    b.ctx, b.ctx_headless, b.ua = new, True, "ua"
+    b._closed(old)                                # a late event from an older context changes nothing
+    assert b.ctx is new and b.ctx_headless is True and b.ua == "ua"
+    b._closed(new)
+    assert b.ctx is None and b.ctx_headless is None and b.ua is None
 
 
 async def test_gemini_free_quota_falls_back_to_smith(monkeypatch):

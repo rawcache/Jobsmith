@@ -99,7 +99,7 @@ class Browser:
                 self.ctx = await self._pw.chromium.launch_persistent_context(**kw)
             self.ctx_headless = want
             ctx = self.ctx
-            ctx.on("close", lambda _c: setattr(self, "ctx", None) if self.ctx is ctx else None)
+            ctx.on("close", lambda _c: self._closed(ctx))
             if self.kind == "takeover" and browser.ctx is not None:
                 try:                              # your sign-ins from the background browser come along
                     await ctx.add_cookies(await browser.ctx.cookies())
@@ -159,14 +159,24 @@ class Browser:
     shown = False            # True after you click Show, until you click Hide
     focus_job: str | None = None   # the application you asked to watch
 
+    def _closed(self, ctx) -> None:
+        """Chrome closed a context. Only the current one matters: a late event from an older one is ignored."""
+        if self.ctx is ctx:
+            self._forget()
+
+    def _forget(self) -> None:
+        """No browser is open now, so none is headless either; a stale True would send "Show" to take-over."""
+        self.ctx = None
+        self.ctx_headless = None
+        self.ua = None
+
     async def _close_ctx(self):
         try:
             if self.ctx:
                 await self.ctx.close()
         except Exception:
             pass
-        self.ctx = None
-        self.ua = None
+        self._forget()
 
     async def close(self):
         # On Ctrl+C the terminal also stops Chrome, so it may already be gone.
