@@ -11,7 +11,7 @@ type HomeData = {
   applied_today: number; applied_week: number; applied_total: number; in_progress: number; queued: number;
   sent_today: number; daily_cap: number; company_cap: number; remaining_today: number; autonomy: string; auto_run: boolean; next_run: number | null;
   last_summary: string; min_fit: number; network: number; first_name: string;
-  review: { id: string; company: string; title: string; status: string; hold_reason: string | null; error: string | null; updated_at: number }[];
+  review: { id: string; company: string; title: string; status: string; hold_reason: string | null; error: string | null; updated_at: number; approve?: boolean }[];
   recent: { id: string; company: string; title: string; outcome: string | null; finished_at: number }[];
   sources: { id: number; url: string; last_synced: number | null; last_count: number | null }[];
   strength: { percent: number; items: Item[] }; started: Item[];
@@ -123,7 +123,7 @@ export default function Home() {
               <li key={j.id}><a href={`#/matches/${j.id}`}>
                 <Logo name={j.company} size={28} />
                 <span className="lr-main"><strong>{j.company}</strong><span className="clamp1 muted">{j.title}</span></span>
-                <span className={`badge ${j.status === "error" ? "bad" : "warn"} clamp1`}>{j.status === "error" ? friendly(j.error) : (j.hold_reason ?? "Ready to submit")}</span>
+                <span className={`badge ${j.status === "error" ? "bad" : "warn"} clamp1`}>{j.status === "error" ? friendly(j.error) : j.approve ? "Approve autopilot's first submission" : (j.hold_reason ?? "Ready to submit")}</span>
                 <span className="lr-when muted">{ago(j.updated_at)}</span>
               </a></li>))}</ul>)}
         </section>

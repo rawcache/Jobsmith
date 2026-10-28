@@ -121,5 +121,21 @@
    "Remote in USA"
   ],
   "category": "AI/ML/Data"
+ },
+ {
+  "id": "demo-cyberdyne",
+  "company": "Cyberdyne Systems",
+  "title": "Perception Engineering Intern",
+  "url": "https://jobs.lever.co/example/cyberdyne-perception-intern",
+  "ats": "lever",
+  "status": "filled",
+  "terms": [
+   "Summer 2027"
+  ],
+  "locations": [
+   "Boston, MA"
+  ],
+  "category": "AI/ML/Data",
+  "hold_reason": "This is autopilot's first submission on Lever: check every answer and where it came from, then approve it to send it. After that, autopilot submits on Lever on its own within your limits."
  }
 ]

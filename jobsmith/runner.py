@@ -394,6 +394,76 @@ async def live_submit(job_id: str) -> dict:
     return {"ok": False, "message": "Couldn't find a Submit button. Click Show and submit it yourself."}
 
 
+_approved: dict[str, str] = {}     # job id -> site: you approved this one; its submission's trail says so
+_approving: set[str] = set()       # approvals being carried out, so a second click can't send it twice
+
+
+def _first_run_hold(job: dict, run: Run, uploaded: list[str] | None = None) -> str | None:
+    """Autopilot's first submission (on this site) waits for you, unless you already approved exactly the answers
+    this fill put in (you approved it after its tab had closed). Returns the hold reason, or None to send."""
+    from . import audit
+    reason = guardrails.first_run_reason(job)
+    if not reason:
+        return None
+    key = guardrails.approved_answers(job["id"])
+    filled = audit.pending(job["id"])
+    if key and filled and guardrails.answers_key(filled["fields"], uploaded) == key:
+        _approved[job["id"]] = guardrails.site_of(job)     # the site is trusted once Submit is actually clicked
+        run.log("Sending it: these are the answers you approved.")
+        return None
+    if guardrails.ask_approval(job["id"], guardrails.site_of(job), uploaded):
+        reason = "The form changed after you approved it, so check the answers again. " + reason
+    run.log("Waiting for your approval: " + reason)
+    return reason
+
+
+def _abandon(job_id: str, why: str) -> bool:
+    """guardrails.abandon, and an approval that never landed is forgotten: the site isn't trusted on it."""
+    _approved.pop(job_id, None)
+    return guardrails.abandon(job_id, why)
+
+
+async def approve(job_id: str) -> dict:
+    """You checked autopilot's first submission (on this site) and approved it: send it, and let autopilot submit
+    on that site on its own from now on."""
+    from . import audit
+    [ask] = guardrails.awaiting_approval(job_id) or [None]
+    if not ask:
+        return {"ok": False, "message": "Nothing here is waiting for your approval."}
+    if job_id in _approving:
+        return {"ok": False, "message": "Already sending it."}
+    name = ask["site_name"]
+    page = (LIVE.get(job_id) or {}).get("page")
+    _approving.add(job_id)
+    try:
+        if page is not None and not page.is_closed():
+            # Counted as in flight from the click, like autopilot's own: if no confirmation shows, it's recorded as
+            # possibly sent, counts toward the caps, and is never sent again on its own.
+            guardrails.claim(job_id)
+            _approved[job_id] = ask["site"]          # before the click: the confirmation can come while it's awaited
+            r = await live_submit(job_id)
+            if not r["ok"]:
+                guardrails.release(job_id)
+                _approved.pop(job_id, None)
+                return r
+            guardrails.approve(job_id)
+            db.x("UPDATE jobs SET hold_reason=NULL, updated_at=? WHERE id=?", (db.now(), job_id))
+            return {"ok": True, "site": ask["site"],
+                    "message": f"Sending it. From now on autopilot submits on {name} on its own, within your limits."}
+        # The tab closed (it's kept 45 minutes, or Jobsmith restarted): fill it again. It's sent only if the refill
+        # puts in exactly the answers you just checked; otherwise it waits for you again.
+        filled = audit.pending(job_id)
+        guardrails.approve_answers(job_id, filled["fields"] if filled else [])
+        db.x("UPDATE jobs SET hold_reason=NULL, updated_at=? WHERE id=?", (db.now(), job_id))
+        started = spawn(job_id, "submitting", fill(job_id, submit=True))
+        return {"ok": started, "site": ask["site"],
+                "message": ("That tab had closed, so Jobsmith is filling it again. It's sent if the answers come out the "
+                            "same as the ones you checked; if anything changed, it waits for you again." if started else
+                            "That tab had closed and couldn't be reopened. Submit it from its page.")}
+    finally:
+        _approving.discard(job_id)
+
+
 async def live_code(job_id: str, code: str) -> dict:
     """Type the verification code you got by email into the form, then submit again."""
     from .fill.base import enter_security_code
@@ -643,6 +713,7 @@ async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None
         await fill_multistep(job_id, submit)
         return
     resume = profile.attachment_file()
+    uploaded = guardrails._files()       # the resume and transcript this fill attaches, by content
     if not resume:
         run.log("Upload a PDF resume in Profile first (it's what gets attached).")
         run.done("error")
@@ -731,7 +802,12 @@ async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None
                 capped = traps.trap_reason(job, nodes, page_text) or guardrails.policy_reason(job, page_text) \
                     or guardrails.cap_reason(job)
             auto = submit and ready["ready"] and not result["failed"] and not capped
-            if submit and not auto:
+            first = _first_run_hold(job, run, uploaded) if auto else None
+            if first:        # everything checks out, but autopilot hasn't sent one here before: you approve it
+                auto = False
+                db.x("UPDATE jobs SET hold_reason=? WHERE id=?", (first, job_id))
+                live_set(job_id, phase="review", note="approve autopilot's first submission here")
+            elif submit and not auto:
                 why = ([capped] if capped else []) + (ready["blockers"] or [])[:3] + \
                     [f"{f[0]}: couldn't fill it" for f in result["failed"]][:3]
                 run.log("Held for your review: " + "; ".join(why))
@@ -751,6 +827,7 @@ async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None
                     run.log("Held for your review: " + late)
                     db.x("UPDATE jobs SET hold_reason=? WHERE id=?", (late, job_id))
                     live_set(job_id, phase="review", note=late[:120])
+                    _approved.pop(job_id, None)
                     auto = False
                 else:
                     guardrails.claim(job_id)   # counted toward the caps from the click on
@@ -762,6 +839,11 @@ async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None
                     live_set(job_id, phase="review", note="CAPTCHA to solve: take over to finish it")
                     from .scheduler import notify
                     notify("Jobsmith needs you", f"Solve the CAPTCHA for {job['company']} in the Jobsmith browser window.")
+            elif first:
+                run.log("Stopped before submit. Approve it on the dashboard or with `jobsmith approve` to send it.")
+                from .scheduler import notify
+                notify("Jobsmith: approve the first submission",
+                       f"{job['company']}: {job['title']} is filled in. Check the answers and approve it.")
             else:
                 run.log("Stopped before submit. Review the tab, then click Submit yourself.")
                 from .scheduler import notify
@@ -772,12 +854,12 @@ async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None
             run.done("waiting_user")
             watch = True
         except asyncio.CancelledError:
-            guardrails.abandon(job_id, "stopped while submitting")
+            _abandon(job_id, "stopped while submitting")
             raise
         except Exception as e:
             run.log("ERROR " + "".join(traceback.format_exception_only(type(e), e)).strip())
             run.done("error")
-            if not guardrails.abandon(job_id, f"stopped by an error: {e.__class__.__name__}"):
+            if not _abandon(job_id, f"stopped by an error: {e.__class__.__name__}"):
                 _set_status(job_id, "error", str(e)[:500])   # (if it may have been sent, it waits for you instead)
             live_set(job_id, phase="error", note=str(e)[:120])
             try:
@@ -797,7 +879,7 @@ async def watch_tab(job_id: str, page, run_dir: Path, run: Run) -> None:
     try:
         await _watch(job_id, page, run_dir, run, job, deadline)
     finally:
-        guardrails.abandon(job_id, "no confirmation page before the tab closed")   # no-op unless autopilot clicked Submit and nothing confirmed
+        _abandon(job_id, "no confirmation page before the tab closed")   # no-op unless autopilot clicked Submit and nothing confirmed
 
 
 async def _watch(job_id: str, page, run_dir: Path, run: Run, job: dict, deadline: float) -> None:
@@ -861,7 +943,12 @@ def record_submission(job_id: str, note: str, confirmation: dict | None = None, 
     sub = Run(job_id, "submit")
     sub.log(note)
     sub.done("done", **files)
-    audit.record(job_id, sub.id, by)
+    site = _approved.pop(job_id, None)
+    if site:
+        by = "you"                     # autopilot filled it, but it went because you approved it
+        guardrails.approve(job_id)     # (after a refill, the site is trusted only once it's actually sent)
+    audit.record(job_id, sub.id, by, note=None if not site else
+                 f"You approved autopilot's first submission on {guardrails.site_name(site)} after checking these answers.")
     if confirmation:
         audit.log_confirmation(job_id, "page", run_id=sub.id, **confirmation)
     _set_status(job_id, "submitted")
@@ -923,6 +1010,7 @@ async def fill_multistep(job_id: str, submit: bool = False) -> None:
     job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (job_id,)))
     run = Run(job_id, "fill")
     resume = profile.attachment_file()
+    uploaded = guardrails._files()       # the resume and transcript this fill attaches, by content
     files = {"resume": str(resume)} if resume else {}
     tr = profile.transcript_file()
     if tr:
@@ -944,9 +1032,14 @@ async def fill_multistep(job_id: str, submit: bool = False) -> None:
             run.log("Held for your review: " + capped)
             db.x("UPDATE jobs SET hold_reason=? WHERE id=?", (capped, job_id))
             return False
-        guardrails.claim(job_id)
         from . import audit
-        audit.capture(job_id, sent)      # exactly the fields it set, on every page
+        audit.capture(job_id, sent)      # exactly the fields it set, on every page: what's sent, or what you approve
+        first = _first_run_hold(job, run, uploaded)
+        if first:
+            held.append(first)
+            db.x("UPDATE jobs SET hold_reason=? WHERE id=?", (first, job_id))
+            return False
+        guardrails.claim(job_id)
         return True
     threshold = int(db.get_setting("trust_threshold") or 3)
 
@@ -1017,10 +1110,10 @@ async def fill_multistep(job_id: str, submit: bool = False) -> None:
             _tasks.add(t)
             t.add_done_callback(_tasks.discard)
         except asyncio.CancelledError:
-            guardrails.abandon(job_id, "stopped while submitting")
+            _abandon(job_id, "stopped while submitting")
             raise
         except Exception as e:
             run.log("ERROR " + "".join(traceback.format_exception_only(type(e), e)).strip())
             run.done("error")
-            if not guardrails.abandon(job_id, f"stopped by an error: {e.__class__.__name__}"):
+            if not _abandon(job_id, f"stopped by an error: {e.__class__.__name__}"):
                 _set_status(job_id, "error", str(e)[:500])   # (if it may have been sent, it waits for you instead)

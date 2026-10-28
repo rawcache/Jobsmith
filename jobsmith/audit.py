@@ -193,14 +193,15 @@ def capture(job_id: str, filled: set[str] | None = None, implicit: list[dict] | 
          (job_id, json.dumps(rows, ensure_ascii=False), db.now()))
 
 
-def record(job_id: str, run_id: int, sent_by: str) -> int:
+def record(job_id: str, run_id: int, sent_by: str, note: str | None = None) -> int:
     """Write the trail for one submission. Returns how many fields it holds."""
     _ensure()
     pending = db.q1("SELECT fields FROM audit_pending WHERE job_id=?", (job_id,))
     if pending:
         rows, basis = json.loads(pending["fields"]), "filled"
-        note = "" if sent_by == "autopilot" else \
-            "You submitted it yourself: anything you changed in the browser first isn't shown here."
+        if note is None:
+            note = "" if sent_by == "autopilot" else \
+                "You submitted it yourself: anything you changed in the browser first isn't shown here."
     else:
         rows, basis = snapshot(job_id), "drafted"
         note = "Jobsmith didn't fill this form, so these are its drafts, not necessarily what the form sent."
@@ -264,6 +265,22 @@ def log_considered(job_id: str, good: bool, fit: float | None) -> None:
     db.x("INSERT INTO considered(job_id, at, good, fit) VALUES(?,?,?,?)", (job_id, db.now(), int(good), fit))
 
 
+def _shown(f: dict) -> dict:
+    f["source_label"] = SOURCE_LABEL.get(f["source"], f["source"])
+    return f
+
+
+def pending(job_id: str) -> dict | None:
+    """What Jobsmith filled in this form and hasn't sent yet, each answer with where it came from: what you check
+    before approving autopilot's first submission."""
+    _ensure()
+    row = db.q1("SELECT fields, at FROM audit_pending WHERE job_id=?", (job_id,))
+    if not row:
+        return None
+    fields = [_shown(f) for f in json.loads(row["fields"])]
+    return {"filled_at": row["at"], "fields": fields, "untraced": sum(1 for f in fields if not f["traces"])}
+
+
 def for_job(job_id: str) -> list[dict]:
     """Every submission of this application, newest first, each with its fields."""
     _ensure()
@@ -276,7 +293,7 @@ def for_job(job_id: str) -> list[dict]:
         for f in fields:
             f["detail"], f["issues"] = json.loads(f["detail"]), json.loads(f["issues"])
             f["approved"], f["traces"] = bool(f["approved"]), bool(f["traces"])
-            f["source_label"] = SOURCE_LABEL.get(f["source"], f["source"])
+            _shown(f)
             for k in ("id", "job_id", "run_id", "at", "sent_by"):
                 f.pop(k, None)
         out.append({"run_id": s["run_id"], "submitted_at": s["at"], "confirmed": s["status"] == "done",

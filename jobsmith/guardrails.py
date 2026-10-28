@@ -114,6 +114,109 @@ def abandon(job_id: str, why: str) -> bool:
     return True
 
 
+# --------------------------------------------------------------------------- supervised first runs
+# Autopilot's first real submission, and its first on each job site, stops at the filled form: you see every answer
+# and where it came from, and it's sent only when you approve it. After that, autopilot submits on that site on its
+# own within the caps. (The practice copy keeps its own data folder, so approvals there never carry over.)
+SITE_NAMES = {"greenhouse": "Greenhouse", "lever": "Lever", "ashby": "Ashby", "workday": "Workday",
+              "icims": "iCIMS", "smartrecruiters": "SmartRecruiters", "oracle": "Oracle", "workable": "Workable",
+              "eightfold": "Eightfold", "rippling": "Rippling", "jobvite": "Jobvite", "taleo": "Taleo",
+              "successfactors": "SuccessFactors"}
+
+
+def site_of(job: dict) -> str:
+    """The job site an application goes through: the tracking system's name, or the host for any other site."""
+    from urllib.parse import urlparse
+    from . import ats
+    url = job.get("referral_url") or job.get("url") or ""
+    name = ats.detect(url) if url else "other"
+    if name == "other" and job.get("ats") and job["ats"] != "other":
+        name = job["ats"]                     # what it was added as (a saved copy of the form has a file:// url)
+    if name != "other":
+        return name
+    host = (urlparse(url).hostname or "").lower()
+    return host.removeprefix("www.") or "other"
+
+
+def site_name(site: str) -> str:
+    return SITE_NAMES.get(site, site)
+
+
+def first_run_reason(job: dict) -> str | None:
+    """Why autopilot needs your approval before sending this one, or None once you've approved one on its site."""
+    site = site_of(job)
+    approved = {r["site"] for r in db.q("SELECT DISTINCT site FROM first_runs WHERE approved_at IS NOT NULL")}
+    if site in approved:
+        return None
+    first = "This is autopilot's first submission" if not approved else \
+        f"This is autopilot's first submission on {site_name(site)}"
+    return (f"{first}: check every answer and where it came from, then approve it to send it. After that, "
+            f"autopilot submits on {site_name(site)} on its own within your limits.")
+
+
+def ask_approval(job_id: str, site: str, files: list[str] | None = None) -> bool:
+    """Hold it for you, noting the files the fill attached (`files`, from when it started; default: as they are
+    now). True when you'd approved different answers for it before (the form changed since)."""
+    import json
+    before = db.q1("SELECT answers FROM first_runs WHERE job_id=? AND approved_at IS NULL", (job_id,))
+    db.x("""INSERT OR REPLACE INTO first_runs(job_id, site, asked_at, approved_at, answers, files)
+            VALUES(?,?,?,NULL,NULL,?)""", (job_id, site, db.now(), json.dumps(files if files is not None else _files())))
+    return bool(before and before["answers"])
+
+
+def _files() -> list[str]:
+    """The resume and transcript as they are now, by content: replacing one means checking it again."""
+    import hashlib
+    from . import profile
+    out = []
+    for f in (profile.attachment_file(), profile.transcript_file()):
+        try:
+            out.append(hashlib.sha256(f.read_bytes()).hexdigest() if f else "")
+        except OSError:
+            out.append("unreadable")
+    return out
+
+
+def answers_key(fields: list[dict], files: list[str] | None = None) -> str:
+    """What you approved, to compare with a later fill: each field and the answer put in it, and the files (as they
+    were when it was filled, or as they are now)."""
+    import json
+    return json.dumps({"fields": sorted((f["field"], f.get("answer") or "") for f in fields),
+                       "files": files if files is not None else _files()})
+
+
+def approve_answers(job_id: str, fields: list[dict]) -> None:
+    """You approved these answers but the tab had closed: a refill that puts in exactly these, with the same files
+    it was filled with, may be sent."""
+    import json
+    row = db.q1("SELECT files FROM first_runs WHERE job_id=? AND approved_at IS NULL", (job_id,))
+    files = json.loads(row["files"]) if row and row["files"] else ["unknown"]
+    db.x("UPDATE first_runs SET answers=? WHERE job_id=? AND approved_at IS NULL",
+         (answers_key(fields, files), job_id))
+
+
+def approved_answers(job_id: str) -> str | None:
+    row = db.q1("SELECT answers FROM first_runs WHERE job_id=? AND approved_at IS NULL", (job_id,))
+    return row and row["answers"]
+
+
+def awaiting_approval(job_id: str | None = None) -> list[dict]:
+    """Applications filled and waiting for you to approve autopilot's first submission (on their site)."""
+    sql = """SELECT f.job_id, f.site, f.asked_at, j.company, j.title FROM first_runs f JOIN jobs j ON j.id=f.job_id
+             WHERE f.approved_at IS NULL AND j.status='filled'"""
+    rows = db.q(sql + (" AND f.job_id=?" if job_id else "") + " ORDER BY f.asked_at", (job_id,) if job_id else ())
+    return [dict(r, site_name=site_name(r["site"])) for r in rows]
+
+
+def approve(job_id: str) -> str | None:
+    """You approved it: its site is trusted from now on. Returns the site, or None if nothing was waiting."""
+    row = db.q1("SELECT site FROM first_runs WHERE job_id=? AND approved_at IS NULL", (job_id,))
+    if not row:
+        return None
+    db.x("UPDATE first_runs SET approved_at=? WHERE job_id=?", (db.now(), job_id))
+    return row["site"]
+
+
 def summary() -> dict:
     """What the dashboard shows: "12 of 20 today"."""
     day, company = caps()

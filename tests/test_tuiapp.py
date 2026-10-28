@@ -93,6 +93,62 @@ def test_ask_review_and_autopilot(engine):
     asyncio.run(go())
 
 
+def test_review_shows_a_first_submission_with_sources_and_s_approves_it(engine, monkeypatch):
+    """Autopilot's first submission waits in Review with every answer it filled in and where each came from;
+    s approves it (and, with its tab gone, fills it again to send)."""
+    import json
+    from jobsmith import audit, guardrails, runner
+    from jobsmith.tuiapp import EditAnswer, Jobsmith, Review
+    db.conn()
+    _held_job()
+    audit._ensure()
+    fields = [{"field": "why", "label": "Why Acme?", "qtype": "textarea", "answer": "I built a Jetson detector.",
+               "source": "resume", "detail": [{"ref": "your profile", "text": "Built a fire detector on Jetson Nano"}],
+               "traces": True, "approved": True, "kind_check": "ok", "issues": []},
+              {"field": "name", "label": "First Name", "qtype": "text", "answer": "Alex", "source": "profile",
+               "detail": [{"ref": "Profile: First name", "text": "Alex"}], "traces": True, "approved": True,
+               "kind_check": "ok", "issues": []}]
+    db.x("INSERT INTO audit_pending(job_id, fields, at) VALUES(?,?,?)", ("j1", json.dumps(fields), db.now()))
+    guardrails.ask_approval("j1", "greenhouse")
+    db.x("UPDATE jobs SET hold_reason=? WHERE id='j1'", (guardrails.first_run_reason({"ats": "greenhouse"}),))
+    started = []
+
+    def fake_spawn(jid, label, coro):
+        coro.close()
+        started.append((jid, label))
+        return True
+    monkeypatch.setattr(runner, "spawn", fake_spawn)
+
+    async def go():
+        app = Jobsmith(engine, splash=False)
+        async with app.run_test(size=(140, 44)) as pilot:
+            await pilot.pause(1)
+            app.query_one("#prompt").value = "/review"
+            await pilot.press("enter")
+            await pilot.pause(1.5)
+            screen = app.screen
+            assert isinstance(screen, Review) and screen.approval["site_name"] == "Greenhouse"
+            from textual.widgets import DataTable, Static
+            qs = screen.query_one("#qs", DataTable)
+            assert qs.row_count == 2 and "first submission on Greenhouse" in str(qs.border_title)
+            from rich.console import Console
+            import io
+            con = Console(width=200, record=True, file=io.StringIO())
+            con.print(screen.query_one("#detail", Static).content)
+            detail = con.export_text()
+            assert "Came from: Your resume" in detail and "Built a fire detector on Jetson Nano" in detail
+            assert "This is autopilot's first submission" in detail
+            await pilot.press("e")                          # already filled: change it in the form, not here
+            await pilot.pause(0.3)
+            assert not isinstance(app.screen, EditAnswer)
+            await pilot.press("s")
+            await pilot.pause(1.5)
+    asyncio.run(go())
+    assert started == [("j1", "submitting")]                 # its tab was gone: filled again, to send if it matches
+    row = db.q1("SELECT approved_at, answers FROM first_runs WHERE job_id='j1'")
+    assert row["approved_at"] is None and row["answers"] == guardrails.answers_key(fields)
+
+
 def test_a_running_job_is_named_before_its_tab_opens(engine):
     """Researching and drafting happen before a browser tab exists; the terminal should name the company from the
     first frame, not show the job's id."""

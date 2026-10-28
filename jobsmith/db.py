@@ -138,6 +138,17 @@ CREATE TABLE IF NOT EXISTS runs (
   started_at REAL,
   finished_at REAL
 );
+
+-- Autopilot's first real submission, and its first on each job site, waits for you to approve it. One row per
+-- application it held for that; approved_at is set when you approved it, and from then on that site is trusted.
+CREATE TABLE IF NOT EXISTS first_runs (
+  job_id TEXT PRIMARY KEY,
+  site TEXT NOT NULL,              -- greenhouse | lever | … | the host name for any other site
+  asked_at REAL NOT NULL,
+  approved_at REAL,
+  answers TEXT,                    -- the answers you approved when its tab had closed: sent only if a refill matches
+  files TEXT                       -- the resume and transcript (by content) when it was filled and held
+);
 """
 
 _lock = threading.RLock()
@@ -163,6 +174,10 @@ def conn() -> sqlite3.Connection:
             c.execute("ALTER TABLE jobs ADD COLUMN traps TEXT NOT NULL DEFAULT '[]'")
         if "original" not in cols:     # the posting as written, hidden lines included, kept only when it has traps
             c.execute("ALTER TABLE jobs ADD COLUMN original TEXT NOT NULL DEFAULT ''")
+        fcols = {r[1] for r in c.execute("PRAGMA table_info(first_runs)").fetchall()}
+        for col in ("answers", "files"):
+            if col not in fcols:
+                c.execute(f"ALTER TABLE first_runs ADD COLUMN {col} TEXT")
         dcols = {r[1] for r in c.execute("PRAGMA table_info(drafts)").fetchall()}
         if "model" not in dcols:
             c.execute("ALTER TABLE drafts ADD COLUMN model TEXT")

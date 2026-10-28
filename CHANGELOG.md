@@ -11,6 +11,10 @@
 - When a posting or its form asks applicants not to use AI or automated tools ("Please do not use AI to write your
   answers", "AI-generated responses will be rejected"), autopilot fills it but never sends it. It waits under "Needs
   you" with the employer's own sentence quoted, and the job's page shows the same line.
+- Autopilot's first submission, and its first on each job site (Greenhouse, Lever, Workday, …), stops at the filled
+  form and waits for you. The application's page lists every answer it filled in and where each came from, with
+  "Approve and send"; in the terminal it's under /review, where s approves it. After you approve one on a site,
+  autopilot submits there on its own within your limits. Applications you send yourself don't count as approving.
 
 ### Added
 - Every submission keeps an audit trail: each field, the answer sent, where it came from (your resume, profile,

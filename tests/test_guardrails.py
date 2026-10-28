@@ -331,3 +331,251 @@ def test_every_match_carries_its_gate():
     [row] = c.get("/api/jobs?min_score=0").json()["jobs"]
     assert row["gate"]["passed"] is False and row["gate"]["against"] == ["location"]
     assert c.get(f"/api/jobs/{jid}").json()["gate"]["summary"].startswith("Fit 30 is under your bar of 50")
+
+
+# --------------------------------------------------------------------------- supervised first runs
+def test_first_submission_and_first_on_each_site_need_your_approval():
+    gh, lever = _job("Acme", 1), sources.add_job_url("https://jobs.lever.co/beta/1", "Beta", "Role")
+    other = sources.add_job_url("https://careers.example.com/jobs/7", "Gamma", "Role")
+    row = lambda j: db.q1("SELECT * FROM jobs WHERE id=?", (j,))
+    assert [guardrails.site_of(row(j)) for j in (gh, lever, other)] == ["greenhouse", "lever", "careers.example.com"]
+    assert guardrails.first_run_reason(row(gh)).startswith("This is autopilot's first submission: check every answer")
+    guardrails.ask_approval(gh, "greenhouse")
+    db.x("UPDATE jobs SET status='filled' WHERE id=?", (gh,))
+    assert [a["job_id"] for a in guardrails.awaiting_approval()] == [gh]
+    assert guardrails.first_run_reason(row(gh)) is not None          # asking isn't approving
+    assert guardrails.approve(gh) == "greenhouse" and guardrails.approve(gh) is None
+    assert guardrails.awaiting_approval() == []
+    assert guardrails.first_run_reason(row(_job("Delta", 2))) is None   # any Greenhouse job now
+    assert guardrails.first_run_reason(row(lever)) == (
+        "This is autopilot's first submission on Lever: check every answer and where it came from, then approve it "
+        "to send it. After that, autopilot submits on Lever on its own within your limits.")
+    assert "on careers.example.com" in guardrails.first_run_reason(row(other))
+
+
+def test_your_own_submission_doesnt_count_as_approving_autopilot():
+    _sent("Acme", 1)                                   # you sent one yourself: autopilot still asks the first time
+    assert guardrails.first_run_reason({"url": "https://job-boards.greenhouse.io/acme/jobs/2"}) is not None
+
+
+def test_approve_endpoint_only_acts_on_an_application_waiting_for_it():
+    from fastapi.testclient import TestClient
+    from jobsmith.api import app
+    c = TestClient(app)
+    jid = _job("Acme", 1)
+    assert c.post(f"/api/jobs/{jid}/approve").json() == {"ok": False, "message": "Nothing here is waiting for your approval."}
+    assert c.get(f"/api/jobs/{jid}").json()["approval"] is None
+    guardrails.ask_approval(jid, "greenhouse")
+    db.x("UPDATE jobs SET status='filled' WHERE id=?", (jid,))
+    got = c.get(f"/api/jobs/{jid}").json()["approval"]
+    assert got["site_name"] == "Greenhouse" and got["answers"] is None      # nothing was filled in this test
+    assert [r["approve"] for r in c.get("/api/home").json()["review"] if r["id"] == jid] == [True]
+
+
+async def test_multipage_autopilot_waits_for_approval_at_the_review_page(monkeypatch):
+    from jobsmith.fill import multistep
+    jid = sources.add_job_url("https://acme.wd1.myworkdayjobs.com/x/job/1", "Acme", "Hardware Intern")
+
+    class Page:
+        async def screenshot(self, **kw):
+            raise RuntimeError("no screen in tests")
+
+        def is_closed(self):
+            return False
+
+    class Browser:
+        def want_headless(self):
+            return True
+
+        async def new_page(self):
+            return Page()
+    allowed = []
+
+    async def fake_run(page, url, *, answer, files, log, wait_for_user, allow_submit, on_page=None, **kw):
+        on_page("Review\nSubmit")
+        allowed.append(allow_submit())
+        return {"status": "review", "filled": 3, "issues": []}
+
+    async def no_watch(*a):
+        return None
+    monkeypatch.setattr(multistep, "run", fake_run)
+    monkeypatch.setattr(runner, "browser", Browser())
+    monkeypatch.setattr(runner, "takeover", Browser())
+    monkeypatch.setattr(runner, "watch_tab", no_watch)
+    try:
+        await runner.fill_multistep(jid, submit=True)
+        assert allowed == [False]
+        job = db.q1("SELECT status, hold_reason FROM jobs WHERE id=?", (jid,))
+        assert job["status"] == "filled" and job["hold_reason"].startswith("This is autopilot's first submission")
+        assert [a["site"] for a in guardrails.awaiting_approval(jid)] == ["workday"]
+        assert not guardrails._submitting
+        guardrails.approve(jid)                           # approved once: the next one goes through on its own
+        await runner.fill_multistep(jid, submit=True)
+        assert allowed == [False, True] and jid in guardrails._submitting
+    finally:
+        guardrails._submitting.discard(jid)
+        runner.live_drop(jid)
+
+
+def _filled(answer: str) -> str:
+    """What Jobsmith filled in a form, as the audit trail keeps it."""
+    import json
+    return json.dumps([{"field": "first_name", "label": "First Name", "qtype": "text", "answer": answer,
+                        "source": "profile", "detail": [{"ref": "Profile: First name", "text": answer}],
+                        "traces": True, "approved": True, "kind_check": "ok", "issues": []}])
+
+
+def _waiting_for_approval(answer: str = "Alex") -> str:
+    from jobsmith import audit
+    jid = _job("Acme", 1)
+    audit._ensure()
+    db.x("INSERT OR REPLACE INTO audit_pending(job_id, fields, at) VALUES(?,?,?)", (jid, _filled(answer), db.now()))
+    guardrails.ask_approval(jid, "greenhouse")
+    db.x("UPDATE jobs SET status='filled' WHERE id=?", (jid,))
+    return jid
+
+
+async def test_approving_after_the_tab_closed_sends_only_the_answers_you_checked(monkeypatch):
+    spawned = []
+
+    def fake_spawn(jid, label, coro):
+        coro.close()
+        spawned.append(jid)
+        return True
+    monkeypatch.setattr(runner, "spawn", fake_spawn)
+    jid = _waiting_for_approval("Alex")
+    r = await runner.approve(jid)
+    assert r["ok"] and spawned == [jid] and "if the answers come out the same" in r["message"]
+    job = db.q1("SELECT * FROM jobs WHERE id=?", (jid,))
+    assert guardrails.first_run_reason(job) is not None                 # not trusted until it's actually sent
+    run = runner.Run(jid, "fill")
+    assert runner._first_run_hold(job, run) is None                     # the refill matches: it may go
+    assert runner._approved.pop(jid) == "greenhouse"
+    assert guardrails.first_run_reason(job) is not None                 # trusted only once Submit is clicked
+
+    other = _job("Beta", 2)                                              # same, but the refill comes out different
+    db.x("UPDATE first_runs SET approved_at=NULL")
+    db.x("INSERT OR REPLACE INTO audit_pending(job_id, fields, at) VALUES(?,?,?)", (other, _filled("Alex"), db.now()))
+    guardrails.ask_approval(other, "greenhouse")
+    db.x("UPDATE jobs SET status='filled' WHERE id=?", (other,))
+    await runner.approve(other)
+    db.x("UPDATE audit_pending SET fields=? WHERE job_id=?", (_filled("Alexander"), other))
+    why = runner._first_run_hold(db.q1("SELECT * FROM jobs WHERE id=?", (other,)), runner.Run(other, "fill"))
+    assert why.startswith("The form changed after you approved it, so check the answers again. This is autopilot's")
+    assert guardrails.awaiting_approval(other) and guardrails.approved_answers(other) is None
+
+
+async def test_two_approvals_at_once_click_submit_once_and_an_unconfirmed_one_is_kept(monkeypatch):
+    import asyncio
+    jid = _waiting_for_approval()
+    clicks = []
+
+    class Tab:
+        def is_closed(self):
+            return False
+
+    async def slow_submit(j):
+        clicks.append(j)
+        await asyncio.sleep(0.2)
+        return {"ok": True}
+    monkeypatch.setattr(runner, "live_submit", slow_submit)
+    monkeypatch.setitem(runner.LIVE, jid, {"page": Tab()})
+    try:
+        a, b = await asyncio.gather(runner.approve(jid), runner.approve(jid))
+        assert clicks == [jid] and sorted([a["ok"], b["ok"]]) == [False, True]
+        assert "Already sending it." in (a.get("message"), b.get("message"))
+        assert jid in guardrails._submitting                   # counted from the click, like autopilot's own
+        # No confirmation page and the tab closes: recorded as possibly sent, never sent again on its own.
+        assert guardrails.abandon(jid, "no confirmation page before the tab closed")
+        assert guardrails.maybe_sent(jid) and guardrails.sent_today() == 1
+    finally:
+        guardrails._submitting.discard(jid)
+        runner._approved.pop(jid, None)
+
+
+async def test_an_approval_whose_click_fails_isnt_counted_or_approved(monkeypatch):
+    jid = _waiting_for_approval()
+
+    class Tab:
+        def is_closed(self):
+            return False
+
+    async def no_button(j):
+        return {"ok": False, "message": "Couldn't find a Submit button."}
+    monkeypatch.setattr(runner, "live_submit", no_button)
+    monkeypatch.setitem(runner.LIVE, jid, {"page": Tab()})
+    assert (await runner.approve(jid))["ok"] is False
+    assert jid not in guardrails._submitting and guardrails.awaiting_approval(jid)
+
+
+def test_a_resume_replaced_after_the_fill_means_checking_again(tmp_path):
+    """Approved after the tab closed: the refill is sent only with the files the held form was filled with."""
+    import json
+    pdf = tmp_path / "resume.pdf"
+    pdf.write_bytes(b"%PDF-1.4 first\n%%EOF\n")
+    db.x("INSERT INTO documents(kind, filename, path, text, is_primary, created_at) VALUES('resume','resume.pdf',?, '',1,?)",
+         (str(pdf), db.now()))
+    fields = json.loads(_filled("Alex"))
+    same, swapped = _job("Acme", 1), _job("Beta", 2)
+    for jid in (same, swapped):
+        guardrails.ask_approval(jid, "greenhouse")            # held right after the fill: files fingerprinted then
+    guardrails.approve_answers(same, fields)
+    assert guardrails.approved_answers(same) == guardrails.answers_key(fields)        # a refill now matches
+    pdf.write_bytes(b"%PDF-1.4 a different resume, same name\n%%EOF\n")              # replaced before you approve
+    guardrails.approve_answers(swapped, fields)
+    assert guardrails.approved_answers(swapped) != guardrails.answers_key(fields)     # the refill would carry B
+    assert guardrails.approved_answers(same) != guardrails.answers_key(fields)        # and after approving, too
+
+
+async def test_a_confirmation_seen_during_the_approved_click_is_yours(monkeypatch):
+    from jobsmith import audit
+    jid = _waiting_for_approval()
+
+    class Tab:
+        def is_closed(self):
+            return False
+
+    async def confirms_at_once(j):            # the watcher sees the thank-you page before the click returns
+        runner.record_submission(j, "Confirmation page detected.")
+        return {"ok": True}
+    monkeypatch.setattr(runner, "live_submit", confirms_at_once)
+    monkeypatch.setitem(runner.LIVE, jid, {"page": Tab()})
+    assert (await runner.approve(jid))["ok"]
+    [sub] = audit.for_job(jid)
+    assert sub["sent_by"] == "you" and sub["note"].startswith("You approved autopilot's first submission on Greenhouse")
+    assert jid not in runner._approved and jid not in guardrails._submitting
+    assert guardrails.first_run_reason({"url": "https://job-boards.greenhouse.io/acme/jobs/9"}) is None
+
+
+def test_a_resume_swapped_while_it_was_filling_means_checking_again():
+    """The fingerprint is of the files the fill started with, not whatever the profile holds when it's held."""
+    import json
+    fields = json.loads(_filled("Alex"))
+    jid = _job("Acme", 1)
+    guardrails.ask_approval(jid, "greenhouse", ["sha-of-resume-A", ""])   # what the fill attached
+    guardrails.approve_answers(jid, fields)
+    assert guardrails.approved_answers(jid) == guardrails.answers_key(fields, ["sha-of-resume-A", ""])
+    assert guardrails.approved_answers(jid) != guardrails.answers_key(fields, ["sha-of-resume-B", ""])
+
+
+def test_a_held_approval_with_no_file_record_is_checked_again():
+    import json
+    fields = json.loads(_filled("Alex"))
+    jid = _job("Acme", 1)
+    db.x("INSERT INTO first_runs(job_id, site, asked_at) VALUES(?,?,?)", (jid, "greenhouse", db.now()))
+    guardrails.approve_answers(jid, fields)
+    assert guardrails.approved_answers(jid) != guardrails.answers_key(fields)
+
+
+def test_after_a_refill_the_site_is_trusted_only_once_it_lands():
+    jid, other = _job("Acme", 1), _job("Beta", 2)
+    for j in (jid, other):
+        guardrails.ask_approval(j, "greenhouse")
+        runner._approved[j] = "greenhouse"            # a refill matched the answers you approved
+        guardrails.claim(j)
+    assert runner._abandon(other, "no confirmation page")          # clicked, never confirmed: not trusted
+    assert other not in runner._approved
+    assert guardrails.first_run_reason({"url": "https://job-boards.greenhouse.io/x/jobs/3"}) is not None
+    runner.record_submission(jid, "Confirmation page detected.")   # confirmed: trusted from now on
+    assert guardrails.first_run_reason({"url": "https://job-boards.greenhouse.io/x/jobs/3"}) is None
+    assert db.q1("SELECT sent_by FROM audit_submissions WHERE job_id=?", (jid,))["sent_by"] == "you"
