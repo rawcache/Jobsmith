@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   research TEXT NOT NULL DEFAULT '{}',
   fit_score REAL,
   fit_reasons TEXT NOT NULL DEFAULT '[]',
-  status TEXT NOT NULL DEFAULT 'new',     -- new|skipped|fetched|drafted|filling|filled|submitted|error
+  status TEXT NOT NULL DEFAULT 'new',     -- new|left_out|skipped|fetched|drafted|filling|filled|submitted|error
   verdict TEXT,                           -- job-level green/red from the user
   verdict_note TEXT,
   error TEXT,
@@ -174,6 +174,8 @@ def conn() -> sqlite3.Connection:
             c.execute("ALTER TABLE jobs ADD COLUMN traps TEXT NOT NULL DEFAULT '[]'")
         if "original" not in cols:     # the posting as written, hidden lines included, kept only when it has traps
             c.execute("ALTER TABLE jobs ADD COLUMN original TEXT NOT NULL DEFAULT ''")
+        if "left_out" not in cols:     # why a job board's role was left out (senior|experience|pay), or 'waived'
+            c.execute("ALTER TABLE jobs ADD COLUMN left_out TEXT")
         fcols = {r[1] for r in c.execute("PRAGMA table_info(first_runs)").fetchall()}
         for col in ("answers", "files"):
             if col not in fcols:

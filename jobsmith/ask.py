@@ -332,7 +332,7 @@ def _people(since, until, label, company):
         if not n:
             yield {"t": "note", "text": "No LinkedIn connections yet. Add your export on the dashboard's Profile page or with /web."}
             return
-        rows = db.q("""SELECT company, COUNT(*) n FROM jobs WHERE active=1 AND status!='skipped' GROUP BY company
+        rows = db.q("""SELECT company, COUNT(*) n FROM jobs WHERE active=1 AND status NOT IN ('skipped','left_out') GROUP BY company
                        ORDER BY MAX(COALESCE(fit_score,0)) DESC LIMIT 300""")
         shown = 0
         for r in rows:

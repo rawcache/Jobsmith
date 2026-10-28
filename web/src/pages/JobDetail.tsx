@@ -245,7 +245,7 @@ export default function JobPage({ id, embedded = false }: { id: string; embedded
     ["doc", f?.category], ["passport", f?.sponsorship || (f?.degree ? `${f.degree} required` : "")]] as [string, string | undefined][])
     .filter(([, v]) => !!v) as [string, string][];
   const stage = applied ? (job.outcome ? OUTCOME_LABEL[job.outcome] : "Applied") : job.status === "filled" || job.status === "error" ? "Needs you"
-    : r.busy ? "Working on it" : job.status === "skipped" ? "Skipped" : "";
+    : r.busy ? "Working on it" : job.status === "skipped" ? "Skipped" : job.status === "left_out" ? "Left out" : "";
 
   return (
     <div className={`jobview ${embedded ? "embedded" : "page"}`}>
@@ -263,7 +263,7 @@ export default function JobPage({ id, embedded = false }: { id: string; embedded
           <button className={`btn ghost sm ${job.verdict === "red" ? "on" : ""}`} onClick={() => act("verdict", { verdict: job.verdict === "red" ? null : "red" })}>Not for me</button>
           {applied ? null : r.busy ? <span className="btn sm" aria-busy><Dots />{r.busy === "filling" ? "Filling" : "Drafting"}</span> : (<>
             {drafts.length > 0 && r.can_fill && <button className="btn sm" onClick={() => act("fill", { submit: false })}>Fill, I'll submit</button>}
-            <button className="btn primary sm" onClick={autopilot}>{unsure || job.status === "skipped" ? "Apply anyway" : "Apply"}</button>
+            <button className="btn primary sm" onClick={autopilot}>{unsure || ["skipped", "left_out"].includes(job.status) ? "Apply anyway" : "Apply"}</button>
           </>)}
         </div>
       </header>
@@ -279,8 +279,9 @@ export default function JobPage({ id, embedded = false }: { id: string; embedded
         <div key={icon}><dt><Icon name={icon} size={15} /></dt><dd>{v}</dd></div>))}</dl>}
 
       {status && !status.llm.ok && <p className="note warn">No AI is connected, so only answers from your profile get filled. <a href="#/settings">Choose an AI</a>.</p>}
+      {job.status === "left_out" && <p className="note">{job.hold_reason}. Autopilot won't apply to this role; Apply anyway is your call.</p>}
       {unsure && !applied && <p className="note warn"><strong>You may not qualify.</strong> {eligibility.reasons.join(" ")} Autopilot skips roles like this; Apply anyway is your call.</p>}
-      {gate && !applied && job.status !== "skipped" && (
+      {gate && !applied && !["skipped", "left_out"].includes(job.status) && (
         <details className="note gate"><summary>{gate.summary}</summary>
           {gate.for.length + gate.against.length > 0 ? <ul className="gate-why">
             {gate.for.map(x => <li key={"+" + x}><span className="ok-text" aria-label="counts for">+</span> {x}</li>)}

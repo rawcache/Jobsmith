@@ -17,7 +17,7 @@ def _ensure() -> None:
 def overview(limit: int = 40) -> list[dict]:
     """Companies you're applying to where you know someone, best matches and live applications first."""
     _ensure()
-    rows = db.q("""SELECT id, company, title, status, fit_score FROM jobs WHERE active=1 AND status != 'skipped'
+    rows = db.q("""SELECT id, company, title, status, fit_score FROM jobs WHERE active=1 AND status NOT IN ('skipped','left_out')
                    ORDER BY (status IN ('submitted','filled','drafted','filling')) DESC, COALESCE(fit_score,0) DESC LIMIT 400""")
     seen: dict[str, dict] = {}
     for r in rows:

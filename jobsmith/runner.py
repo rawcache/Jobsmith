@@ -966,8 +966,13 @@ async def autopilot(job_ids: list[str], force: bool = False, submit: bool | None
     autonomous = applies_on_own() if submit is None else submit
 
     async def one(jid):
-        if not force:            # the fit gate: autopilot's own picks only, never one you chose
-            row = db.q1("SELECT fit_score, fit_reasons FROM jobs WHERE id=?", (jid,)) or {}
+        if force:                # you picked it, so a job board role left out for you is a match again
+            from . import boards
+            boards.waive(jid)
+        else:                    # the fit gate: autopilot's own picks only, never one you chose
+            row = db.q1("SELECT fit_score, fit_reasons, status FROM jobs WHERE id=?", (jid,)) or {}
+            if row.get("status") == "left_out":      # a job board role left out for you: only you can pick it
+                return
             gate = guardrails.fit_gate(row)
             from . import audit
             audit.log_considered(jid, gate["passed"], row.get("fit_score"))   # for `jobsmith stats`, whatever comes next

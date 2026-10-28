@@ -6,7 +6,7 @@ export type Job = {
   description?: string; research?: Research; questions?: unknown[];
   referral_name?: string | null; referral_url?: string | null; outcome?: string | null; tokens?: number;
   match?: number | null; match_hits?: number; match_total?: number; connections?: number; hold_reason?: string | null;
-  pay?: string; updated_at?: number;
+  pay?: string; updated_at?: number; left_out?: string | null;
   eligibility?: { ok?: boolean; reasons?: string[]; notes?: string[] };
   ai_blocked?: boolean;
   gate?: FitGate;

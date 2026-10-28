@@ -21,7 +21,9 @@
   `jobs.ashbyhq.com/ramp`) as a source, in Settings or by pasting it in the terminal. Jobsmith reads the board's
   public JSON (no browser, nothing sent) and leaves out roles with senior titles, roles asking for more years of
   experience than you have, and roles paying under your minimum (new in Job preferences: "Lowest pay you'd take").
-  Each sync says how many it left out and why. A posting that doesn't state pay still counts.
+  Each sync says how many it left out and why. A posting that doesn't state pay still counts. Left-out roles are
+  kept, with the reason, under "Left out" on the Matches page and in `/matches` (press `l`); autopilot never picks
+  them up, and "Apply anyway" makes one a match again.
 - Every submission keeps an audit trail: each field, the answer sent, where it came from (your resume, profile,
   writing, an answer you approved before, something you typed, or a file you added) and whether the answer was the
   right kind for the question. See it under "What was sent" on the application's page, or export it as JSON.
@@ -51,6 +53,8 @@
   bar show "Under your fit bar" and autopilot skips them; pick one yourself and it still applies.
 
 ### Fixed
+- Enter in the terminal's `/matches` now applies to the highlighted role. The table took the key for itself,
+  so nothing happened.
 - Resume match reads each posting for the skills its kind of role asks for: sales (discovery, value selling,
   pipeline generation, Salesforce), design, product, data and marketing, as well as engineering. On Figma's Account
   Executive posting it used to list "Figma, networking, performance, communication". A company's own name never
