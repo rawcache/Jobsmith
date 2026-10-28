@@ -262,8 +262,9 @@ UNTOUCHED = ("new", "fetched", "drafted", "error")
 
 
 def store(source: dict, kind: str, roles: list[dict]) -> dict:
-    """Add the roles that pass the screen as matches; the rest are counted, not added. Ones added before that no
-    longer pass (you changed your minimum) or are gone from the board are put away."""
+    """Store the board's roles. Ones that pass the screen are matches; the rest are kept as left out, with the
+    reason, where autopilot never picks them and you can still apply anyway. Ones that stop passing (you changed
+    your minimum) are left out the same way, and ones gone from the board are put away."""
     from . import traps
     from .jobdetail import original_text
     from .match import guess_category
@@ -276,37 +277,52 @@ def store(source: dict, kind: str, roles: list[dict]) -> dict:
         for r in roles:
             jid = job_id_for(r["url"], r["company"], r["title"])
             seen.append(jid)
-            exists = c.execute("SELECT status FROM jobs WHERE id=?", (jid,)).fetchone()
-            out = screen(r, years, min_pay)
+            exists = c.execute("SELECT status, left_out FROM jobs WHERE id=?", (jid,)).fetchone()
+            if exists and exists["status"] not in UNTOUCHED + ("left_out",):
+                continue                                 # you've filled, sent or skipped it: it stays as it is
+            out = None if exists and exists["left_out"] == "waived" else screen(r, years, min_pay)
             if out:
                 why[out[0]] += 1
-                if exists and exists["status"] in UNTOUCHED:
-                    c.execute("UPDATE jobs SET active=0, hold_reason=?, updated_at=? WHERE id=?",
-                              ("Left out: " + out[1], db.now(), jid))
-                continue
             found = traps.unique(traps.scan_html(r["html"]) + traps.scan_text(r["description"]))
             row = (source["id"], r["external_id"], r["company"], r["title"], ats.clean_url(r["url"]), kind,
                    db.enc(r["locations"]), db.enc(_terms(r["title"])), guess_category(r["title"]), r["date_posted"],
                    r["description"], db.enc(found), original_text(r["html"]) if found else "")
+            if out:
+                state = ("left_out", out[0], "Left out: " + out[1])
+            elif exists and exists["status"] == "left_out":
+                state = ("new", None, None)              # it passes now
+            else:
+                state = None
             if exists:
                 c.execute("""UPDATE jobs SET source_id=?, external_id=?, company=?, title=?, url=?, ats=?, locations=?,
                              terms=?, category=?, date_posted=?, description=?, traps=?, original=?, active=1,
+                             hold_reason=CASE WHEN hold_reason='No longer on the board' THEN NULL ELSE hold_reason END,
                              updated_at=? WHERE id=?""", row + (db.now(), jid))
-                updated += 1
+                if state:
+                    c.execute("UPDATE jobs SET status=?, left_out=?, hold_reason=? WHERE id=?", state + (jid,))
+                updated += not out
             else:
                 c.execute("""INSERT INTO jobs(source_id, external_id, company, title, url, ats, locations, terms,
-                             category, date_posted, description, traps, original, active, id, created_at, updated_at)
-                             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?)""", row + (jid, db.now(), db.now()))
-                added += 1
+                             category, date_posted, description, traps, original, active, id, created_at, updated_at,
+                             status, left_out, hold_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?,?)""",
+                          row + (jid, db.now(), db.now()) + (state or ("new", None, None)))
+                added += not out
         # Roles taken down since the last sync are closed: put away the ones autopilot could still pick.
         marks = ",".join("?" * len(seen))
+        gone = UNTOUCHED + ("left_out",)
         closed = c.execute(f"""UPDATE jobs SET active=0, hold_reason='No longer on the board', updated_at=?
-                               WHERE source_id=? AND active=1 AND status IN ({",".join("?" * len(UNTOUCHED))})
+                               WHERE source_id=? AND active=1 AND status IN ({",".join("?" * len(gone))})
                                {f"AND id NOT IN ({marks})" if seen else ""}""",
-                           (db.now(), source["id"], *UNTOUCHED, *seen)).rowcount
+                           (db.now(), source["id"], *gone, *seen)).rowcount
         c.execute("UPDATE sources SET last_synced=?, last_count=? WHERE id=?", (db.now(), len(roles), source["id"]))
     return {"source": source["url"], "listings": len(roles), "added": added, "updated": updated,
             "left_out": sum(why.values()), "why": dict(why), "closed": closed}
+
+
+def waive(job_id: str) -> None:
+    """You chose to apply to a left-out role anyway: it's a match again, and later syncs don't leave it out."""
+    db.x("UPDATE jobs SET status='new', left_out='waived', hold_reason=NULL, updated_at=? WHERE id=? AND status='left_out'",
+         (db.now(), job_id))
 
 
 async def sync(source: dict, client: httpx.AsyncClient | None = None) -> dict:

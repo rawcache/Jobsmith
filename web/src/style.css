@@ -244,6 +244,13 @@ input[type="number"] { width: 76px; }
 .mx-co { color: var(--text); font-size: 13px; }
 .mx-meta { color: var(--muted); }
 .empty-li { color: var(--muted); font-size: 14px; }
+.mx-list > li.mx-leftout { display: block; background: var(--bg); }
+.mx-leftout summary { font-size: 13.5px; font-weight: 500; }
+.mx-leftout ul { list-style: none; padding: 0; margin: 6px 0 0; }
+.mx-leftout li { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line-2); }
+.mx-leftout li.on .mx-title { color: var(--accent); }
+.mx-leftout a.grow { display: flex; flex-direction: column; gap: 1px; font-size: 13px; color: var(--text); min-width: 0; }
+.mx-leftout a.grow:hover { text-decoration: none; }
 .mx-detail { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); min-height: 400px; }
 
 /* ---- job view ---- */

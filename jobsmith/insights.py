@@ -288,7 +288,8 @@ def domain_guess(company: str) -> str:
 def company(name: str) -> dict:
     jobs = [db.decode(r) for r in db.q("""SELECT id, company, title, url, ats, locations, terms, category, fit_score,
                                           status, outcome, date_posted, research FROM jobs
-                                          WHERE company = ? COLLATE NOCASE ORDER BY fit_score DESC""", (name,))]
+                                          WHERE company = ? COLLATE NOCASE AND status!='left_out'
+                                          ORDER BY fit_score DESC""", (name,))]
     research = next((j["research"] for j in jobs if j.get("research") and j["research"].get("summary")), {})
     for j in jobs:
         j.pop("research", None)

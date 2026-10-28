@@ -766,6 +766,8 @@ def list_jobs(status: str = "", category: str = "", ats_name: str = "", min_scor
     if status:
         where.append("status IN (%s)" % ",".join("?" * len(status.split(","))))
         params += status.split(",")
+    else:                    # job board roles left out for you are listed on their own, never under "All"
+        where.append("status!='left_out'")
     if category:
         where.append("category LIKE ?")
         params.append(f"%{category}%")
@@ -790,7 +792,7 @@ def list_jobs(status: str = "", category: str = "", ats_name: str = "", min_scor
     total = db.q1(f"SELECT COUNT(*) n FROM jobs WHERE {w}", params)["n"]
     outcomes._ensure()
     rows = db.q(f"""SELECT id, company, title, url, ats, locations, terms, category, sponsorship, date_posted,
-                    fit_score, fit_reasons, status, verdict, error, outcome, hold_reason, eligibility, updated_at FROM jobs WHERE {w}
+                    fit_score, fit_reasons, status, verdict, error, outcome, hold_reason, left_out, eligibility, updated_at FROM jobs WHERE {w}
                     ORDER BY {order} LIMIT ? OFFSET ?""", params + [limit, offset])
     facets = {
         "ats": db.q(f"SELECT ats, COUNT(*) n FROM jobs WHERE {w} GROUP BY ats ORDER BY n DESC", params),
@@ -817,7 +819,8 @@ def list_jobs(status: str = "", category: str = "", ats_name: str = "", min_scor
         r["match"], r["match_hits"], r["match_total"] = km["score"], len(km["matched"]), km["total"]
         r["connections"] = conns.get(r["company"], 0)
         r["pay"] = insights.pay_of(descs.get(r["id"], ""))
-    return {"total": total, "jobs": [db.decode(r) for r in rows], "facets": facets,
+    left_out = db.q1("SELECT COUNT(*) n FROM jobs WHERE active=1 AND status='left_out'")["n"]
+    return {"total": total, "jobs": [db.decode(r) for r in rows], "facets": facets, "left_out": left_out,
             "fillable": sorted(set(ats.SUPPORTED) | {"lever", "ashby", "other", "smartrecruiters", "workable"})}
 
 
@@ -1158,7 +1161,7 @@ def connections(company: str = ""):
 def companies(q: str = ""):
     from . import clout
     rows = db.q("""SELECT company, COUNT(*) jobs, SUM(status='submitted') applied, MAX(fit_score) best
-                   FROM jobs WHERE active=1 AND (? = '' OR company LIKE ?) GROUP BY company COLLATE NOCASE
+                   FROM jobs WHERE active=1 AND status!='left_out' AND (? = '' OR company LIKE ?) GROUP BY company COLLATE NOCASE
                    LIMIT 5000""", (q, f"%{q}%"))
     # Best-known names first, then everyone else by how many roles they have open.
     for r in rows:

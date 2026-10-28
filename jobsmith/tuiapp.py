@@ -486,8 +486,11 @@ class Review(View):
 
 
 class Matches(View):
+    """Your best-fit roles. l switches to the job board roles left out for you, where enter applies anyway."""
     BINDINGS = View.BINDINGS + [Binding("enter", "apply", "Apply"), Binding("f", "fill", "Fill, don't submit"),
-                                Binding("x", "skip", "Not for me"), Binding("o", "open", "Open posting")]
+                                Binding("x", "skip", "Not for me"), Binding("o", "open", "Open posting"),
+                                Binding("l", "left_out", "Left out")]
+    left = False
 
     def compose(self) -> ComposeResult:
         yield Static("", classes="title", id="t")
@@ -497,25 +500,44 @@ class Matches(View):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.query_one("#m", DataTable).add_columns("Fit", "Company", "Role", "Where", "Pay", "Posted")
         self.load()
 
     @work(thread=True, exclusive=True)
     def load(self) -> None:
-        rows = self.get("/api/jobs", status="new,fetched,drafted", limit=80).get("jobs", [])
-        self.app.call_from_thread(self.show, rows)
+        r = self.get("/api/jobs", status="left_out" if self.left else "new,fetched,drafted", limit=100000 if self.left else 80)
+        self.app.call_from_thread(self.show, r.get("jobs", []), r.get("left_out", 0))
 
-    def show(self, rows: list[dict]) -> None:
+    def show(self, rows: list[dict], left_out: int = 0) -> None:
         from .ask import ago
         t = self.query_one("#m", DataTable)
-        t.clear()
+        t.clear(columns=True)
         self.rows = {r["id"]: r for r in rows}
-        for j in rows:
-            fit = round(j.get("fit_score") or 0)
-            t.add_row(Text(f"{fit:>3}", style=f"bold {INK}" if fit >= 70 else INK if fit >= 50 else DIM), Text(j["company"][:22], style="bold"),
-                      j["title"][:46], (j.get("locations") or [""])[0][:22], j.get("pay") or "", ago(j.get("date_posted")), key=j["id"])
-        self.query_one("#t", Static).update(self.heading((f"Matches  {len(rows)}", "bold"), ("   enter apply · f fill only · x not for me · o open · esc back", DIM)))
+        if self.left:
+            t.border_title = "Left out"
+            t.add_columns("Company", "Role", "Why it was left out")
+            for j in rows:
+                t.add_row(Text(j["company"][:22], style="bold"), j["title"][:46],
+                          (j.get("hold_reason") or "").removeprefix("Left out: ")[:70], key=j["id"])
+            self.query_one("#t", Static).update(self.heading((f"Left out  {len(rows)}", "bold"), (
+                "   job board roles autopilot won't apply to · enter apply anyway · o open · l back to matches", DIM)))
+        else:
+            t.border_title = "Best matches"
+            t.add_columns("Fit", "Company", "Role", "Where", "Pay", "Posted")
+            for j in rows:
+                fit = round(j.get("fit_score") or 0)
+                t.add_row(Text(f"{fit:>3}", style=f"bold {INK}" if fit >= 70 else INK if fit >= 50 else DIM), Text(j["company"][:22], style="bold"),
+                          j["title"][:46], (j.get("locations") or [""])[0][:22], j.get("pay") or "", ago(j.get("date_posted")), key=j["id"])
+            self.query_one("#t", Static).update(self.heading((f"Matches  {len(rows)}", "bold"), (
+                "   enter apply · f fill only · x not for me · o open" + (f" · l left out ({left_out})" if left_out else "")
+                + " · esc back", DIM)))
         t.focus()
+
+    def action_left_out(self) -> None:
+        self.left = not self.left
+        self.load()
+
+    def on_data_table_row_selected(self, _: DataTable.RowSelected) -> None:
+        self.action_apply()             # the table takes enter for itself, so the screen's binding never sees it
 
     def sel(self) -> dict | None:
         t = self.query_one("#m", DataTable)
@@ -526,11 +548,16 @@ class Matches(View):
     def action_apply(self) -> None:
         if j := self.sel():
             r = self.send("POST", "/api/jobs/batch", {"action": "autopilot", "ids": [j["id"]]})
-            self.notify(f"Applying to {j['company']}." if r.get("started") else f"Couldn't start: {r.get('error') or 'already running'}")
-            self.app.say(f"Applying to [b]{j['company']}[/] · {j['title']}")
+            anyway = " anyway" if self.left else ""
+            self.notify(f"Applying{anyway} to {j['company']}." if r.get("started") else f"Couldn't start: {r.get('error') or 'already running'}")
+            self.app.say(f"Applying{anyway} to [b]{j['company']}[/] · {j['title']}")
+            if self.left:
+                self.load()
 
     def action_fill(self) -> None:
-        if j := self.sel():
+        if self.left:
+            self.notify("This role was left out for you. Press enter to apply anyway.")
+        elif j := self.sel():
             self.send("POST", "/api/jobs/batch", {"action": "fill", "ids": [j["id"]]})
             self.notify(f"Filling {j['company']}; it'll wait in /review.")
 

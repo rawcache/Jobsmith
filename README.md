@@ -45,8 +45,9 @@ Code: one prompt, a conversation, and everything a `/command` away.
   with no AI.
 - **Tell it where to apply**: `apply to nvidia hardware internships`, a job link, a GitHub list, or a company's
   Greenhouse, Lever or Ashby board (`jobs.lever.co/palantir`). Boards are read as JSON, and roles too senior for you,
-  asking for more experience than you have, or paying under your minimum are left out before a browser opens.
-  Applications in progress animate above the prompt.
+  asking for more experience than you have, or paying under your minimum are left out before a browser opens. They
+  wait under "Left out" in `/matches` (press `l`) and on the Matches page, where you can apply anyway. Applications
+  in progress animate above the prompt.
 - **`/review`** goes through what's waiting for you, problems first: approve or edit each answer, then submit.
   **`/matches`**, **`/outreach`**, **`/followups`**, **`/voice`** and **`/settings`** open the same way.
 - **Shift+Tab** turns autopilot on or off. **Ctrl+O** shows everything at once. **`?`** lists shortcuts.

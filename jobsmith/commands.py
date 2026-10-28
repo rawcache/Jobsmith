@@ -132,7 +132,8 @@ async def run(text: str, mode: str | None = None) -> dict:
                 continue
             log.append(f"Added the list {u}: {res['listings']} postings ({res['added']} new)." if "left_out" not in res
                        else f"Added the job board {u}: {res['listings']} open roles, {res['added']} new"
-                            + (f"; left out {res['left_out']} ({boards.left_out_words(res['why'])})." if res["left_out"]
+                            + (f"; left out {res['left_out']} ({boards.left_out_words(res['why'])}), under Left out in /matches."
+                               if res["left_out"]
                                else "."))
             rows = db.q("""SELECT id FROM jobs WHERE source_id=? AND active=1 AND status IN ('new','fetched')
                            AND COALESCE(fit_score,0) >= ?""", (src["id"], db.get_setting("min_fit_score") or 40))

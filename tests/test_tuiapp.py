@@ -237,3 +237,45 @@ def test_the_practice_copy_says_whose_data_it_is(engine, demo):
         assert "Welcome back" not in hello
     else:
         assert hello.startswith("Welcome back, Alex!")
+
+
+def test_matches_shows_left_out_roles_on_l_and_enter_applies_anyway(engine, monkeypatch):
+    """Job board roles left out for you are counted in /matches; l lists them with why, and enter applies anyway."""
+    from jobsmith import runner
+    from jobsmith.tuiapp import Jobsmith, Matches
+    db.conn()
+    now = db.now()
+    for jid, title, status, left, why in (
+            ("m1", "Software Engineer Intern", "new", None, None),
+            ("m2", "Senior Software Engineer", "left_out", "senior", 'Left out: "Senior" in the title: more senior than you\'re looking for')):
+        db.x("""INSERT INTO jobs(id, company, title, url, ats, status, left_out, hold_reason, fit_score, created_at,
+                updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+             (jid, "Acme Robotics", title, f"https://x/{jid}", "lever", status, left, why, 80, now, now))
+    started = []
+
+    def fake_spawn(jid, label, coro):
+        coro.close()
+        started.append((jid, label))
+        return True
+    monkeypatch.setattr(runner, "spawn", fake_spawn)
+
+    async def go():
+        from textual.widgets import DataTable, Static
+        app = Jobsmith(engine, splash=False)
+        async with app.run_test(size=(160, 40)) as pilot:
+            await pilot.pause(1)
+            app.query_one("#prompt").value = "/matches"
+            await pilot.press("enter")
+            await pilot.pause(1.5)
+            screen = app.screen
+            assert isinstance(screen, Matches)
+            t = screen.query_one("#m", DataTable)
+            assert t.row_count == 1 and "l left out (1)" in str(screen.query_one("#t", Static).content)
+            await pilot.press("l")
+            await pilot.pause(1)
+            assert t.row_count == 1 and str(t.border_title) == "Left out"
+            assert "more senior than you're looking for" in str(t.get_row_at(0)[2])
+            await pilot.press("enter")
+            await pilot.pause(0.5)
+    asyncio.run(go())
+    assert started == [("m2", "autopilot")]

@@ -119,7 +119,7 @@ def test_your_years_come_from_your_profile_or_your_goals():
 
 
 @pytest.mark.parametrize("kind", ["greenhouse", "lever", "ashby"])
-async def test_syncing_a_board_adds_only_what_passes_and_only_reads(kind):
+async def test_syncing_a_board_keeps_what_doesnt_pass_apart_and_only_reads(kind):
     db.set_settings({"goals": ["internship", "newgrad"], "min_pay": 100000})
     src = sources.add_source(SAVED[kind][0])
     assert src["kind"] == "board"
@@ -127,16 +127,19 @@ async def test_syncing_a_board_adds_only_what_passes_and_only_reads(kind):
     async with _client(seen) as client:
         res = await boards.sync(src, client)
     assert [m for m, _ in seen] == ["GET"] and seen[0][1] == boards.api_url(kind, boards.board_of(src["url"])[1])
-    rows = db.q("SELECT title, ats, active, description, url, source_id FROM jobs WHERE source_id=?", (src["id"],))
-    assert res["added"] == len(rows) and res["listings"] == len(rows) + res["left_out"] and res["left_out"] > 0
+    rows = db.q("SELECT title, ats, active, status, left_out, hold_reason, description FROM jobs WHERE source_id=?",
+                (src["id"],))
+    matches = [r for r in rows if r["status"] == "new"]
+    left_out = [r for r in rows if r["status"] == "left_out"]
+    assert res["added"] == len(matches) and res["left_out"] == len(left_out) > 0 and len(rows) == res["listings"]
     assert all(r["active"] and r["ats"] == kind and r["description"] for r in rows)
-    titles = {r["title"] for r in rows}
-    assert not any(t.startswith("Senior") for t in titles)
+    assert not any(r["title"].startswith("Senior") for r in matches)
+    assert all(r["left_out"] in boards.WHY and r["hold_reason"].startswith("Left out: ") for r in left_out)
     left = boards.left_out_words(res["why"])
     assert "senior titles" in left and "ask for more experience" in left
 
 
-async def test_left_out_roles_never_reach_a_browser_and_a_raised_minimum_puts_old_ones_away():
+async def test_left_out_roles_never_reach_a_browser_and_a_raised_minimum_leaves_old_ones_out():
     db.set_settings({"goals": ["internship", "newgrad"], "min_pay": 0, "min_fit_score": 0})
     src = sources.add_source(SAVED["greenhouse"][0])
     async with _client([]) as client:
@@ -149,10 +152,18 @@ async def test_left_out_roles_never_reach_a_browser_and_a_raised_minimum_puts_ol
     async with _client([]) as client:
         again = await boards.sync(src, client)
     assert again["why"]["pay"] >= 1
-    row = db.q1("SELECT active, hold_reason FROM jobs WHERE id=?", (intern["id"],))
-    assert row["active"] == 0 and row["hold_reason"].startswith("Left out: Pays up to $55 an hour")
-    assert intern["id"] not in scheduler.pick_new_jobs(50)                      # never opened in a browser
-    assert not db.q1("SELECT 1 FROM jobs WHERE title LIKE 'Senior%'")           # never even stored
+    row = db.q1("SELECT status, left_out, hold_reason FROM jobs WHERE id=?", (intern["id"],))
+    assert (row["status"], row["left_out"]) == ("left_out", "pay")
+    assert row["hold_reason"].startswith("Left out: Pays up to $55 an hour")
+    picked = scheduler.pick_new_jobs(50)
+    assert intern["id"] not in picked                                           # never opened in a browser
+    senior = db.q1("SELECT id, status, left_out FROM jobs WHERE title='Senior Account Executive, SMB'")
+    assert (senior["status"], senior["left_out"]) == ("left_out", "senior") and senior["id"] not in picked
+    db.set_settings({"min_pay": 0})                                             # lowered again: a match again
+    async with _client([]) as client:
+        await boards.sync(src, client)
+    assert db.q1("SELECT status, left_out, hold_reason FROM jobs WHERE id=?", (intern["id"],)) == \
+        {"status": "new", "left_out": None, "hold_reason": None}
 
 
 async def test_a_board_that_doesnt_exist_says_so():
@@ -188,7 +199,7 @@ async def test_pasting_a_board_address_adds_it_and_says_what_was_left_out(monkey
     monkeypatch.setattr(commands, "queue", lambda ids, **kw: [])         # don't start applying in a test
     r = await commands.run("https://jobs.lever.co/palantir")
     assert r["log"][0] == ("Added the job board https://jobs.lever.co/palantir: 6 open roles, 3 new; left out 3 "
-                           "(2 ask for more experience, 1 senior titles).")
+                           "(2 ask for more experience, 1 senior titles), under Left out in /matches.")
     assert db.q1("SELECT kind FROM sources WHERE url='https://jobs.lever.co/palantir'")["kind"] == "board"
 
 
@@ -230,7 +241,7 @@ def test_a_greenhouse_posting_with_a_range_per_city_counts_its_best():
 
 
 @pytest.mark.parametrize("status", ["new", "fetched", "drafted", "error"])
-async def test_roles_autopilot_could_still_pick_are_put_away_when_they_stop_passing_or_close(status):
+async def test_roles_autopilot_could_still_pick_are_left_out_when_they_stop_passing_or_put_away_when_closed(status):
     db.set_settings({"goals": ["internship", "newgrad"], "min_pay": 0})
     src = sources.add_source(SAVED["greenhouse"][0])
     async with _client([]) as client:
@@ -249,8 +260,8 @@ async def test_roles_autopilot_could_still_pick_are_put_away_when_they_stop_pass
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
         res = await boards.sync(src, client)
     assert seen == ["GET"] and res["closed"] == 1
-    rows = {r["id"]: r for r in db.q("SELECT id, active, hold_reason FROM jobs")}
-    assert rows[intern]["active"] == 0 and rows[intern]["hold_reason"].startswith("Left out: Pays up to $55")
+    rows = {r["id"]: r for r in db.q("SELECT id, active, status, hold_reason FROM jobs")}
+    assert rows[intern]["status"] == "left_out" and rows[intern]["hold_reason"].startswith("Left out: Pays up to $55")
     assert rows[designer]["active"] == 0 and rows[designer]["hold_reason"] == "No longer on the board"
     picked = scheduler.pick_new_jobs(50)
     assert intern not in picked and designer not in picked
@@ -282,3 +293,71 @@ async def test_an_answer_that_isnt_a_board_doesnt_close_anything(kind, body):
         res = await boards.sync(src, client)
     assert res["error"] == f"{kind.capitalize()} sent something that isn't a job board"
     assert db.q1("SELECT COUNT(*) n FROM jobs WHERE active=1")["n"] == before > 0
+
+
+async def _left_out_board():
+    db.set_settings({"goals": ["internship", "newgrad"], "min_pay": 0, "min_fit_score": 0,
+                     "max_applications_per_company": 0})
+    src = sources.add_source(SAVED["greenhouse"][0])
+    async with _client([]) as client:
+        await boards.sync(src, client)
+    db.x("UPDATE jobs SET fit_score=90")
+    return src, db.q1("SELECT id FROM jobs WHERE title='Senior Account Executive, SMB'")["id"]
+
+
+async def test_left_out_roles_are_listed_apart_and_kept_out_of_counts():
+    from fastapi.testclient import TestClient
+    from jobsmith import insights
+    from jobsmith.api import app
+    _, senior = await _left_out_board()
+    c = TestClient(app)
+    everything = c.get("/api/jobs", params={"limit": 200}).json()
+    assert everything["left_out"] == 3 and senior not in {j["id"] for j in everything["jobs"]}
+    listed = c.get("/api/jobs", params={"status": "left_out"}).json()["jobs"]
+    assert len(listed) == 3 and {j["left_out"] for j in listed} == {"senior", "experience"}
+    assert all(j["hold_reason"].startswith("Left out: ") for j in listed)
+    figma = next(r for r in c.get("/api/companies").json() if r["company"] == "Figma")
+    assert figma["jobs"] == 4
+    assert senior not in {j["id"] for j in insights.company("Figma")["jobs"]}
+
+
+async def test_apply_anyway_makes_a_left_out_role_a_match_that_later_syncs_keep(monkeypatch):
+    from jobsmith import eligibility, runner
+    src, senior = await _left_out_board()
+    prepared = []
+
+    async def prepare(jid):                        # stop before anything opens: this is about the choice
+        prepared.append(jid)
+    monkeypatch.setattr(runner, "prepare", prepare)
+    monkeypatch.setattr(eligibility, "check", lambda job: {"ok": True, "reasons": [], "notes": []})
+    await runner.autopilot([senior], force=True)   # what Apply anyway does, on the dashboard and in /matches
+    assert prepared == [senior]
+    assert db.q1("SELECT status, left_out, hold_reason FROM jobs WHERE id=?", (senior,)) == \
+        {"status": "new", "left_out": "waived", "hold_reason": None}
+    async with _client([]) as client:
+        res = await boards.sync(src, client)
+    assert res["left_out"] == 2 and db.q1("SELECT status FROM jobs WHERE id=?", (senior,))["status"] == "new"
+    assert senior in scheduler.pick_new_jobs(50)
+
+
+async def test_autopilot_on_its_own_never_waives_a_left_out_role(monkeypatch):
+    from jobsmith import runner
+    _, senior = await _left_out_board()
+    monkeypatch.setattr(runner, "prepare", lambda jid: (_ for _ in ()).throw(AssertionError("opened " + jid)))
+    await runner.autopilot([senior])
+    assert db.q1("SELECT status FROM jobs WHERE id=?", (senior,))["status"] == "left_out"
+
+
+def test_every_left_out_role_can_be_reached_however_many_there_are():
+    from fastapi.testclient import TestClient
+    from jobsmith.api import app
+    now = db.now()
+    for n in range(201):
+        db.x("""INSERT INTO jobs(id, company, title, url, status, left_out, hold_reason, created_at, updated_at)
+                VALUES(?,?,?,?,'left_out','senior','Left out: senior',?,?)""",
+             (f"lo{n}", "Acme", f"Senior Engineer {n}", f"https://x/{n}", now, now - n))
+    c = TestClient(app)
+    first = c.get("/api/jobs", params={"status": "left_out", "limit": 100}).json()
+    assert first["left_out"] == first["total"] == 201 and len(first["jobs"]) == 100
+    more = c.get("/api/jobs", params={"status": "left_out", "limit": 300}).json()["jobs"]   # "Show more", /matches
+    assert len(more) == 201 and "lo200" in {j["id"] for j in more}

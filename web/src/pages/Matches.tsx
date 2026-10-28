@@ -4,7 +4,7 @@ import { StatusCtx } from "../main";
 import { Dots, Icon, Logo, MatchText, poll } from "../ui";
 import JobPage from "./JobDetail";
 
-type Resp = { total: number; jobs: Job[]; facets: { category: { category: string; n: number }[] } };
+type Resp = { total: number; jobs: Job[]; facets: { category: { category: string; n: number }[] }; left_out: number };
 const VIEWS: [string, string][] = [
   ["new,fetched,drafted,filled,error", "To apply"], ["filled,error", "Needs you"], ["submitted", "Applied"],
   ["skipped", "Skipped"], ["", "All"],
@@ -19,6 +19,49 @@ function stateLine(j: Job, busy?: string) {
   if (j.eligibility && j.eligibility.ok === false) return <span className="muted" title={(j.eligibility.reasons ?? []).join(" ")}>May not qualify</span>;
   if (j.gate && !j.gate.passed) return <span className="muted" title={j.gate.summary}>{j.gate.score == null ? "Not scored yet" : "Under your fit bar"}</span>;
   return null;
+}
+
+/** Job board roles screened out for you (senior title, years asked, pay), kept so you can still apply anyway.
+ *  Autopilot never picks them up. Collapsed: they're there for a second look, not to work through. */
+function LeftOut({ n, current, apply }: { n: number; current?: string; apply: (id: string) => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const [jobs, setJobs] = useState<Job[] | null>(null);
+  const [limit, setLimit] = useState(100);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!open) return;
+    let current = true, sent = 0, shown = 0;     // a slower, older answer mustn't replace a newer one
+    const load = () => {
+      const n = ++sent;
+      return api.get<Resp>(`/api/jobs?status=left_out&limit=${limit}`).then(r => {
+        if (current && n > shown) { shown = n; setJobs(r.jobs); }
+      });
+    };
+    load();
+    const t = poll(load, 6000);                  // a sync can swap roles without changing the count
+    return () => { current = false; t.stop(); };
+  }, [open, n, limit, tick]);
+  if (!n) return null;
+  return (
+    <li className="mx-leftout">
+      <details open={open} onToggle={e => setOpen((e.target as HTMLDetailsElement).open)}>
+        <summary>Left out ({n})</summary>
+        <p className="small muted">Roles from job boards that ask for more than your profile shows or pay under your
+          minimum. Autopilot won't apply to them.</p>
+        {open && !jobs && <p className="small muted"><Dots />Loading</p>}
+        <ul>{jobs?.map(j => (
+          <li key={j.id} className={j.id === current ? "on" : ""}>
+            <a href={`#/matches/${j.id}`} className="grow">
+              <strong className="mx-title">{j.title}</strong> <span className="mx-co">{j.company}</span>
+              <span className="mx-meta">{(j.hold_reason ?? "").replace(/^Left out: /, "")}</span>
+            </a>
+            <button className="btn sm" onClick={() => apply(j.id).then(() => setTick(t => t + 1))}>Apply anyway</button>
+          </li>))}
+        </ul>
+        {jobs && n > jobs.length && <button className="link" onClick={() => setLimit(limit + 100)}>Show {Math.min(100, n - jobs.length)} more</button>}
+      </details>
+    </li>
+  );
 }
 
 export default function Matches({ selected }: { selected?: string }) {
@@ -110,6 +153,7 @@ export default function Matches({ selected }: { selected?: string }) {
           {data && data.total > data.jobs.length && (
             <li className="empty-li"><button className="link" onClick={() => setLimit(limit + 60)}>Show {Math.min(60, data.total - data.jobs.length)} more</button></li>
           )}
+          {data && <LeftOut n={data.left_out} current={current} apply={id => run("autopilot", [id])} />}
         </ul>
         <div className="mx-detail">
           {current ? <JobPage id={current} embedded /> : <p className="muted pad">Pick a role to see it here.</p>}

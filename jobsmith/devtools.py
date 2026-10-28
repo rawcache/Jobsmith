@@ -116,6 +116,15 @@ def seed_here(setup: bool = False) -> None:
                   "description": f"{co} is hiring a {title}.\n\nRequirements\n- Python or C++\n- Git and Linux\n\n"
                                  f"Responsibilities\n- Ship features with a small team\n\n" + (f"Pay: {pay}." if pay else "")},
                  now - 86400 * rnd.randint(0, 40))
+    # Two job board roles screened out for Alex, under "Left out" on Matches.
+    for jid, co, title, kind, why in (
+            ("demo-left-senior", "Kestrel AI", "Senior Machine Learning Engineer", "senior",
+             '"Senior" in the title: more senior than you\'re looking for'),
+            ("demo-left-years", "Lattice Quant", "Quant Developer", "experience", "Asks for 5+ years of experience")):
+        _add_job({"id": jid, "company": co, "title": title, "category": "Software", "ats": "lever", "status": "left_out",
+                  "url": f"https://jobs.lever.co/example/{jid}", "hold_reason": "Left out: " + why,
+                  "description": f"{co} is hiring a {title}.\n\nRequirements\n- 5+ years of experience"}, now - 86400 * 2)
+        db.x("UPDATE jobs SET left_out=? WHERE id=?", (kind, jid))
     from . import network
     network.import_csv("First Name,Last Name,URL,Email Address,Company,Position,Connected On\n"
                        "Priya,Natarajan,https://www.linkedin.com/in/example-priya,,Acme Robotics,Senior Robotics Engineer,01 Mar 2025\n"
