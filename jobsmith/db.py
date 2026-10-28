@@ -161,6 +161,8 @@ def conn() -> sqlite3.Connection:
             c.execute("ALTER TABLE jobs ADD COLUMN eligibility TEXT NOT NULL DEFAULT '{}'")
         if "traps" not in cols:        # lines in the posting aimed at AI, found when it was fetched
             c.execute("ALTER TABLE jobs ADD COLUMN traps TEXT NOT NULL DEFAULT '[]'")
+        if "original" not in cols:     # the posting as written, hidden lines included, kept only when it has traps
+            c.execute("ALTER TABLE jobs ADD COLUMN original TEXT NOT NULL DEFAULT ''")
         dcols = {r[1] for r in c.execute("PRAGMA table_info(drafts)").fetchall()}
         if "model" not in dcols:
             c.execute("ALTER TABLE drafts ADD COLUMN model TEXT")
