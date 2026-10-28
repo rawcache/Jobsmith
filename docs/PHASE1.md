@@ -111,11 +111,18 @@ issue), and commit the tick with the work.
 
 ## 4. Skills from any posting ([#20](https://github.com/rawcache/Jobsmith/issues/20)), minimal
 
-- [ ] Replace the fixed engineering word list in `insights.py` so skills come from any role's posting, and the
+- [x] Replace the fixed engineering word list in `insights.py` so skills come from any role's posting, and the
       company's own name never counts.
-- [ ] Tests: the saved Figma AE posting doesn't report "Figma" or "networking" as skills; an engineering posting
+      Evidence: [dfe43e3](https://github.com/rawcache/Jobsmith/commit/dfe43e3): a vocabulary per kind of role (engineering, sales, design, product, data, marketing) picked
+      from the title, still no AI; engineering's plain-English words ("networking", "performance") only in
+      engineering postings; the company's own name skipped; ties broken in a fixed order.
+- [x] Tests: the saved Figma AE posting doesn't report "Figma" or "networking" as skills; an engineering posting
       still extracts its real skills. No new breakdown UI (that's Phase 2, with
       [#6](https://github.com/rawcache/Jobsmith/issues/6)).
+      Evidence: `tests/test_core.py`: the Figma AE posting now asks for discovery, value selling, pipeline
+      generation, account planning, deal qualification, SaaS, closing and sales cycles, with no Figma, networking,
+      performance or communication; the saved Acme engineering posting still gets Python, C++, OpenCV and AWS;
+      software-sales, mixed ML/data and company-name cases; the same score under any hash seed. [CI run](https://github.com/rawcache/Jobsmith/actions/runs/40644500332).
 
 ## 5. Finding jobs through public job boards
 
