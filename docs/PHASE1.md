@@ -109,6 +109,19 @@ issue), and commit the tick with the work.
       Evidence: [docs/design/real-browser.md](design/real-browser.md) ([2be612f](https://github.com/rawcache/Jobsmith/commit/2be612f)).
       All of item 3: [CI run](https://github.com/rawcache/Jobsmith/actions/runs/40642820972).
 
+## 3b. Supervised first run
+
+- [x] The first real (non-practice) autopilot submission, and the first on each new job site, stops at the filled
+      form and shows every answer with its source. It's sent only after the user approves it in the dashboard or the
+      terminal; after that, autopilot submits on that site on its own within the caps. Tests.
+      Evidence: [78897c5](https://github.com/rawcache/Jobsmith/commit/78897c5). `guardrails.first_run_reason` holds
+      the run, the job page's "Approve and send" panel and `/review`'s `s` approve it, and the site is trusted only
+      once the confirmation lands. Tests: `test_autopilots_first_submission_waits_for_your_approval` (test_fill.py),
+      twelve `test_guardrails.py` tests from `test_first_submission_and_first_on_each_site_need_your_approval` to
+      `test_after_a_refill_the_site_is_trusted_only_once_it_lands` (multi-page, closed tab, double click, failed
+      click, files swapped), and the `/review` approval test in test_tuiapp.py.
+      [CI run](https://github.com/rawcache/Jobsmith/actions/runs/40750079559).
+
 ## 4. Skills from any posting ([#20](https://github.com/rawcache/Jobsmith/issues/20)), minimal
 
 - [x] Replace the fixed engineering word list in `insights.py` so skills come from any role's posting, and the
