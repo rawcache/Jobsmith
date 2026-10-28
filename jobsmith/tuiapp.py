@@ -1071,7 +1071,10 @@ class Jobsmith(App):
         try:
             if text == "/sync":
                 r = self.http.post("/api/sources/sync", timeout=600).json()
-                lines = [f"{x.get('source', '')}: {x.get('error') or str(x.get('added', 0)) + ' new'}" for x in r.get("results", [])]
+                from .boards import left_out_words
+                lines = [f"{x.get('source', '')}: {x.get('error') or str(x.get('added', 0)) + ' new'}"
+                         + (f", {x['left_out']} left out ({left_out_words(x.get('why') or {})})" if x.get("left_out") else "")
+                         for x in r.get("results", [])]
             else:
                 r = self.http.post("/api/command", json={"text": text}, timeout=600).json()
                 lines = r.get("log", []) or [r.get("detail", "Done.")]

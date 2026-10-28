@@ -22,7 +22,8 @@ def job_id_for(url: str, company: str, title: str) -> str:
 
 
 def add_source(url: str) -> dict:
-    kind = "simplify_github" if "github.com" in url else "url"
+    from . import boards
+    kind = "simplify_github" if "github.com" in url else "board" if boards.board_of(url) else "url"
     db.x("INSERT OR IGNORE INTO sources(kind, url, active) VALUES(?,?,1)", (kind, url.strip()))
     return db.q1("SELECT * FROM sources WHERE url=?", (url.strip(),))
 
@@ -86,6 +87,9 @@ async def _fetch_readme_rows(owner: str, repo: str, client: httpx.AsyncClient) -
 
 
 async def sync_source(source: dict) -> dict:
+    from . import boards
+    if boards.board_of(source["url"]):          # a company's Greenhouse, Lever or Ashby board, read as JSON
+        return await boards.sync(source)
     owner_repo = _repo(source["url"])
     async with httpx.AsyncClient(headers=UA, timeout=60, follow_redirects=True) as client:
         if owner_repo:

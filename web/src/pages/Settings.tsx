@@ -8,7 +8,9 @@ import { Icon, Switch } from "../ui";
 
 
 type S = Record<string, any>;
-type Source = { id: number; url: string; active: number; last_synced: number | null; last_count: number | null };
+type Source = { id: number; url: string; kind: string; active: number; last_synced: number | null; last_count: number | null };
+// A company's own job board on Greenhouse, Lever or Ashby (not one posting on it).
+const BOARD = /^(https?:\/\/)?((job-)?boards\.(eu\.)?greenhouse\.io|jobs\.(eu\.)?lever\.co|jobs\.ashbyhq\.com)\/[^/?#]+\/?$/i;
 
 export default function Settings({ focus }: { focus?: string }) {
   const { refresh, status } = useContext(StatusCtx);
@@ -22,8 +24,9 @@ export default function Settings({ focus }: { focus?: string }) {
     const v = newSrc.trim();
     setAdding(true);
     try {
-      if (/github\.com\/[^/]+\/[^/]+/.test(v)) {
-        await api.post("/api/sources", { url: v }); setSaved("List added. Checking it now.");
+      if (/github\.com\/[^/]+\/[^/]+/.test(v) || BOARD.test(v)) {
+        const r = await api.post<{ added?: number; left_out?: number; error?: string }>("/api/sources", { url: v });
+        setSaved(r.error ? r.error : r.left_out != null ? `Board added: ${r.added ?? 0} roles that fit, ${r.left_out} left out (too senior, more experience, or pay under your minimum).` : "List added. Checking it now.");
       } else {
         const r = await api.post<{ log: string[] }>("/api/command", { text: /^https?:/.test(v) ? v : `find roles at ${v}` });
         setSaved(r.log.slice(-1)[0] ?? "Added.");
@@ -124,11 +127,12 @@ export default function Settings({ focus }: { focus?: string }) {
         <p className="small muted">Jobsmith checks these lists for new roles on its own. You can add:</p>
         <ul className="small src-kinds">
           <li><strong>A GitHub job list</strong>, like SimplifyJobs' internship and new grad lists. Checked every few hours.</li>
+          <li><strong>A company's job board</strong> on Greenhouse, Lever or Ashby, like boards.greenhouse.io/figma, jobs.lever.co/palantir or jobs.ashbyhq.com/ramp. Roles too senior for you, asking for more experience than you have, or paying under your minimum are left out before anything opens.</li>
           <li><strong>A company name</strong>, like "NVIDIA" or "Jane Street". Jobsmith finds their open roles that fit you and starts on them.</li>
           <li><strong>A link</strong> to one job or a careers page. Jobsmith reads it and starts the application.</li>
         </ul>
         <ul className="rows">{src.filter(x => x.active).map(x => (
-          <li key={x.id} className="src"><Icon name="github" size={18} /><a className="grow" href={x.url} target="_blank" rel="noreferrer">{x.url.replace("https://github.com/", "")}</a>
+          <li key={x.id} className="src"><Icon name={x.kind === "board" ? "globe" : "github"} size={18} /><a className="grow" href={x.url} target="_blank" rel="noreferrer">{x.url.replace(/^https:\/\/(github\.com\/)?/, "")}</a>
             <span className="small muted">{x.last_synced ? `${x.last_count} roles` : "not checked yet"}</span>
             <button className="btn ghost sm" onClick={() => api.del(`/api/sources/${x.id}`).then(load)}>Remove</button></li>))}
         </ul>
