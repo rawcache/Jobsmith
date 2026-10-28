@@ -53,6 +53,11 @@
   bar show "Under your fit bar" and autopilot skips them; pick one yourself and it still applies.
 
 ### Fixed
+- On Greenhouse's application form, the extension's Autofill now fills the dropdowns: phone Country, Location
+  (City) from the form's own city search ("Boston, MA" picks "Boston, Massachusetts, United States"), and Yes/No
+  questions. They used to all land under "Needs you": Greenhouse opens its menus when a key or the mouse button
+  comes back up, and Autofill only pressed down. A box with no option matching your answer still waits for you;
+  Autofill never picks the first option instead.
 - Enter in the terminal's `/matches` now applies to the highlighted role. The table took the key for itself,
   so nothing happened.
 - Resume match reads each posting for the skills its kind of role asks for: sales (discovery, value selling,

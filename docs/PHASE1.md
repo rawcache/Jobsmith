@@ -158,8 +158,9 @@ issue), and commit the tick with the work.
 
 ## 6. Greenhouse dropdowns and location autocomplete ([#19](https://github.com/rawcache/Jobsmith/issues/19))
 
-- [ ] A small page-context script, injected only on the listed job-site hosts, drives react-select so Country,
-      Location (City) and other dropdowns get filled.
+- [ ] The extension drives react-select so Country, Location (City) and other dropdowns get filled. (Planned as a
+      page-context script; on the live form a whole key press from the content script is enough, because Greenhouse
+      opens its menus on key-up and mouse-up and the extension only sent key-down. See #19.)
 - [ ] Autopilot's Playwright runner uses real clicks for the same fields.
 - [ ] Tests on the saved Figma form: Country gets "United States", Location gets "Boston, MA" from the
       autocomplete, and anything without a confident match stays under "Needs you".

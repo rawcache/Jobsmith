@@ -72,12 +72,16 @@ async def answers(url: str, fields: list[dict], title: str = "", company: str = 
             kind = "cover_letter" if "cover" in f["label"].lower() else "transcript" if "transcript" in f["label"].lower() else "resume"
             out.append({"id": f["field"], "file": kind, "kind": "file"})
             continue
+        qkind = classify.question_kind(f["label"], f["qtype"], f["options"])
         out.append({"id": f["field"], "value": r.get("answer", ""), "kind": r.get("kind", ""),
                     "confidence": r.get("confidence", 0), "issues": r.get("issues", []),
                     # held: left blank because the answer didn't fit; check: filled, but you should read it.
                     # qkind: what the question asks for, so the extension checks the same thing (one set of rules).
-                    "hold": r.get("held"), "check": r.get("check"),
-                    "qkind": classify.question_kind(f["label"], f["qtype"], f["options"])})
+                    "hold": r.get("held"), "check": r.get("check"), "qkind": qkind,
+                    # pick: the option to look for in a place lookup ("Boston, Massachusetts, United States" for
+                    # "Boston, MA"); the extension still types the city and picks only a matching option.
+                    **({"pick": draft.location_full(r.get("answer", ""))}
+                       if qkind == "location" and f["qtype"] == "select" and r.get("answer") else {})})
     pdf = profile.attachment_file()
     return {"job_id": jid, "company": company, "answers": out, "error": err,
             "resume": pdf.name if pdf else None}

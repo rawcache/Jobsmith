@@ -113,7 +113,10 @@
     const r = inRange(options, value); if (r >= 0) return r;
     const o = options.map(norm);
     let i = o.indexOf(v); if (i >= 0) return i;
-    i = o.findIndex(x => x.startsWith(v) || v.startsWith(x) && x.length > 1); if (i >= 0) return i;
+    // "United States" picks "United States +1", not a longer name that starts the same way
+    const starts = o.map((x, k) => [x, k]).filter(([x]) => x.startsWith(v)).sort((a, b) => a[0].length - b[0].length);
+    if (starts.length) return starts[0][1];
+    i = o.findIndex(x => v.startsWith(x) && x.length > 1); if (i >= 0) return i;
     if (/^(yes|no)$/.test(v)) { i = o.findIndex(x => x.split(" ")[0] === v || x.startsWith(v)); if (i >= 0) return i; }
     return o.findIndex(x => x.includes(v) || (v.length > 3 && v.includes(x)));
   }
@@ -132,12 +135,14 @@
     return [...document.querySelectorAll("[role='option']")].filter(visible);
   }
 
-  async function pick(el, value, waitMs) {
+  // wants: what to look for, best first (the engine's name for a place, then the answer as written)
+  async function pick(el, wants, waitMs) {
     for (let t = 0; t < waitMs / 200; t++) {
       await sleep(200);
       const opts = optionsNear(el);
       if (opts.length) {
-        const i = best(opts.map(o => o.innerText), value);
+        const texts = opts.map(o => o.innerText);
+        const i = [].concat(wants).map(w => best(texts, w)).find(k => k >= 0) ?? -1;
         if (i >= 0) { opts[i].scrollIntoView({ block: "nearest" }); opts[i].click(); return true; }
         return false;
       }
@@ -145,18 +150,27 @@
     return false;
   }
 
-  async function fillCombobox(el, value) {
+  // A whole key press. Greenhouse opens its menus on key-up (and mouse-up), not key-down: a key-down alone left
+  // every one of its dropdowns closed and under "Needs you" (#19).
+  const press = (el, key) => ["keydown", "keyup"].forEach(type =>
+    el.dispatchEvent(new KeyboardEvent(type, { key, code: key, bubbles: true, cancelable: true })));
+
+  // value: the answer, typed to search. want: the option to pick, when the list names it differently ("Boston,
+  // Massachusetts, United States" for "Boston, MA"). Only a matching option is picked, never the first one.
+  async function fillCombobox(el, value, want = value) {
+    const wants = want === value ? [value] : [want, value];
     el.focus(); el.click();
     // 1) open the full list and pick (works for ranges like GPA buckets)
-    el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", code: "ArrowDown", bubbles: true }));
-    if (await pick(el, value, 800)) return true;
+    press(el, "ArrowDown");
+    if (await pick(el, wants, 800)) return true;
     // 2) type to search: the whole answer, then its first words (long lists like schools and cities)
     for (const q of [value, value.split(/[,(]/)[0], value.split(" ").slice(0, 2).join(" ")]) {
       setNative(el, q);
-      if (await pick(el, value, 2500)) return true;
+      el.dispatchEvent(new KeyboardEvent("keyup", { key: q.slice(-1), bubbles: true }));
+      if (await pick(el, wants, 2500)) return true;
     }
     setNative(el, "");
-    el.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    press(el, "Escape");
     return false;
   }
 
@@ -199,7 +213,7 @@
       target.dispatchEvent(new Event("change", { bubbles: true }));
       return true;
     }
-    if (target.getAttribute("role") === "combobox" || target.getAttribute("aria-autocomplete") === "list") return fillCombobox(target, value);
+    if (target.getAttribute("role") === "combobox" || target.getAttribute("aria-autocomplete") === "list") return fillCombobox(target, value, a.pick || value);
     if (target.value && target.value.trim()) return true;   // never overwrite what you typed
     setNative(target, value);
     return true;
