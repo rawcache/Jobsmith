@@ -65,6 +65,8 @@ Pull requests that break one of these are closed, however useful they are otherw
 - No keys, tokens, cookies or `.env` files. `.gitignore` keeps the common ones out, and the `secrets` check
   (gitleaks) fails a push or pull request that contains a recognisable key or token. It can't catch everything,
   so look at `git status` before you commit.
+- Using Claude Code? You can opt in to a Codex review of your staged diff before each commit:
+  see [`scripts/hooks/README.md`](scripts/hooks/README.md).
 
 ## Pull requests
 
