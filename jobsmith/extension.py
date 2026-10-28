@@ -109,7 +109,8 @@ def context(url: str, title: str = "", site_name: str = "", text: str = "") -> d
     job = find(url)
     company = (job or {}).get("company") or company_guess(url, site_name)
     desc = (job or {}).get("description") or text
-    km = insights.keyword_match({"title": (job or {}).get("title") or title, "description": desc}, insights.resume_text())
+    km = insights.keyword_match({"title": (job or {}).get("title") or title, "company": company,
+                                 "category": (job or {}).get("category"), "description": desc}, insights.resume_text())
     people = network.at_company(company, 5) if company else []
     letter = letters.cover_text(job["id"]) if job else ""
     return {"known": bool(job), "job_id": (job or {}).get("id"), "company": company, "title": (job or {}).get("title") or title,

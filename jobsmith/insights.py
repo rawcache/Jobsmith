@@ -13,8 +13,16 @@ from . import db, network, profile
 from .config import DATA_DIR, RUNS_DIR
 
 # --------------------------------------------------------------------------- resume match
-# A fixed vocabulary keeps the match free (no AI tokens) and explainable.
-KEYWORDS = """
+# Skills come from a vocabulary for the kind of role the posting is (engineering, sales, design, product, data,
+# marketing), picked from its title. Fixed lists keep the match free (no AI tokens) and explainable. Words that are
+# skills in engineering and plain English elsewhere ("networking", "performance", "communication") are only in the
+# engineering list, so a sales posting's networking events never count. The company's own name never counts.
+def _words(s: str) -> list[str]:
+    return [k.strip() for k in s.replace("\n", "").split("|") if k.strip()]
+
+
+VOCAB = {
+    "engineering": _words("""
 Python|Java|C++|C#|C|Go|Golang|Rust|Kotlin|Swift|Scala|Ruby|PHP|R|MATLAB|Julia|TypeScript|JavaScript|SQL|Bash|Perl|Haskell|
 Verilog|SystemVerilog|VHDL|Chisel|HLS|Assembly|CUDA|OpenCL|Triton|
 React|Angular|AngularJS|Vue|Next.js|Node.js|Express|Django|Flask|FastAPI|Spring|Rails|.NET|GraphQL|REST|gRPC|HTML|CSS|
@@ -28,25 +36,86 @@ signal processing|DSP|power electronics|thermal|validation|verification|UVM|timi
 networking|TCP/IP|security|cryptography|robotics|ROS|ROS 2|SLAM|controls|Simulink|CAD|SolidWorks|
 object oriented|object-oriented|data structures|algorithms|APIs|API|microservices|backend|frontend|full stack|mobile|iOS|Android|
 testing|unit testing|automated testing|deployment|cloud|concurrency|multithreading|performance|low latency|
-agile|Scrum|Jira|Figma|Excel|Tableau|Power BI|A/B testing|product management|communication|leadership
-""".replace("\n", "").split("|")
-KEYWORDS = [k.strip() for k in KEYWORDS if k.strip()]
+agile|Scrum|Jira|Figma|Excel|Tableau|Power BI|A/B testing|product management|communication|leadership"""),
+    "sales": _words("""
+enterprise sales|SaaS|B2B|quota|pipeline generation|pipeline|prospecting|prospect|lead generation|cold calling|outbound|
+discovery|value selling|solution selling|consultative selling|MEDDIC|MEDDPICC|Challenger|sales methodology|
+deal qualification|closing|negotiation|forecasting|account planning|account plans|territory planning|book of business|
+new business|expansion|upsell|renewals|customer success|account management|C-level|executive relationships|
+multi-threading|sales cycles|Salesforce|HubSpot|Outreach|Salesloft|Gong|CRM|ZoomInfo|RFP|channel partners|
+go-to-market|demos|Excel"""),
+    "design": _words("""
+Figma|Sketch|Adobe XD|Photoshop|Illustrator|InDesign|After Effects|Creative Cloud|Framer|prototyping|prototypes|
+wireframing|wireframes|user research|usability testing|interaction design|visual design|UI design|UX design|
+product design|design systems|typography|accessibility|WCAG|information architecture|journey mapping|user flows|
+motion design|branding|portfolio|HTML|CSS|design thinking"""),
+    "product": _words("""
+roadmap|product strategy|product requirements|PRDs|user research|customer discovery|A/B testing|experimentation|
+metrics|KPIs|OKRs|SQL|analytics|Amplitude|Mixpanel|Looker|Jira|prioritization|go-to-market|user stories|agile|Scrum|
+wireframes|prototyping|Figma|market research|competitive analysis|stakeholder management|product launches"""),
+    "data": _words("""
+SQL|Python|R|Tableau|Power BI|Looker|Excel|statistics|statistical modeling|regression|experimentation|A/B testing|
+causal inference|dbt|Airflow|Snowflake|BigQuery|Redshift|data visualization|dashboards|machine learning|forecasting|
+ETL|data modeling|Pandas|NumPy|Spark|scikit-learn|Jupyter"""),
+    "marketing": _words("""
+SEO|SEM|content marketing|social media|email marketing|Google Analytics|Google Ads|HubSpot|Marketo|Salesforce|
+campaigns|copywriting|paid acquisition|lifecycle marketing|demand generation|marketing automation|market research|
+product marketing|positioning|messaging|go-to-market|analytics|A/B testing"""),
+}
+KEYWORDS = sorted(set().union(*VOCAB.values()))
+# Which vocabularies a posting gets, from its title. A title can be two ("Sales Engineer"); none means engineering.
+ROLES = [(name, re.compile(p, re.I)) for name, p in (
+    ("sales", r"\b(?:account executive|sales|business development|account manager|SDRs?|BDRs?|customer success|"
+              r"partnerships?)\b"),
+    ("design", r"\b(?:designer|UX|UI|user experience|visual design|product design)\b"),
+    ("product", r"\b(?:product manager|product management|product owner|APM|program manager)\b"),
+    ("data", r"\b(?:data analyst|data scientist|data science|analytics|business intelligence|business analyst)\b"),
+    ("marketing", r"\b(?:marketing|growth|content|brand|SEO)\b"),
+    ("engineering", r"\b(?:engineer\w*|developer|programmer|firmware|SWE|devops|SRE|research scientist)\b"),
+)]
+# Fields an engineering role is often in, but that a sales or product title can name too ("Software Sales", "AI
+# Product Manager"): engineering too, unless the title is for one of those business roles.
+TECH_FIELD = re.compile(r"\b(?:software|hardware|robotics|machine learning|ML|AI|quant\w*)\b", re.I)
+BUSINESS = {"sales", "product", "marketing", "design"}
+CATEGORY_ROLE = {"Product": "product"}
 # Words that are common English too: only count them in their exact case.
 CASE_SENSITIVE = {"C", "R", "Go", "ARM", "Spark", "Swift", "Rust", "Express", "REST", "API", "APIs", "Excel", "Julia",
                   "Spring", "Rails", "Triton", "Chisel", "LLM", "LLMs", "ROS", "DSP", "CAD", "thermal", "analog",
                   "testing", "cloud", "mobile", "performance", "validation", "verification", "security",
                   "communication", "leadership", "backend", "frontend", "controls", "statistics", "deployment",
-                  "networking", "concurrency", "agile"}
+                  "networking", "concurrency", "agile", "Outreach", "Gong", "Challenger", "Sketch", "Framer",
+                  "Illustrator", "Looker"}
 
 
 def _pattern(k: str) -> re.Pattern:
     flags = 0 if k in CASE_SENSITIVE else re.I
-    return re.compile(r"(?<![A-Za-z0-9+#.])" + re.escape(k) + r"(?![A-Za-z0-9+#])", flags)
+    # "value selling" also reads "value-selling"
+    body = re.escape(k).replace(r"\ ", r"[\s-]+").replace(r"\-", r"[\s-]+")
+    return re.compile(r"(?<![A-Za-z0-9+#.])" + body + r"(?![A-Za-z0-9+#])", flags)
 
 
 _PATTERNS = {k: _pattern(k) for k in KEYWORDS}
 SAME = {"Golang": "Go", "object-oriented": "object oriented", "AngularJS": "Angular", "LLMs": "LLM", "APIs": "API",
-        "ROS 2": "ROS"}
+        "ROS 2": "ROS", "prospect": "prospecting", "account plans": "account planning", "prototypes": "prototyping",
+        "wireframes": "wireframing"}
+
+
+def roles(job: dict) -> list[str]:
+    """The kinds of role this posting is, for picking which skills to look for."""
+    title = job.get("title") or ""
+    found = [name for name, pat in ROLES if pat.search(title)]
+    if "engineering" not in found and TECH_FIELD.search(title) and not BUSINESS & set(found):
+        found.append("engineering")
+    return found or [CATEGORY_ROLE.get(job.get("category") or "", "engineering")]
+
+
+def _own_name(company: str) -> set[str]:
+    """The company's name as a skill would read it: "Figma, Inc." is "figma"."""
+    norm = lambda s: re.sub(r"[^a-z0-9+#]", "", s.lower())
+    name = re.sub(r"[,.]?\s+(?:inc|llc|ltd|corp|corporation|co|gmbh|plc|technologies|labs)\.?$", "", (company or "").strip(),
+                  flags=re.I)
+    words = name.split()
+    return {n for n in (norm(name), norm(words[0]) if len(words) > 1 else "") if n}
 
 
 def resume_text() -> str:
@@ -58,9 +127,13 @@ def resume_text() -> str:
 def keyword_match(job: dict, resume: str | None = None, top: int = 16) -> dict:
     """Which of the posting's key skills your resume shows. Like a recruiter's quick skim."""
     text = f"{job.get('title', '')}\n{job.get('description', '')}"
+    own = _own_name(job.get("company") or "")
+    words = list(dict.fromkeys(k for r in roles(job) for k in VOCAB[r]))   # a fixed order, so ties break the same way
     counts: Counter = Counter()
-    for k, pat in _PATTERNS.items():
-        n = len(pat.findall(text))
+    for k in words:
+        if re.sub(r"[^a-z0-9+#]", "", k.lower()) in own:
+            continue                                     # Figma's own name isn't a skill its posting asks for
+        n = len(_PATTERNS[k].findall(text))
         if n:
             counts[SAME.get(k, k)] += n
     # skills named in the title count double

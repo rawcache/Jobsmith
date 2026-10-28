@@ -42,6 +42,10 @@
   bar show "Under your fit bar" and autopilot skips them; pick one yourself and it still applies.
 
 ### Fixed
+- Resume match reads each posting for the skills its kind of role asks for: sales (discovery, value selling,
+  pipeline generation, Salesforce), design, product, data and marketing, as well as engineering. On Figma's Account
+  Executive posting it used to list "Figma, networking, performance, communication". A company's own name never
+  counts as a skill, and words like "networking" and "performance" only count in engineering postings.
 - Greenhouse's Hispanic/Latino question and the phone country box are filled only from answers you confirmed on
   the Profile page. Before, an answer Jobsmith had inferred (like U.S. citizenship from your resume) could fill
   them before you confirmed it.
