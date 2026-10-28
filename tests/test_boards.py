@@ -15,7 +15,7 @@ SAVED = {"greenhouse": ("https://boards.greenhouse.io/figma", "greenhouse_figma.
 
 
 def _saved(kind: str):
-    return json.loads((FIXTURES / "boards" / SAVED[kind][1]).read_text())
+    return json.loads((FIXTURES / "boards" / SAVED[kind][1]).read_text(encoding="utf-8"))
 
 
 def _client(seen: list):
