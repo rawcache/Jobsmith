@@ -4,8 +4,9 @@ Jobsmith is an open-source, local job-hunt app: it finds roles, fills and submit
 helps with everything around them. The repo is github.com/rawcache/Jobsmith (MIT). Brand is "Jobsmith" in prose;
 the command, package, import and data folder are lowercase `jobsmith`.
 
-The roadmap lives in the user's Claude Project ("Jobsmith Roadmap"). The current phase and its checklist are in
-`docs/PHASE0.md`. Work through that file top to bottom and tick items off as they're done.
+Plan: `docs/ROADMAP.md` is the roadmap; the current phase's checklist is `docs/PHASE1.md`. Work only on the current
+phase. Anything from a later phase becomes an issue in that phase's milestone, not code. If a request conflicts with
+the roadmap's principles, stop and ask. Work through the checklist top to bottom and tick items off as they're done.
 
 ## Rules that never bend
 
@@ -76,7 +77,7 @@ blocks every outward action.
 ## Known gaps to keep honest
 
 - `ats.SUPPORTED` is only `{"greenhouse"}`; Lever and Ashby go through `fill/generic.py`. Public claims about which
-  sites work end to end must match what the tests prove (Phase 0 task).
+  sites work end to end must match what the tests prove.
 - Workday / iCIMS: filled page by page, stop at review; sign-in is the user's.
 
 ## Working with Codex
