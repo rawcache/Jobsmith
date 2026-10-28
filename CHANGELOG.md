@@ -17,6 +17,11 @@
   autopilot submits there on its own within your limits. Applications you send yourself don't count as approving.
 
 ### Added
+- Add a company's job board on Greenhouse, Lever or Ashby (`boards.greenhouse.io/figma`, `jobs.lever.co/palantir`,
+  `jobs.ashbyhq.com/ramp`) as a source, in Settings or by pasting it in the terminal. Jobsmith reads the board's
+  public JSON (no browser, nothing sent) and leaves out roles with senior titles, roles asking for more years of
+  experience than you have, and roles paying under your minimum (new in Job preferences: "Lowest pay you'd take").
+  Each sync says how many it left out and why. A posting that doesn't state pay still counts.
 - Every submission keeps an audit trail: each field, the answer sent, where it came from (your resume, profile,
   writing, an answer you approved before, something you typed, or a file you added) and whether the answer was the
   right kind for the question. See it under "What was sent" on the application's page, or export it as JSON.

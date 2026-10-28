@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 
-from . import db, jobdetail, llm, match, profile, runner, sources
+from . import boards, db, jobdetail, llm, match, profile, runner, sources
 from .llm import LLMError, complete_json
 
 URL_RE = re.compile(r"https?://[^\s<>\"')]+")
@@ -123,11 +123,17 @@ async def run(text: str, mode: str | None = None) -> dict:
     urls = URL_RE.findall(text)
     for u in urls:
         u = u.rstrip(".,")
-        if "github.com" in u:
+        if "github.com" in u or boards.board_of(u):
             src = sources.add_source(u)
             res = await sources.sync_source(src)
             match.rescore()
-            log.append(f"Added the list {u}: {res['listings']} postings ({res['added']} new).")
+            if res.get("error"):
+                log.append(f"Couldn't read {u}: {res['error']}.")
+                continue
+            log.append(f"Added the list {u}: {res['listings']} postings ({res['added']} new)." if "left_out" not in res
+                       else f"Added the job board {u}: {res['listings']} open roles, {res['added']} new"
+                            + (f"; left out {res['left_out']} ({boards.left_out_words(res['why'])})." if res["left_out"]
+                               else "."))
             rows = db.q("""SELECT id FROM jobs WHERE source_id=? AND active=1 AND status IN ('new','fetched')
                            AND COALESCE(fit_score,0) >= ?""", (src["id"], db.get_setting("min_fit_score") or 40))
             found += [r["id"] for r in rows]

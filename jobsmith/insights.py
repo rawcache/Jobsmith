@@ -366,7 +366,7 @@ def posting_sections(description: str) -> list[dict]:
 
 
 # --------------------------------------------------------------------------- the facts row on a job page
-PAY = re.compile(r"\$\s?(\d{2,3}(?:,\d{3})+|\d{2,3}(?:\.\d+)?\s?[kK]|\d{2,3}(?:\.\d{1,2})?)"
+PAY = re.compile(r"(?<![A-Za-z])\$\s?(\d{2,3}(?:,\d{3})+|\d{2,3}(?:\.\d+)?\s?[kK]|\d{2,3}(?:\.\d{1,2})?)"
                  r"(?:\s*(?:-|–|—|to)\s*\$?\s?(\d{2,3}(?:,\d{3})+|\d{2,3}(?:\.\d+)?\s?[kK]|\d{2,3}(?:\.\d{1,2})?))?"
                  r"\s*(?:USD\s*)?(?:/|per\s+|an?\s+)?\s*(hour|hr|year|yr|annually|annum)?", re.I)
 LEVELS = [("Intern", r"\bintern(ship)?\b|\bco-?op\b"), ("New grad", r"new ?grad|university grad|early career|entry[- ]level|\bgraduate\b"),
@@ -382,8 +382,9 @@ def _fmt(v: float, hourly: bool) -> str:
     return f"${v:,.0f}" if hourly or v < 1000 else f"${v / 1000:,.0f}k"
 
 
-def pay_of(text: str) -> str:
-    """'$45 - $55/hr' or '$140k - $180k/yr' from a posting, or ''. Ignores small amounts like '$5 credit'."""
+def pay_range(text: str) -> tuple[float, float, bool] | None:
+    """(low, high, hourly) for the first pay range in US dollars a posting states, or None. Ignores small amounts
+    like '$5 credit' and monthly stipends it can't place."""
     for m in PAY.finditer(text or ""):
         lo = _money(m.group(1))
         hi = _money(m.group(2)) if m.group(2) else None
@@ -393,9 +394,17 @@ def pay_of(text: str) -> str:
             continue
         if not hourly and lo < 20000:
             continue
-        rng = _fmt(lo, hourly) + (f" - {_fmt(hi, hourly)}" if hi and hi > lo else "")
-        return rng + ("/hr" if hourly else "/yr")
-    return ""
+        return lo, (hi if hi and hi > lo else lo), hourly
+    return None
+
+
+def pay_of(text: str) -> str:
+    """'$45 - $55/hr' or '$140k - $180k/yr' from a posting, or ''."""
+    r = pay_range(text)
+    if not r:
+        return ""
+    lo, hi, hourly = r
+    return _fmt(lo, hourly) + (f" - {_fmt(hi, hourly)}" if hi > lo else "") + ("/hr" if hourly else "/yr")
 
 
 def job_facts(job: dict) -> dict:

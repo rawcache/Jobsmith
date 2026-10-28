@@ -108,6 +108,15 @@ export default function Preferences() {
       </section>
 
       <section className="card">
+        <h2>Lowest pay you'd take</h2>
+        <label className="field">Yearly, in US dollars (hourly and monthly pay is counted as a full year)
+          <input inputMode="numeric" defaultValue={s.min_pay ? String(s.min_pay) : ""} placeholder="No minimum"
+            onBlur={e => { const v = e.target.value.trim().toLowerCase();         // "120000", "$120,000" or "120k"
+              put({ min_pay: Math.max(0, Math.round((parseFloat(v.replace(/[^0-9.]/g, "")) || 0) * (/k$/.test(v) ? 1000 : 1))) }); }} /></label>
+        <p className="small muted">Roles on a company's job board that say they pay less are left out before anything opens. Postings that don't say still count.</p>
+      </section>
+
+      <section className="card">
         <h2>Companies to skip</h2>
         <label className="field">Never apply to
           <input defaultValue={(s.exclude_companies ?? []).join(", ")} onBlur={listOf("exclude_companies")} placeholder="Company names, separated by commas" /></label>

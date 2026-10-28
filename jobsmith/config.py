@@ -92,6 +92,7 @@ DEFAULT_SETTINGS: dict = {
     "location_choices": [],            # the named places picked in setup or Settings ("Remote", "New York", …)
     "target_locations": [],            # empty = anywhere; substrings like "CA", "Remote", "New York"
     "exclude_companies": [],
+    "min_pay": 0,                      # lowest yearly pay in USD you'd take; job boards' roles under it are left out
     "min_fit_score": 40,
     # --- Limits -----------------------------------------------------------
     "max_applications_per_day": 20,     # autopilot's caps (see guardrails.py); 0 = no limit
