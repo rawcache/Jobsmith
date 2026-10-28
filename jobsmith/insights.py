@@ -42,13 +42,13 @@ enterprise sales|SaaS|B2B|quota|pipeline generation|pipeline|prospecting|prospec
 discovery|value selling|solution selling|consultative selling|MEDDIC|MEDDPICC|Challenger|sales methodology|
 deal qualification|closing|negotiation|forecasting|account planning|account plans|territory planning|book of business|
 new business|expansion|upsell|renewals|customer success|account management|C-level|executive relationships|
-multi-threading|sales cycles|Salesforce|HubSpot|Outreach|Salesloft|Gong|CRM|ZoomInfo|RFP|channel partners|
-go-to-market|demos|Excel"""),
+multi-threading|multi-threaded|sales cycles|sales process|Force Management|mid-market|Salesforce|HubSpot|Outreach|
+Salesloft|Gong|CRM|ZoomInfo|RFP|channel partners|go-to-market|demos|Excel"""),
     "design": _words("""
 Figma|Sketch|Adobe XD|Photoshop|Illustrator|InDesign|After Effects|Creative Cloud|Framer|prototyping|prototypes|
 wireframing|wireframes|user research|usability testing|interaction design|visual design|UI design|UX design|
 product design|design systems|typography|accessibility|WCAG|information architecture|journey mapping|user flows|
-motion design|branding|portfolio|HTML|CSS|design thinking"""),
+motion design|branding|portfolio|HTML|CSS|design thinking|design critiques|design principles|front-end development"""),
     "product": _words("""
 roadmap|product strategy|product requirements|PRDs|user research|customer discovery|A/B testing|experimentation|
 metrics|KPIs|OKRs|SQL|analytics|Amplitude|Mixpanel|Looker|Jira|prioritization|go-to-market|user stories|agile|Scrum|
@@ -97,7 +97,7 @@ def _pattern(k: str) -> re.Pattern:
 _PATTERNS = {k: _pattern(k) for k in KEYWORDS}
 SAME = {"Golang": "Go", "object-oriented": "object oriented", "AngularJS": "Angular", "LLMs": "LLM", "APIs": "API",
         "ROS 2": "ROS", "prospect": "prospecting", "account plans": "account planning", "prototypes": "prototyping",
-        "wireframes": "wireframing"}
+        "wireframes": "wireframing", "multi-threaded": "multi-threading"}
 
 
 def roles(job: dict) -> list[str]:
