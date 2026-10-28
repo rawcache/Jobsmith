@@ -461,6 +461,94 @@ def test_keyword_match_counts_what_the_resume_shows():
     assert "Go" not in insights.keyword_match({"title": "", "description": "ready to go build things"}, "")["missing"]
 
 
+def _figma_ae() -> dict:
+    """The saved Figma Account Executive posting (tests/fixtures/greenhouse_board_posting.html)."""
+    from bs4 import BeautifulSoup
+    from conftest import FIXTURES
+    soup = BeautifulSoup((FIXTURES / "greenhouse_board_posting.html").read_text(), "html.parser")
+    return {"title": "Account Executive, Enterprise", "company": "Figma",
+            "description": soup.select_one(".job__description").get_text("\n")}
+
+
+def test_a_sales_posting_gets_sales_skills_not_the_company_or_plain_words():
+    """#20: the Figma AE posting once matched on "Figma, networking, performance, communication"."""
+    from jobsmith import insights
+    job = _figma_ae()
+    m = insights.keyword_match(job, resume="")
+    wanted = set(m["missing"])
+    assert insights.roles(job) == ["sales"]
+    assert not wanted & {"Figma", "networking", "performance", "communication"}, wanted
+    assert {"discovery", "value selling", "pipeline generation", "account planning", "deal qualification", "SaaS",
+            "closing", "sales cycles"} <= wanted, wanted
+    m = insights.keyword_match(job, resume="Ran discovery calls and value-selling for a SaaS startup; closed 40 deals.")
+    assert {"discovery", "value selling", "SaaS"} <= set(m["matched"])
+
+
+def test_a_company_never_counts_as_its_own_skill():
+    from jobsmith import insights
+    job = {"title": "Product Designer", "company": "Figma, Inc.", "description": "Prototype in Figma and Sketch. "
+           "Run usability testing and build our design systems."}
+    wanted = set(insights.keyword_match(job, resume="")["missing"])
+    assert "Figma" not in wanted and {"Sketch", "usability testing", "design systems"} <= wanted
+    other = dict(job, company="Canva")                     # at another company, Figma is a design skill
+    assert "Figma" in insights.keyword_match(other, resume="")["missing"]
+
+
+def test_an_engineering_posting_still_gets_its_real_skills():
+    import json
+    from jobsmith import insights, jobdetail
+    from conftest import FIXTURES
+    data = json.loads((FIXTURES / "greenhouse_job.json").read_text())
+    job = {"title": data["title"], "company": data["company_name"],
+           "description": jobdetail.html_to_text(data["content"])}
+    assert insights.roles(job) == ["engineering"]
+    wanted = set(insights.keyword_match(job, resume="")["missing"])
+    assert {"Python", "C++", "OpenCV", "AWS"} <= wanted, wanted
+    assert "networking" in insights.keyword_match(
+        {"title": "Network Engineer", "description": "Linux networking and TCP/IP."}, resume="")["missing"]
+
+
+@pytest.mark.parametrize("title, roles", [
+    ("Account Executive, Enterprise", ["sales"]), ("Sales Engineer", ["sales", "engineering"]),
+    ("Product Designer", ["design"]), ("Product Management Intern", ["product"]),
+    ("Data Analyst Intern", ["data"]), ("Growth Marketing Intern", ["marketing"]),
+    ("Software Engineering Intern", ["engineering"]), ("Machine Learning Intern", ["engineering"]),
+    ("Embedded Software Engineer, New Grad", ["engineering"]), ("Summer Intern", ["engineering"]),
+    ("Software Sales Account Executive", ["sales"]), ("AI Product Manager", ["product"]),
+    ("Hardware Intern", ["engineering"]), ("Quant Developer Intern", ["engineering"]),
+    ("Machine Learning / Data Science Intern", ["data", "engineering"]),
+])
+def test_which_skills_a_posting_is_read_for(title, roles):
+    from jobsmith import insights
+    assert insights.roles({"title": title}) == roles
+
+
+def test_a_software_sales_posting_doesnt_count_engineering_plain_words():
+    from jobsmith import insights
+    job = {"title": "Software Sales Account Executive", "description": "Networking events, strong performance and "
+           "communication. Run discovery and own your pipeline."}
+    wanted = set(insights.keyword_match(job, resume="")["missing"])
+    assert not wanted & {"networking", "performance", "communication"} and {"discovery", "pipeline"} <= wanted
+
+
+def test_a_mixed_ml_and_data_posting_keeps_its_engineering_skills():
+    from jobsmith import insights
+    job = {"title": "Machine Learning / Data Science Intern", "description": "PyTorch, TensorFlow and CUDA; SQL and "
+           "Tableau dashboards."}
+    assert {"PyTorch", "TensorFlow", "CUDA", "SQL", "Tableau"} <= set(insights.keyword_match(job, resume="")["missing"])
+
+
+def test_the_same_posting_scores_the_same_in_every_process():
+    """More skills tie than fit in the top 16: which ones count mustn't depend on Python's hash seed."""
+    import subprocess
+    import sys
+    code = ("from jobsmith import insights; import json; print(json.dumps(insights.keyword_match({'title': 'Software "
+            "Engineer', 'description': ' '.join(insights.VOCAB['engineering'][:40])}, resume='Python Java Go')))")
+    runs = {subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True,
+                           env={**__import__("os").environ, "PYTHONHASHSEED": seed}).stdout for seed in ("1", "2", "3")}
+    assert len(runs) == 1, runs
+
+
 def test_linkedin_connections_import_and_company_match():
     from jobsmith import network
     csv_text = ("Notes:\n\"When exporting your connection data, you may notice...\"\n\n"

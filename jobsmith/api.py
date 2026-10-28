@@ -812,7 +812,8 @@ def list_jobs(status: str = "", category: str = "", ats_name: str = "", min_scor
         r["gate"] = guardrails.fit_gate(r, bar)
         r["ai_blocked"] = r["id"] in ai_blocked
         r["tokens"] = tok.get(r["id"], 0)
-        km = insights.keyword_match({"title": r["title"], "description": descs.get(r["id"], "")}, resume)
+        km = insights.keyword_match({"title": r["title"], "company": r["company"], "category": r.get("category"),
+                                     "description": descs.get(r["id"], "")}, resume)
         r["match"], r["match_hits"], r["match_total"] = km["score"], len(km["matched"]), km["total"]
         r["connections"] = conns.get(r["company"], 0)
         r["pay"] = insights.pay_of(descs.get(r["id"], ""))
