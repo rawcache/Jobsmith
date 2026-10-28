@@ -28,6 +28,16 @@
 - A visible line that only asks you to use a word or open your answer a certain way ("Mention the word 'otter' in
   your answer") is labelled "may be an attention check for you — answer it yourself" under "Needs you", instead of
   "aimed at AI tools". Autopilot still never follows it or sends the application on its own.
+- Every submission keeps its proof: the confirmation page's address, title and text (and a screenshot) when
+  autopilot or the extension sees one, and the "we received your application" email when your inbox is connected.
+  See it under "What was sent". A confirmation email also settles one autopilot clicked Submit on without seeing a
+  confirmation page.
+- `jobsmith stats`: what you submitted over the last 30 days (`--days N`), how many were confirmed by a page, an
+  email or a reply, and the share of good matches autopilot sent without you, counting every one it held, hit a
+  limit on, or failed.
+- `jobsmith audit`: 50 submitted applications picked at random (`-n N`), every answer with what it traces to on
+  your resume, profile or writing. Any answer that doesn't trace is flagged, and the command exits with 1. Add
+  `--practice` to either command to try it on the practice copy.
 - Each match says whether it clears your fit bar and why, with what counts for it and against it. Matches under the
   bar show "Under your fit bar" and autopilot skips them; pick one yourself and it still applies.
 

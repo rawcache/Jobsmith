@@ -142,7 +142,7 @@ def seed_here(setup: bool = False) -> None:
               {"field": "project", "label": "Tell us about a robotics project you're proud of.", "qtype": "textarea", "required": False}]
     draft.save_results("demo-acme", fields, {
         "first_name": {"kind": "standard", "answer": "Alex", "confidence": 1, "rationale": "From your profile"},
-        "email": {"kind": "standard", "answer": "alex.rivera@example.com", "confidence": 1, "rationale": "From your profile"},
+        "email": {"kind": "standard", "answer": "alex.rivera@example.edu", "confidence": 1, "rationale": "From your profile"},
         "resume": {"kind": "file", "answer": "Alex_Rivera_resume.pdf", "confidence": 1, "rationale": "Your resume"},
         "authorized": {"kind": "answer_bank", "answer": "Yes", "confidence": 1, "rationale": "You set this in your profile"},
         "why": {"kind": "generated", "answer": "I want to work on hardware and software that has to be fast and has to be right. Acme's "
@@ -163,7 +163,7 @@ def seed_here(setup: bool = False) -> None:
         ("data", "Tell us about a data pipeline you've built.", "textarea"), ("heard", "How did you hear about us?", "text"))]
     draft.save_results("demo-soylent", sent, {
         "first_name": {"kind": "answer_bank", "canon": "first_name", "answer": "Alex", "confidence": 1},
-        "email": {"kind": "answer_bank", "canon": "email", "answer": "alex.rivera@example.com", "confidence": 1},
+        "email": {"kind": "answer_bank", "canon": "email", "answer": "alex.rivera@example.edu", "confidence": 1},
         "resume": {"kind": "file", "canon": "resume", "answer": "primary resume", "confidence": 1},
         "authorized": {"kind": "answer_bank", "canon": "work_authorized_us", "answer": "Yes", "confidence": 1},
         "data": {"kind": "generated", "answer": "At Northwind Labs I built an image pipeline that ingested 600,000+ images "
@@ -175,6 +175,21 @@ def seed_here(setup: bool = False) -> None:
     run = db.q1("SELECT id FROM runs WHERE job_id='demo-soylent' AND kind='submit'")
     if run:
         audit.record("demo-soylent", run["id"], "autopilot")
+    # What `jobsmith stats --practice` reads: the jobs autopilot picked, and proof the sent ones landed.
+    for jid in ("demo-northwind", "demo-globex", "demo-initech", "demo-stark", "demo-soylent"):
+        r = db.q1("SELECT id FROM runs WHERE job_id=? AND kind='submit'", (jid,))
+        if r and not db.q1("SELECT 1 FROM audit_submissions WHERE run_id=?", (r["id"],)):
+            audit.record(jid, r["id"], "autopilot" if jid != "demo-initech" else "you")
+    for jid, title in (("demo-northwind", "Thanks for applying | Northwind"), ("demo-globex", "Application submitted"),
+                       ("demo-soylent", "Thank you for applying to Soylent Systems")):
+        audit.log_confirmation(jid, "page", url=f"https://boards.greenhouse.io/example/{jid}/confirmation", title=title,
+                               text="Thank you for applying. We've received your application.")
+    for jid, good in (("demo-northwind", 1), ("demo-globex", 1), ("demo-stark", 1), ("demo-soylent", 1),
+                      ("demo-acme", 1), ("demo-wayne", 1), ("demo-umbrella", 1), ("demo-hooli", 0)):
+        audit.log_considered(jid, bool(good), 82 if good else 41)
+        sent = db.q1("SELECT started_at FROM runs WHERE job_id=? AND kind='submit'", (jid,))
+        picked = (sent["started_at"] if sent else now) - 1800          # autopilot picks a job before it sends it
+        db.x("UPDATE considered SET at=? WHERE job_id=?", (picked, jid))
     match.rescore()
 
 

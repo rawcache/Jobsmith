@@ -171,6 +171,24 @@ async def test_the_submit_watcher_sees_a_quiet_submit(page, send):
 
 
 @browser
+async def test_after_submit_the_thank_you_page_itself_is_sent_to_the_app_as_proof(page):
+    await _load(page, {}, other_tab=False)
+    posting = page.url
+    await page.evaluate("""() => {
+      sessionStorage.setItem("jobsmith-submit", JSON.stringify({ url: location.href, title: "Robotics Intern", at: Date.now() }));
+      history.replaceState(null, "", "/confirmation");
+      document.title = "Thank you | Acme";
+      document.querySelector("main").innerHTML = "<h1>Thank you for applying!</h1>";   // the form gives way to thanks
+    }""")
+    await page.wait_for_function("__calls.some(c => c.type === 'submitted')", timeout=8000)
+    body = await page.evaluate("__calls.find(c => c.type === 'submitted').body")
+    assert body["url"] == posting and body["title"] == "Robotics Intern"            # the posting it was for
+    c = body["confirmation"]                                                           # and the page that said thanks
+    assert c["url"].endswith("/confirmation") and c["title"] == "Thank you | Acme" and "Thank you for applying!" in c["text"]
+    page._jobsmith_navigations = [u for u in getattr(page, "_jobsmith_navigations", [])
+                                  if not u.endswith("/confirmation")]      # this test's own stand-in for the site's
+
+
 async def test_autofill_fills_one_step_of_a_job_site_form_in_a_frame_and_nothing_else(page):
     """Multi-step sites (iCIMS) show one step at a time in a frame: a page with just a phone number to give is still
     filled. A newsletter frame from another site asks for your email, but isn't an application: never typed into.

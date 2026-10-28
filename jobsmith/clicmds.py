@@ -7,6 +7,12 @@
     jobsmith voice add FILE...            add your writing (.md .txt .docx .pdf)
     jobsmith mcp                          the MCP server itself (your agent starts this; you don't need to)
     jobsmith site                         open the project page (site/index.html) in your browser
+    jobsmith stats [--days N] [--json]    submissions, how many were confirmed, and the share of good matches
+                                          autopilot sent without you
+    jobsmith audit [-n N] [--seed S] [--json]
+                                          N submitted applications (default 50), every answer with what it traces
+                                          to; exits 1 if any answer doesn't trace to a fact
+    Add --practice to either to read the practice copy (`jobsmith demo`) instead of your own data.
 """
 from __future__ import annotations
 
@@ -167,3 +173,44 @@ def main(argv: list[str]) -> None:
         voice_cmd(rest)
     elif cmd == "site":
         site()
+    elif cmd in ("stats", "audit"):
+        if "--practice" in rest:
+            _use_practice_copy()
+        (stats_cmd if cmd == "stats" else audit_cmd)([a for a in rest if a != "--practice"])
+
+
+def _use_practice_copy() -> None:
+    """Point this command at the practice copy. Must happen before anything reads the data folder."""
+    import os
+    from .devtools import DEMO_DIR
+    if "jobsmith.config" in sys.modules:
+        raise SystemExit("--practice has to be set before Jobsmith opens its data; run it as its own command.")
+    if not (DEMO_DIR / "jobsmith.db").exists():
+        raise SystemExit("There's no practice copy yet. Start one with: jobsmith demo")
+    os.environ.update(JOBSMITH_DATA=str(DEMO_DIR), JOBSMITH_DEMO="1")
+
+
+def _opt(rest: list[str], name: str, default: int | None) -> int | None:
+    i = rest.index(name) + 1 if name in rest else 0
+    return int(rest[i]) if 0 < i < len(rest) else default
+
+
+def stats_cmd(rest: list[str]) -> None:
+    from . import db, stats
+    db.conn()
+    d = stats.compute(days=_opt(rest, "--days", 30))
+    print(json.dumps(d, indent=2) if "--json" in rest else stats.render(d))
+
+
+def audit_cmd(rest: list[str]) -> None:
+    from . import audit, db
+    db.conn()
+    audit._ensure()
+    total = db.q1("SELECT COUNT(*) n FROM audit_submissions")["n"]
+    subs = audit.sample(_opt(rest, "-n", 50), _opt(rest, "--seed", None))
+    if "--json" in rest:
+        print(json.dumps({"total": total, "submissions": subs}, indent=2, ensure_ascii=False))
+    else:
+        print(audit.render_sample(subs, total) if subs else "No submitted applications to check yet.")
+    if any(not f["traces"] for s in subs for f in s["fields"]):
+        raise SystemExit(1)

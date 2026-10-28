@@ -119,16 +119,61 @@ async def check_inbox(days: int = 45) -> dict:
         messages = await asyncio.to_thread(_fetch, days)
     except Exception as e:
         return {"error": f"Couldn't read your email: {e}"}
-    jobs = db.q("SELECT id, company, updated_at FROM jobs WHERE status='submitted'")
+    # Sent ones, and ones autopilot clicked Submit on without seeing a confirmation page: an email settles those.
+    jobs = db.q("""SELECT id, company, title, updated_at FROM jobs WHERE status='submitted'
+                   OR id IN (SELECT job_id FROM runs WHERE kind='submit' AND status='unconfirmed')""")
     found = 0
     for msg in messages:
         kind = classify(msg["subject"], msg["body"])
         if not kind:
             continue
         job = match_job(msg["from"], msg["subject"], msg["body"], jobs)
-        if job and record(job, kind, msg["subject"], msg["from"], msg["when"], msg["id"]):
+        if not job:
+            continue
+        if kind == "received":
+            job = _receipt_for(job, msg, jobs)
+            if not job:
+                continue                       # you applied there more than once and it doesn't say for which
+            _log_confirmation(job["id"], msg)
+        if record(job, kind, msg["subject"], msg["from"], msg["when"], msg["id"]):
             found += 1
     return {"checked": len(messages), "new_outcomes": found}
+
+
+def _receipt_for(job: dict, msg: dict, jobs: list[dict]) -> dict | None:
+    """Which application a receipt from this company is proof for. It names the company, but you may have applied
+    there more than once: then only the one role the email names, and none if it names no role or several."""
+    same = [j for j in jobs if _norm(j["company"]) == _norm(job["company"])]
+    if len(same) == 1:
+        return same[0]
+    words = lambda t: re.findall(r"[a-z0-9+#]+", (t or "").lower())
+    toks = words(f"{msg['subject']} {msg['body'][:3000]}")
+
+    def spans(j: dict) -> list[tuple[int, int]]:      # where the role's title appears, as whole words
+        t = words(j.get("title"))
+        return [(i, i + len(t)) for i in range(len(toks) - len(t) + 1) if toks[i:i + len(t)] == t] if t else []
+    named = [j for j in same if len(" ".join(words(j.get("title")))) >= 4 and spans(j)]
+    if not named:
+        return None
+    # "Senior Engineer" names "Engineer" too: the longest title wins if every mention of the others is inside one
+    # of its own, and no other role has the same title.
+    best = max(named, key=lambda j: len(words(j.get("title"))))
+    own = spans(best)
+    inside = lambda sp: any(a <= sp[0] and sp[1] <= b for a, b in own)
+    others = [j for j in named if j is not best]
+    if any(words(j.get("title")) == words(best.get("title")) for j in others):
+        return None
+    return best if all(inside(sp) for j in others for sp in spans(j)) else None
+
+
+def _log_confirmation(job_id: str, msg: dict) -> None:
+    """A "we received your application" email is proof the latest submission landed, if it came after it."""
+    from . import audit
+    sub = db.q1("SELECT id, started_at FROM runs WHERE job_id=? AND kind='submit' AND status IN ('done','unconfirmed') "
+                "ORDER BY id DESC LIMIT 1", (job_id,))
+    if sub and msg["when"] >= sub["started_at"] - 3600:      # an hour's slack for clocks and slow forms
+        audit.log_confirmation(job_id, "email", run_id=sub["id"], title=msg["subject"], text=msg["body"][:600],
+                               sender=msg["from"], seen_by="inbox", message_id=msg["id"], at=msg["when"])
 
 
 def funnel() -> dict:

@@ -474,7 +474,9 @@
     if (Date.now() - p.at > 10 * 60 * 1000) { sessionStorage.removeItem("jobsmith-submit"); return; }
     if (!THANKS.test((document.body.innerText || "").slice(0, 20000))) return;
     sessionStorage.removeItem("jobsmith-submit");
-    const r = await send({ type: "submitted", body: { url: p.url, title: p.title, site_name: site() } });
+    // The posting it was for, and the thank-you page itself as proof it landed (kept only in the app on your computer).
+    const confirmation = { url: location.href, title: document.title, text: (document.body.innerText || "").slice(0, 4000) };
+    const r = await send({ type: "submitted", body: { url: p.url, title: p.title, site_name: site(), confirmation } });
     if (r.ok) { state.similar = r.data; state.msg = ""; state.open = true; render(); load(); }
   }
 

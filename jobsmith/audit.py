@@ -45,6 +45,32 @@ CREATE TABLE IF NOT EXISTS audit_pending (
   fields TEXT NOT NULL,
   at REAL NOT NULL
 );
+-- Proof a submission landed: the confirmation page the site showed, or the confirmation email it sent.
+CREATE TABLE IF NOT EXISTS confirmations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id TEXT NOT NULL,
+  run_id INTEGER,                   -- the submission it confirms
+  kind TEXT NOT NULL,               -- page | email
+  at REAL NOT NULL,
+  url TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL DEFAULT '',   -- the page's title, or the email's subject
+  text TEXT NOT NULL DEFAULT '',    -- what the page or email said, trimmed
+  sender TEXT NOT NULL DEFAULT '',
+  screenshot TEXT NOT NULL DEFAULT '',
+  seen_by TEXT NOT NULL DEFAULT '', -- jobsmith | extension | inbox
+  message_id TEXT UNIQUE
+);
+CREATE INDEX IF NOT EXISTS confirmations_job ON confirmations(job_id);
+-- Every job autopilot picked for itself, and whether it was a good match (at or above your fit bar) at the
+-- time. The denominator of "good matches sent without you".
+CREATE TABLE IF NOT EXISTS considered (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id TEXT NOT NULL,
+  at REAL NOT NULL,
+  good INTEGER NOT NULL,
+  fit REAL
+);
+CREATE INDEX IF NOT EXISTS considered_at ON considered(at);
 """
 
 SOURCE_LABEL = {"resume": "Your resume", "profile": "Your profile", "writing": "Your writing",
@@ -191,6 +217,53 @@ def record(job_id: str, run_id: int, sent_by: str) -> int:
     return len(rows)
 
 
+def log_confirmation(job_id: str, kind: str, *, run_id: int | None = None, url: str = "", title: str = "",
+                     text: str = "", sender: str = "", screenshot: str = "", seen_by: str = "jobsmith",
+                     message_id: str | None = None, at: float | None = None) -> bool:
+    """Keep the proof a submission landed. Without `run_id` it belongs to the job's latest submission. False when
+    there's no submission to attach it to, or this email was already logged."""
+    _ensure()
+    if run_id is None:
+        r = db.q1("SELECT id FROM runs WHERE job_id=? AND kind='submit' AND status IN ('done','unconfirmed') "
+                  "ORDER BY id DESC LIMIT 1", (job_id,))
+        if not r:
+            return False
+        run_id = r["id"]
+    try:
+        db.x("""INSERT INTO confirmations(job_id, run_id, kind, at, url, title, text, sender, screenshot, seen_by,
+                message_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+             (job_id, run_id, kind, at or db.now(), url[:1000], title[:300], " ".join(text.split())[:4000],
+              sender[:200], screenshot, seen_by, message_id))
+    except Exception:
+        return False                                      # the same email again
+    _settle(job_id, run_id, kind)
+    return True
+
+
+def _settle(job_id: str, run_id: int, kind: str) -> None:
+    """Autopilot clicked Submit but never saw the confirmation page, so the application was held "check your email".
+    Proof arrived after all: it was sent, by autopilot, and nothing is waiting on you."""
+    run = db.q1("SELECT status FROM runs WHERE id=?", (run_id,))
+    if not run or run["status"] != "unconfirmed":
+        return
+    what = "confirmation email" if kind == "email" else "confirmation page"
+    db.x("UPDATE runs SET status='done', log=COALESCE(log,'') || ? WHERE id=?", (f"\nConfirmed later by its {what}.", run_id))
+    db.x("UPDATE jobs SET status='submitted', hold_reason=NULL, updated_at=? WHERE id=? AND status='filled'",
+         (db.now(), job_id))
+
+
+def confirmations(run_id: int) -> list[dict]:
+    _ensure()
+    return db.q("SELECT kind, at, url, title, text, sender, screenshot, seen_by FROM confirmations WHERE run_id=? "
+                "ORDER BY at", (run_id,))
+
+
+def log_considered(job_id: str, good: bool, fit: float | None) -> None:
+    """Autopilot looked at this job on its own: counted in `jobsmith stats` whatever happens to it next."""
+    _ensure()
+    db.x("INSERT INTO considered(job_id, at, good, fit) VALUES(?,?,?,?)", (job_id, db.now(), int(good), fit))
+
+
 def for_job(job_id: str) -> list[dict]:
     """Every submission of this application, newest first, each with its fields."""
     _ensure()
@@ -207,6 +280,7 @@ def for_job(job_id: str) -> list[dict]:
             for k in ("id", "job_id", "run_id", "at", "sent_by"):
                 f.pop(k, None)
         out.append({"run_id": s["run_id"], "submitted_at": s["at"], "confirmed": s["status"] == "done",
+                    "confirmations": confirmations(s["run_id"]),
                     "sent_by": s["sent_by"], "basis": s["basis"], "note": s["note"], "fields": fields,
                     "untraced": sum(1 for f in fields if not f["traces"])})
     return out
@@ -217,3 +291,60 @@ def export(job_id: str) -> dict:
     job = db.q1("SELECT id, company, title, url FROM jobs WHERE id=?", (job_id,)) or {}
     from . import __version__
     return {"jobsmith": __version__, "job": job, "submissions": for_job(job_id)}
+
+
+def _day(t: float) -> str:
+    """"Oct 5", built by hand: the strftime code that drops the zero isn't available on Windows."""
+    import time
+    lt = time.localtime(t)
+    return f"{time.strftime('%b', lt)} {lt.tm_mday}"
+
+
+def sample(n: int = 50, seed: int | None = None) -> list[dict]:
+    """`jobsmith audit`: up to n submitted applications picked at random (all of them when there are fewer), each
+    with every answer it sent and what that answer traces to."""
+    import random
+    _ensure()
+    runs = [r["run_id"] for r in db.q("""SELECT s.run_id FROM audit_submissions s JOIN runs r ON r.id=s.run_id
+                                          WHERE r.kind='submit' ORDER BY s.run_id""")]
+    picked = sorted(random.Random(seed).sample(runs, min(n, len(runs))))
+    out = []
+    for run_id in picked:
+        job_id = db.q1("SELECT job_id FROM audit_submissions WHERE run_id=?", (run_id,))["job_id"]
+        sub = next(s for s in for_job(job_id) if s["run_id"] == run_id)
+        job = db.q1("SELECT company, title FROM jobs WHERE id=?", (job_id,)) or {}
+        replied = bool(db.q("SELECT name FROM sqlite_master WHERE name='outcomes'")) and bool(db.q1(
+            "SELECT 1 FROM outcomes WHERE job_id=? AND received_at>=?", (job_id, sub["submitted_at"] - 3600)))
+        out.append(dict(sub, job_id=job_id, company=job.get("company", ""), title=job.get("title", ""),
+                        replied=replied))
+    return out
+
+
+def render_sample(subs: list[dict], total: int) -> str:
+    """Plain words for the terminal: every answer with its source, and a flag on any that doesn't trace."""
+    import time
+    lines = []
+    for s in subs:
+        when = _day(s["submitted_at"])
+        proof = ", ".join(sorted({c["kind"] for c in s["confirmations"]} | ({"reply"} if s.get("replied") else set()))) \
+            or "no confirmation logged"
+        lines += ["", f"{s['company']} · {s['title']}",
+                  f"  sent by {s['sent_by']} on {when} · {proof}" + (f" · {s['note']}" if s["note"] else "")]
+        if not s["fields"]:
+            lines.append("  (no answers recorded for this one)")
+        for f in s["fields"]:
+            answer = " ".join((f["answer"] or "").split())
+            answer = answer if len(answer) <= 100 else answer[:97] + "..."
+            lines.append(f"  {'✓' if f['traces'] else '✗'} {f['label']}: {answer}")
+            if not f["traces"]:
+                lines.append("      DOESN'T TRACE to anything you gave Jobsmith")
+            for d in f["detail"][:2]:
+                text = " ".join((d.get("text") or "").split())
+                text = text if len(text) <= 90 else text[:87] + "..."
+                lines.append(f"      ← {d['ref']}" + (f": {text}" if text and text != answer else ""))
+    answers = sum(len(s["fields"]) for s in subs)
+    bad = [(s, f) for s in subs for f in s["fields"] if not f["traces"]]
+    lines += ["", f"Checked {len(subs)} of {total} submitted applications: {answers} answers, "
+                  f"{len(bad)} that {'doesn' if len(bad) == 1 else 'don'}'t trace to a fact."]
+    lines += [f"  ✗ {s['company']}: {f['label']}" for s, f in bad]
+    return "\n".join(lines).lstrip("\n")
