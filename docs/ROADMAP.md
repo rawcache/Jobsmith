@@ -32,7 +32,7 @@ CAPTCHAs, writing facts the user doesn't have.
 
 ## Phases (each ends at a gate it must pass before the next starts)
 
-### Phase 0 · Go public (Oct 22–31, 2026) — done
+### Phase 0 · Go public (Oct 22–31, 2026) — done except the demo video
 
 Gate passed: clean install to the practice copy in 25 seconds. Left: the 30-second demo video.
 

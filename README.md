@@ -152,7 +152,7 @@ Deny. Jobsmith's browser doesn't need it, and it never asks for passwords.
 
 The full plan, with each phase's gate, is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
-- **Phase 0 · Go public** (October 2026): done.
+- **Phase 0 · Go public** (October 2026): done except the demo video.
 - **Phase 1 · Autopilot you can trust** (November 2026): guardrails, posting traps, confirmed submissions, more job sites.
 - **Phase 2 · Applications that win** (December 2026): fit evaluation, tailored resumes and reviewed cover letters.
 - **Phase 3 · Every job and every reply** (January 2027): Chrome Web Store, job board, more sources, inbox tracking.
