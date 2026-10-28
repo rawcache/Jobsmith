@@ -100,4 +100,6 @@ and never give it anything from `data/`. Long tasks can take minutes; run them i
 
 Always run `git add` as its own command before `git commit`, never in the same command. The commit hook in
 `.claude/settings.json` runs Codex before the whole command starts, so a combined `git add && git commit` is
-reviewed with nothing staged.
+reviewed with nothing staged. The hook (`.claude/hooks/commit_review.py`, local like the settings file) finds
+`git commit` anywhere in a command and refuses one that also stages (`git add … &&`, `-a`, paths); its cases are
+in `.claude/hooks/test_commit_review.py`.
