@@ -146,10 +146,13 @@ issue), and commit the tick with the work.
       away on the next sync, and an answer that isn't a board closes nothing.
 - [x] Filter there by experience, seniority words and pay, so unsuitable jobs never reach a browser.
       Evidence: `boards.screen` leaves out senior titles (staff/principal need 7+ years, senior/lead 3+), roles
-      requiring 3+ years and more than a year beyond what the profile shows (preferred years don't count, since a
-      left-out role can't be applied to anyway), and pay under the new "Lowest pay you'd take" (hourly and monthly annualized; USD only; no
-      stated pay passes). Experience is screened only when the profile or goals say it. Each sync says how many it
-      left out and why; roles that stop passing are put away before autopilot picks them.
+      requiring 3+ years and more than a year beyond what the profile shows (preferred years don't count), and pay
+      under the new "Lowest pay you'd take" (hourly and monthly annualized; USD only; no stated pay passes).
+      Experience is screened only when the profile or goals say it. Each sync says how many it left out and why.
+      Left-out roles are kept with the reason under a collapsed "Left out (N)" on Matches and with `l` in
+      `/matches`, never picked by autopilot, and "Apply anyway" makes one a match for good
+      ([942200e](https://github.com/rawcache/Jobsmith/commit/942200e),
+      [CI run](https://github.com/rawcache/Jobsmith/actions/runs/40765309244)).
 - [x] Tests on saved board responses for each of the three.
       Evidence: `tests/test_boards.py` (26 tests) on trimmed saved responses in `tests/fixtures/boards/` (Figma on
       Greenhouse, Palantir on Lever, Ramp on Ashby), served through a mock that refuses anything but a GET.
@@ -158,12 +161,29 @@ issue), and commit the tick with the work.
 
 ## 6. Greenhouse dropdowns and location autocomplete ([#19](https://github.com/rawcache/Jobsmith/issues/19))
 
-- [ ] The extension drives react-select so Country, Location (City) and other dropdowns get filled. (Planned as a
+- [x] The extension drives react-select so Country, Location (City) and other dropdowns get filled. (Planned as a
       page-context script; on the live form a whole key press from the content script is enough, because Greenhouse
       opens its menus on key-up and mouse-up and the extension only sent key-down. See #19.)
-- [ ] Autopilot's Playwright runner uses real clicks for the same fields.
-- [ ] Tests on the saved Figma form: Country gets "United States", Location gets "Boston, MA" from the
+      Evidence: [7de52a8](https://github.com/rawcache/Jobsmith/commit/7de52a8). `fillCombobox` in
+      `extension/content.js` sends whole key presses and a key-up after typing; the engine sends the city as place
+      lookups name it (`draft.location_full`: "Boston, MA" → "Boston, Massachusetts, United States", only for a
+      plain US city and state). Checked on the live Figma form (headless, every non-GET blocked): Country, Location
+      (City) and both Yes/No boxes filled, every hidden "required" copy filled, nothing sent.
+- [x] Autopilot's Playwright runner uses real clicks for the same fields.
+      Evidence: `fill_combobox` already clicked the control and the option; now proven on Greenhouse's controlled
+      menus, on the fixture and on the live form (same check, read-only).
+- [x] Tests on the saved Figma form: Country gets "United States", Location gets "Boston, MA" from the
       autocomplete, and anything without a confident match stays under "Needs you".
+      Evidence: `tests/fixtures/greenhouse_figma_live.html` is the saved form with real react-select set up as
+      the live form is (source and rebuild steps in `tests/fixtures/src/`). Extension (submit watcher on):
+      `test_autofill_picks_greenhouse_dropdowns_and_the_city_from_its_lookup`,
+      `..._leaves_a_city_the_lookup_doesnt_have_for_you`, `..._picks_a_city_outside_the_us_as_you_wrote_it`;
+      autopilot: `test_greenhouse_dropdowns_on_the_saved_figma_form_are_picked_with_real_clicks`; engine:
+      `test_engine_names_the_city_to_pick_from_a_place_lookup`, `test_a_us_city_is_named_the_way_place_lookups_name_it`.
+      [CI run](https://github.com/rawcache/Jobsmith/actions/runs/40769864788) (Linux, Windows, dashboard passed;
+      the macOS runner cancelled the job before its first step, and it's been rerun).
+      Checked by hand on the live Figma posting (2026-10-28): phone Country "+1", Location (City) picked from the
+      autocomplete, "From where do you intend to work?" under Check these, nothing submitted.
 
 ## 7. New job sites, one at a time ([#18](https://github.com/rawcache/Jobsmith/issues/18))
 
