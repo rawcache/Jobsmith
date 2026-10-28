@@ -70,17 +70,44 @@ issue), and commit the tick with the work.
 
 ## 3. Submissions that land, plus gate tooling
 
-- [ ] Every real submission logs its confirmation page, and the confirmation email when the user's inbox is
+- [x] Every real submission logs its confirmation page, and the confirmation email when the user's inbox is
       connected.
-- [ ] `jobsmith stats` reports submitted, the confirmed rate, and the share of good matches submitted without the
+      Evidence: [2be612f](https://github.com/rawcache/Jobsmith/commit/2be612f): the page's address, title, text and screenshot from autopilot (single and multi-page) and from
+      the extension's thank-you watcher; "we received your application" emails matched to the one role they name.
+      Proof arriving later settles a submit autopilot never saw confirmed. `tests/test_stats.py`, the confirmation
+      assertions in `tests/test_fill.py`, and the thank-you test in `tests/test_extension.py`.
+- [x] `jobsmith stats` reports submitted, the confirmed rate, and the share of good matches submitted without the
       user over a period. The denominator is every good match autopilot considered in that period, including ones
       held, capped or failed.
-- [ ] `jobsmith audit` samples N submitted applications (default 50) and prints each answer with its source fact.
+      Evidence: [2be612f](https://github.com/rawcache/Jobsmith/commit/2be612f): autopilot logs every job it picks for itself and whether it cleared the fit bar
+      (`audit.log_considered`); `jobsmith/stats.py`; `tests/test_stats.py` (held, capped, failed, unconfirmed and
+      under-the-bar jobs in one period).
+- [x] `jobsmith audit` samples N submitted applications (default 50) and prints each answer with its source fact.
       Any answer that doesn't trace to a fact is flagged.
-- [ ] Both run on the practice copy, with the output shown. The real gate numbers come from the maintainer's own
+      Evidence: [2be612f](https://github.com/rawcache/Jobsmith/commit/2be612f): `audit.sample` and `render_sample`; exits 1 when an answer doesn't trace. `tests/test_stats.py`.
+- [x] Both run on the practice copy, with the output shown. The real gate numbers come from the maintainer's own
       search.
-- [ ] `docs/design/real-browser.md`: letting autopilot drive the user's own Chrome through the extension, with the
+      Evidence: `jobsmith stats --practice` and `jobsmith audit --practice` on a fresh `jobsmith demo`:
+
+      ```
+      Submitted             5   autopilot 4, you 1
+      Confirmed             4   80% of submitted (page 3, email 0, reply 1)
+        no proof yet        1   check the site or your email for these
+
+      Good matches          7   of 8 jobs autopilot picked for itself
+        sent without you    4   57% (Phase 1 goal: 80%)
+        held for you: 2
+        stopped with an error: 1
+      ...
+      Checked 5 of 5 submitted applications: 6 answers, 0 that don't trace to a fact.
+      ```
+
+      The first audit run flagged a real slip in the practice data (Soylent's email answer didn't match Alex's
+      profile), fixed in the same commit.
+- [x] `docs/design/real-browser.md`: letting autopilot drive the user's own Chrome through the extension, with the
       tradeoffs. Design only; not built in Phase 1.
+      Evidence: [docs/design/real-browser.md](design/real-browser.md) ([2be612f](https://github.com/rawcache/Jobsmith/commit/2be612f)).
+      All of item 3: [CI run](https://github.com/rawcache/Jobsmith/actions/runs/40642820972).
 
 ## 4. Skills from any posting ([#20](https://github.com/rawcache/Jobsmith/issues/20)), minimal
 
