@@ -12,6 +12,13 @@ from jobsmith import db, llm  # noqa: E402
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+def pytest_terminal_summary(terminalreporter, config):
+    """Tests run in a random order; say which, even under -q, so a failure in CI can be replayed exactly."""
+    seed = getattr(config.option, "randomly_seed", None)
+    if isinstance(seed, int):
+        terminalreporter.write_line(f"Random order seed: {seed} (repeat with -p randomly --randomly-seed={seed})")
+
+
 @pytest.fixture(autouse=True)
 def fresh_db(tmp_path):
     db.reset_for_tests(tmp_path / "test.db")

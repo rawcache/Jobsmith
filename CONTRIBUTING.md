@@ -12,6 +12,10 @@ uv run pytest -q          # all tests should pass
 uv run jobsmith demo      # a practice copy with a made-up person; nothing real is touched
 ```
 
+Tests run in a random order each time (pytest-randomly), so a test that leans on another's leftovers fails early.
+To repeat a failing order, pass the seed: `uv run pytest -p randomly --randomly-seed=1234`. Give each test its own
+setup (the `monkeypatch` fixture is the easy way) rather than resetting shared state afterwards.
+
 Work only in the practice copy. It blocks every outward action, so you can't apply anywhere by accident.
 
 ## Add a job site
