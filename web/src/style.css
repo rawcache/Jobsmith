@@ -1096,3 +1096,10 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
   .lrows .badge { order: 3; margin-left: 42px; }
   .card.flush .card-h { padding: 14px 16px 8px; }
 }
+
+/* Autopilot's first submission (on a site), filled and waiting for your approval */
+.note.first-run { display: block; border-left-color: var(--accent); padding: 10px 14px; }
+.note.first-run h3 { margin: 0 0 4px; font-size: 15px; }
+.note.first-run .audit-scroll { margin: 10px 0; }
+.note.first-run p + .row { margin-top: 10px; }
+.prewrap { white-space: pre-wrap; }

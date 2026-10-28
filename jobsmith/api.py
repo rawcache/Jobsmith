@@ -854,9 +854,19 @@ def get_job(job_id: str):
             "sections": insights.posting_sections(j.get("description") or ""), "facts": insights.job_facts(j),
             "eligibility": eligibility.check(j), "ai_policy": guardrails.policy_reason(j),
             "trap": traps.trap_reason(j), "posting_marked": marked,
-            "gate": guardrails.fit_gate(j),
+            "gate": guardrails.fit_gate(j), "approval": approval_of(job_id),
             "readiness": draft.readiness(job_id) if drafts else None,
             "busy": runner.active().get(job_id), "can_fill": runner.can_fill(j["ats"])}
+
+
+def approval_of(job_id: str) -> dict | None:
+    """Autopilot's first submission (on its site), filled and waiting for you: every answer it put in, each with
+    where it came from. None when this application isn't waiting for approval."""
+    [ask] = guardrails.awaiting_approval(job_id) or [None]
+    if not ask:
+        return None
+    return {"site": ask["site"], "site_name": ask["site_name"], "asked_at": ask["asked_at"],
+            "answers": audit.pending(job_id)}
 
 
 @app.get("/api/jobs/{job_id}/audit")
@@ -864,6 +874,13 @@ def job_audit(job_id: str):
     """What was sent in each submission of this application, field by field, and where each answer came from."""
     job_or_404(job_id)
     return {"submissions": audit.for_job(job_id)}
+
+
+@app.post("/api/jobs/{job_id}/approve")
+async def approve_first_run(job_id: str):
+    """You checked autopilot's first submission (on its site): send it, and trust the site from now on."""
+    job_or_404(job_id)
+    return await runner.approve(job_id)
 
 
 @app.get("/api/jobs/{job_id}/audit.json")
@@ -1087,6 +1104,9 @@ async def home():
     sub_q = "SELECT COUNT(*) n FROM runs WHERE kind='submit' AND status='done' AND finished_at>?"
     review = [db.decode(r) for r in db.q("""SELECT id, company, title, ats, status, hold_reason, error, fit_score, updated_at
                                              FROM jobs WHERE status IN ('filled','error') ORDER BY updated_at DESC LIMIT 30""")]
+    waiting = {a["job_id"] for a in guardrails.awaiting_approval()}
+    for r in review:
+        r["approve"] = r["id"] in waiting          # autopilot's first submission (on its site): yours to approve
     recent = db.q("""SELECT j.id, j.company, j.title, j.outcome, r.finished_at FROM runs r JOIN jobs j ON j.id=r.job_id
                      WHERE r.kind='submit' AND r.status='done' ORDER BY r.finished_at DESC LIMIT 8""")
     srcs = db.q("SELECT id, url, kind, last_synced, last_count FROM sources WHERE active=1 ORDER BY id")

@@ -9,7 +9,7 @@ import pytest
 from jobsmith import db, draft, jobdetail, profile, runner, sources
 from jobsmith.fill import base, generic, greenhouse
 from jobsmith.fill.base import page_confirms_submission, scan_form
-from conftest import FIXTURES
+from conftest import FIXTURES, trust
 
 def _browser_available():
     from playwright.sync_api import sync_playwright
@@ -148,6 +148,7 @@ async def test_lever_generic_fill_stops_before_submit(tmp_path, page):
 
 async def test_runner_fill_and_detect_submission(fake_llm, tmp_path):
     jid, _ = await _job_with_drafts(fake_llm, tmp_path)
+    trust("greenhouse")             # its first submission here was approved before (see the first-run tests)
     db.set_settings({"browser_channel": "", "headless": True, "autonomy": "autonomous", "trust_threshold": 0})
     # user approves every remaining field, sets EEO answers
     for d in draft.drafts_for(jid):
@@ -175,6 +176,55 @@ async def test_runner_fill_and_detect_submission(fake_llm, tmp_path):
     implicit = {f["label"]: f for f in sub["fields"] if f["field"] in ("country", "hispanic_ethnicity")}
     assert implicit["Hispanic/Latino"]["detail"][0]["ref"].startswith("Profile: ") and implicit["Hispanic/Latino"]["traces"]
     assert implicit["Phone country"]["answer"] == "United States +1"          # what the box shows
+
+
+async def test_autopilots_first_submission_waits_for_your_approval(fake_llm, tmp_path, monkeypatch):
+    """The first real autopilot submission stops at the filled form with every answer and its source; it's sent
+    only when you approve, and after that autopilot submits on that site on its own."""
+    import asyncio
+    from jobsmith import api, audit, guardrails
+    jid, _ = await _job_with_drafts(fake_llm, tmp_path)
+    db.set_settings({"browser_channel": "", "headless": True, "autonomy": "autonomous", "trust_threshold": 0})
+    for d in draft.drafts_for(jid):
+        db.x("UPDATE drafts SET verdict='green' WHERE id=?", (d["id"],))
+    filling = asyncio.create_task(runner.fill(jid, submit=True))     # keeps watching the tab while it waits for you
+    try:
+        for _ in range(300):
+            if guardrails.awaiting_approval(jid) or filling.done():
+                break
+            await asyncio.sleep(0.1)
+        job = db.q1("SELECT status, hold_reason FROM jobs WHERE id=?", (jid,))
+        assert job["status"] == "filled"
+        assert job["hold_reason"].startswith("This is autopilot's first submission: check every answer and where it "
+                                             "came from, then approve it to send it.")
+        page = runner.LIVE[jid]["page"]
+        assert await page.locator("#thanks").is_hidden()                      # filled, not sent
+        assert not db.q("SELECT 1 FROM runs WHERE job_id=? AND kind='submit'", (jid,)) and not guardrails._submitting
+        a = api.approval_of(jid)                                             # what you check before approving
+        assert a["site"] == "greenhouse" and a["site_name"] == "Greenhouse"
+        by_field = {f["field"]: f for f in a["answers"]["fields"]}
+        assert by_field["question_1004"]["source_label"] == "Your resume" and by_field["question_1004"]["traces"]
+        assert "Jetson" in by_field["question_1004"]["detail"][0]["text"]
+        assert by_field["question_1005"]["source"] == "none" and a["answers"]["untraced"] == 1
+        assert {f["field"] for f in a["answers"]["fields"]} >= {"first_name", "email", "resume"}
+
+        r = await runner.approve(jid)
+        assert r["ok"] and r["site"] == "greenhouse" and "autopilot submits on Greenhouse on its own" in r["message"]
+        await asyncio.wait_for(filling, 30)                                 # the watcher sees the thank-you page
+    finally:
+        if not filling.done():
+            filling.cancel()
+        await runner.browser.close()
+    assert db.q1("SELECT status FROM jobs WHERE id=?", (jid,))["status"] == "submitted"
+    [sub] = audit.for_job(jid)
+    assert sub["sent_by"] == "you" and sub["confirmed"] and sub["basis"] == "filled"
+    assert sub["note"] == "You approved autopilot's first submission on Greenhouse after checking these answers."
+    assert not guardrails.awaiting_approval(jid) and api.approval_of(jid) is None
+    # From now on Greenhouse is trusted; another site still asks once.
+    assert guardrails.first_run_reason({"url": "https://job-boards.greenhouse.io/x/jobs/2"}) is None
+    assert guardrails.first_run_reason({"url": "https://jobs.lever.co/x/1"}).startswith(
+        "This is autopilot's first submission on Lever:")
+    assert (await runner.approve(jid))["message"] == "Nothing here is waiting for your approval."
 
 
 async def test_runner_holds_at_the_daily_cap(fake_llm, tmp_path, monkeypatch):
@@ -354,6 +404,7 @@ async def test_a_fill_stopped_while_submitting_still_counts(fake_llm, tmp_path, 
     import asyncio
     from jobsmith import guardrails
     jid, _ = await _job_with_drafts(fake_llm, tmp_path)
+    trust("greenhouse")
     db.set_settings({"browser_channel": "", "headless": True, "autonomy": "autonomous", "trust_threshold": 0})
     for d in draft.drafts_for(jid):
         db.x("UPDATE drafts SET verdict='green' WHERE id=?", (d["id"],))
@@ -380,6 +431,7 @@ async def _green_job(fake_llm, tmp_path, monkeypatch):
         return None
     monkeypatch.setattr(runner, "watch_tab", no_watch)
     jid, _ = await _job_with_drafts(fake_llm, tmp_path)
+    trust("greenhouse")
     db.set_settings({"browser_channel": "", "headless": True, "autonomy": "autonomous", "trust_threshold": 0})
     for d in draft.drafts_for(jid):
         db.x("UPDATE drafts SET verdict='green' WHERE id=?", (d["id"],))

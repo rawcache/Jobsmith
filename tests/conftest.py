@@ -27,6 +27,13 @@ def fresh_db(tmp_path):
     llm.set_backend_override(None)
 
 
+def trust(*sites: str) -> None:
+    """Autopilot's first submission on these sites was approved earlier, so it sends on its own now."""
+    for s in sites:
+        db.x("INSERT INTO first_runs(job_id, site, asked_at, approved_at) VALUES(?,?,?,?)",
+             (f"earlier-{s}", s, db.now(), db.now()))
+
+
 class FakeLLM(llm.Backend):
     """Returns canned answers; records prompts so tests can assert on them."""
     name = "fake"

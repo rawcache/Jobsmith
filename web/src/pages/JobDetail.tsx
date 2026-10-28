@@ -3,15 +3,19 @@ import { ago, api, companyHref, Draft, FitGate, Job, LiveTab, Match, OUTCOME_LAB
 import { friendly } from "./Tracker";
 import { StatusCtx } from "../main";
 import { Dots, Icon, Logo, MatchText, Modal, useTick, poll } from "../ui";
-import AuditTrail from "../components/AuditTrail";
+import AuditTrail, { Field, FieldsTable } from "../components/AuditTrail";
 
 type Section = { heading: string; kind: string; items: string[] };
 type Resp = { job: Job; drafts: Draft[]; runs: Run[]; readiness: { ready: boolean; blockers: string[] } | null;
   busy?: string; can_fill: boolean; usage: Usage; match: Match; connections: Person[]; sections: Section[];
   eligibility: { ok: boolean; reasons: string[]; notes: string[] };
-  ai_policy: string | null; trap: string | null; gate: FitGate;
+  ai_policy: string | null; trap: string | null; gate: FitGate; approval: Approval | null;
   posting_marked: { text: string; trap: { how: string; attention: boolean } | null }[] | null;
   facts: { pay: string; level: string; mode: string; category: string; sponsorship: string; degree: string } };
+
+// Autopilot's first submission (on this site), filled and waiting for you to approve it.
+type Approval = { site: string; site_name: string; asked_at: number;
+  answers: { filled_at: number; fields: Field[]; untraced: number } | null };
 
 const SOURCE: Record<string, string> = {
   answer_bank: "from your profile", learned: "reused from an answer you approved", generated: "written by AI", file: "file",
@@ -115,7 +119,7 @@ function Referral({ job, onSaved }: { job: Job; onSaved: () => void }) {
   );
 }
 
-function LivePeek({ id, company }: { id: string; company: string }) {
+function LivePeek({ id, company, approve }: { id: string; company: string; approve?: boolean }) {
   const t = useTick(1500);
   const [tab, setTab] = useState<LiveTab | null>(null);
   const [big, setBig] = useState(false);
@@ -126,10 +130,41 @@ function LivePeek({ id, company }: { id: string; company: string }) {
       <h3>In the browser now <span className="muted">{tab.phase_label}</span></h3>
       <button className="shot" onClick={() => setBig(true)} aria-label="Watch larger"><img src={`/api/live/${id}/shot?t=${t}`} alt="" /></button>
       <div className="row tight">
-        {tab.phase === "review" && <button className="btn primary sm" onClick={() => confirm(`Submit the ${company} application now?`) && api.post(`/api/live/${id}/submit`)}>Submit</button>}
+        {tab.phase === "review" && !approve && <button className="btn primary sm" onClick={() => confirm(`Submit the ${company} application now?`) && api.post(`/api/live/${id}/submit`)}>Submit</button>}
         <button className="btn sm" onClick={() => api.post(`/api/live/${id}/show`)}>Take over</button>
       </div>
       {big && <Modal wide title={<strong>{company}</strong>} onClose={() => setBig(false)}><img className="peek-img" src={`/api/live/${id}/shot?t=${t}`} alt="" /></Modal>}
+    </section>
+  );
+}
+
+/** Autopilot's first submission, or its first on this site: every answer it filled in and where each came from.
+ *  Nothing is sent until you approve; after that, autopilot submits on this site on its own within your limits. */
+function FirstRun({ id, company, a, hold, onDone }: { id: string; company: string; a: Approval; hold?: string | null; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const fields = a.answers?.fields ?? [];
+  const approve = async () => {
+    setBusy(true);
+    try {
+      const r = await api.post<{ ok: boolean; message: string }>(`/api/jobs/${id}/approve`);
+      setMsg(r.message);
+      if (r.ok) onDone();
+    } catch (e) { setMsg((e as Error).message); }
+    setBusy(false);
+  };
+  return (
+    <section className="note first-run">
+      <h3>Approve autopilot's first submission{a.site_name ? ` on ${a.site_name}` : ""}</h3>
+      <p className="small">{hold ?? `Check every answer for ${company}, then approve it to send it.`}</p>
+      {fields.length > 0 ? <FieldsTable fields={fields} />
+        : <p className="small muted">No answers were recorded for this form. Take over to look at it before you approve.</p>}
+      {a.answers && a.answers.untraced > 0 && <p className="small bad-text">{a.answers.untraced} answer{a.answers.untraced > 1 ? "s don't" : " doesn't"} trace to your resume or profile. Check {a.answers.untraced > 1 ? "them" : "it"} before you approve.</p>}
+      <div className="row tight">
+        <button className="btn primary sm" disabled={busy} onClick={approve}>{busy ? "Sending" : "Approve and send"}</button>
+        <button className="btn sm" onClick={() => api.post(`/api/live/${id}/show`)}>Take over</button>
+      </div>
+      {msg && <p className="small" role="status">{msg}</p>}
     </section>
   );
 }
@@ -187,7 +222,7 @@ export default function JobPage({ id, embedded = false }: { id: string; embedded
   if (err) return <div className="jobview"><p>{err}</p></div>;
   if (!r) return <div className="jobview"><p className="muted"><Dots />Loading</p></div>;
 
-  const { job, drafts, runs, readiness, usage, match, connections, sections, eligibility, ai_policy, trap, gate, posting_marked } = r;
+  const { job, drafts, runs, readiness, usage, match, connections, sections, eligibility, ai_policy, trap, gate, posting_marked, approval } = r;
   const showTrap = () => { setTab("overview"); setFullPosting(true); };
   const unsure = eligibility && !eligibility.ok;
   const res = job.research ?? {};
@@ -254,7 +289,8 @@ export default function JobPage({ id, embedded = false }: { id: string; embedded
         </details>)}
       {trap && !applied && !(job.hold_reason ?? "").includes(trap) && <p className="note warn">{trap}{posting_marked && <> <button className="link" onClick={showTrap}>Show it in the posting</button></>}</p>}
       {ai_policy && !applied && !(job.hold_reason ?? "").includes(ai_policy) && <p className="note warn">{ai_policy}</p>}
-      {job.hold_reason && job.status === "filled" && <p className="note warn">Held for you: {job.hold_reason}{posting_marked && trap && job.hold_reason.includes(trap) && <> <button className="link" onClick={showTrap}>Show it in the posting</button></>}</p>}
+      {approval && <FirstRun id={id} company={job.company} a={approval} hold={job.hold_reason} onDone={() => { refresh(); load(); }} />}
+      {job.hold_reason && job.status === "filled" && !approval && <p className="note warn">Held for you: {job.hold_reason}{posting_marked && trap && job.hold_reason.includes(trap) && <> <button className="link" onClick={showTrap}>Show it in the posting</button></>}</p>}
       {job.error && !/connect/i.test(job.error) && <p className="note warn">{friendly(job.error)}</p>}
 
       <div className="tabs jv-tabs" role="tablist">
@@ -263,7 +299,7 @@ export default function JobPage({ id, embedded = false }: { id: string; embedded
       </div>
       <div className="jv-body">
         <div className="jv-main">
-          <LivePeek id={id} company={job.company} />
+          <LivePeek id={id} company={job.company} approve={!!approval} />
           {tab === "overview" && <>
 
           <section className="block">

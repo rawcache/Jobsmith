@@ -109,7 +109,7 @@ def shimmer(word: str, frame: int) -> Text:
 
 COMMANDS: list[tuple[str, str, str]] = [
     ("/help", "", "what you can ask and every command"),
-    ("/review", "", "go through applications waiting for you, approve or edit answers, submit"),
+    ("/review", "", "applications waiting for you: approve or edit answers, submit, approve autopilot's first send"),
     ("/matches", "", "your best-fit roles; enter applies"),
     ("/apply", "<company, link or list>", "apply somewhere: /apply nvidia hardware internships"),
     ("/autopilot", "[on|off]", "apply on its own (shift+tab)"),
@@ -285,6 +285,7 @@ class Review(View):
         self.query_one("#qs", DataTable).add_columns("", "Question", "Answer")
         self.job: dict = {}
         self.drafts: list[dict] = []
+        self.approval: dict | None = None
         self.load_jobs()
 
     @work(thread=True, exclusive=True, group="jobs")
@@ -298,7 +299,8 @@ class Review(View):
         t.clear()
         for r in rows:
             mark = Text("✗", style=BAD) if r["status"] == "error" else Text("!", style=WARN)
-            t.add_row(mark, Text(r["company"][:20], style="bold"), (r.get("hold_reason") or r.get("error") or "ready to submit")[:40], key=r["id"])
+            why = "approve the first submission" if r.get("approve") else r.get("hold_reason") or r.get("error") or "ready to submit"
+            t.add_row(mark, Text(r["company"][:20], style="bold"), why[:40], key=r["id"])
         self.query_one("#t", Static).update(self.heading((f"Review  {len(rows)} waiting for you", "bold"),
                                                        ("   a approve · e edit · s submit · k skip · esc back", DIM)))
         if not rows:
@@ -326,6 +328,10 @@ class Review(View):
 
     def show_job(self, d: dict) -> None:
         self.job = d["job"]
+        self.approval = d.get("approval")
+        if self.approval:
+            self.show_approval(self.approval)
+            return
         blockers = (d.get("readiness") or {}).get("blockers", [])
         self.drafts = sorted(d["drafts"], key=lambda x: (not self._problem(x, blockers), x["qtype"] not in ("textarea", "text"), x["id"]))
         t = self.query_one("#qs", DataTable)
@@ -348,6 +354,23 @@ class Review(View):
                 Text("Jobsmith hasn't drafted answers for this one yet. Press s to fill it in the browser; "
                      "it comes back here if anything needs you.", style=STEEL)))
 
+    def show_approval(self, a: dict) -> None:
+        """Autopilot's first submission (on this site): every answer it filled in, each with where it came from."""
+        fields = (a.get("answers") or {}).get("fields") or []
+        self.drafts = [dict(f, id=f["field"]) for f in fields]
+        t = self.query_one("#qs", DataTable)
+        t.clear()
+        for f in fields:
+            mark = Text("✓", style=OK) if f["traces"] else Text("!", style=BAD)
+            t.add_row(mark, f["label"][:46], Text((f["answer"] or "File").replace("\n", " ")[:60], style=INK), key=f["field"])
+        t.border_title = f"{self.job['company']} · first submission on {a['site_name']}"[:70] + "   s approves and sends"
+        if t.row_count:
+            t.move_cursor(row=0)
+            self.show_detail()
+        else:
+            self.query_one("#detail", Static).update(Text(
+                "No answers were recorded for this form. Press t to look at it before you approve with s.", style=STEEL))
+
     @on(DataTable.RowHighlighted, "#qs")
     def picked_q(self, _e) -> None:
         self.show_detail()
@@ -362,6 +385,16 @@ class Review(View):
     def show_detail(self) -> None:
         x = self.current()
         if not x:
+            return
+        if self.approval:
+            parts = [Text(self.job.get("hold_reason") or "", style=WARN), Text(""), Text(x["label"], style="bold"),
+                     Text(x["answer"] or "File", style=INK), Text(""),
+                     Text("Came from: " + x["source_label"], style=OK if x["traces"] else BAD)]
+            parts += [Text(f"  {d['ref']}" + (f": {d['text'][:140]}" if d.get("text") and x["source"] == "resume" else ""),
+                           style=DIM) for d in x["detail"]]
+            if x["kind_check"] != "ok":
+                parts.append(Text(f"! {x['kind_check']}", style=WARN))
+            self.query_one("#detail", Static).update(Group(*parts))
             return
         val = x.get("final_answer") or x.get("answer") or ""
         parts = [Text(x["label"], style="bold"), Text("")]
@@ -382,15 +415,22 @@ class Review(View):
     def action_switch(self) -> None:
         (self.query_one("#qs") if self.focused and self.focused.id == "jobs" else self.query_one("#jobs")).focus()
 
+    def _filled_already(self) -> bool:
+        if self.approval:
+            self.notify("This form is already filled in. To change an answer, press t and change it in the form, "
+                        "then submit it yourself.", severity="warning", timeout=8)
+            return True
+        return False
+
     def action_approve(self) -> None:
         x = self.current()
-        if x:
+        if x and not self._filled_already():
             r = self.send("PUT", f"/api/drafts/{x['id']}", {"verdict": "green"})
             self.notify(r["error"], severity="warning") if r.get("error") else self.load_job(self.job["id"])
 
     def action_edit(self) -> None:
         x = self.current()
-        if not x:
+        if not x or self._filled_already():
             return
 
         def saved(text: str | None) -> None:
@@ -403,6 +443,14 @@ class Review(View):
         if not self.job:
             return
         jid = self.job["id"]
+        if self.approval:          # autopilot's first submission here: you approve, it sends
+            r = self.send("POST", f"/api/jobs/{jid}/approve", timeout=120)
+            msg = r.get("error") or r.get("message") or ""
+            self.notify(str(msg), severity="information" if r.get("ok") else "warning", timeout=8)
+            if r.get("ok"):
+                self.app.say(f"Approved [b]{self.job['company']}[/] ({self.job['title']}). {msg}")
+            self.load_jobs()
+            return
         rd = self.get(f"/api/jobs/{jid}").get("readiness") or {}
         if not self.drafts:
             r = self.send("POST", f"/api/jobs/{jid}/fill", {"submit": False})
