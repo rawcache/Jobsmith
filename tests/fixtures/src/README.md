@@ -1,0 +1,28 @@
+# Sources for built fixtures
+
+## `greenhouse_select.jsx` → `../greenhouse_figma_live.html`
+
+`greenhouse_board_posting.html` is the saved Figma application form (Greenhouse job-boards, blank). It has no
+scripts, so its dropdowns can't open. `greenhouse_figma_live.html` is the same page with a script at the end. The
+script replaces Country, Location (City) and two Yes/No boxes with real react-select (MIT), set up the way the live
+form sets it up:
+
+- Greenhouse controls the menu. It opens on key-up and mouse-up, not on react-select's own key-down or mouse-down.
+- Location (City) searches a place lookup as you type. The lookup's answers here are the ones the live form gave for
+  "Boston".
+- Each box has react-select's hidden "required" input until something is picked.
+
+That behaviour was observed on the live form on 2026-10-28, headless, with every non-GET request blocked. The script
+contains none of Greenhouse's code.
+
+To rebuild after changing the source:
+
+```bash
+mkdir -p /tmp/gh-select && cp tests/fixtures/src/greenhouse_select.jsx /tmp/gh-select/ && cd /tmp/gh-select
+npm init -y >/dev/null && npm install react@18.3.1 react-dom@18.3.1 react-select@5.8.0 esbuild@0.21.5
+npx esbuild greenhouse_select.jsx --bundle --minify --format=iife --jsx=automatic \
+  --define:process.env.NODE_ENV='"production"' --legal-comments=eof --outfile=bundle.js
+cd - && python3 -c "
+html = open('tests/fixtures/greenhouse_board_posting.html').read(); js = open('/tmp/gh-select/bundle.js').read()
+open('tests/fixtures/greenhouse_figma_live.html', 'w').write(html.replace('</body>', '<script>' + js + '</script></body>', 1))"
+```

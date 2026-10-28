@@ -351,6 +351,32 @@ async def test_real_react_select_ignores_other_option_lists(page):
     assert (await combobox_text(page, "#question_5")).startswith("Select")
 
 
+async def test_greenhouse_dropdowns_on_the_saved_figma_form_are_picked_with_real_clicks(page):
+    """#19, autopilot's side: the saved Figma form with its dropdowns working as on the live site (they open on
+    key-up and mouse-up, not key-down; Location (City) searches a lookup). Real clicks pick Country and the
+    Yes/No boxes, the city comes from the lookup, and a box with no matching option stays under Needs you."""
+    from jobsmith.fill.base import combobox_text
+    await page.goto((FIXTURES / "greenhouse_figma_live.html").resolve().as_uri())
+    await page.evaluate("window.__submits = 0; document.addEventListener('submit', () => window.__submits++, true); 0")
+    await page.wait_for_function("document.querySelectorAll('input[required][aria-hidden=true]').length === 4")
+    drafts = [{"field": "location", "label": "Location (City)", "qtype": "select", "value": "Boston, MA", "required": True},
+              {"field": "question_12497125004", "label": "Are you authorized to work in the country for which you applied?",
+               "qtype": "select", "value": "Yes", "required": True},
+              {"field": "question_12497126004", "label": "Have you ever worked for Figma before?", "qtype": "select",
+               "value": "Sometimes", "required": True}]
+    res = await greenhouse.fill(page, drafts, {}, {"country": "United States",
+                                                   "location_full": draft.location_full("Boston, MA")})
+    assert await combobox_text(page, "#country") == "United States +1"
+    assert await combobox_text(page, "#candidate-location") == "Boston, Massachusetts, United States"
+    assert await combobox_text(page, "#question_12497125004") == "Yes"
+    assert await combobox_text(page, "#question_12497126004") == ""
+    assert ("Phone country", "ok") in res["filled"] and ("Location (City)", "ok") in res["filled"]
+    assert res["failed"] == [("Have you ever worked for Figma before?", 'no option matched "Sometimes"')]
+    assert set(res["sent"]) == {"location", "question_12497125004"}
+    assert await page.evaluate("window.__lookups") and await page.evaluate("window.__submits") == 0
+    assert await page.evaluate("document.querySelectorAll('input[required][aria-hidden=true]').length") == 1
+
+
 async def test_verification_code_step(page):
     """After Submit, some forms email a code. Jobsmith spots the prompt and types the code you give it."""
     from jobsmith.fill.base import enter_security_code, page_confirms_submission, security_code_prompt

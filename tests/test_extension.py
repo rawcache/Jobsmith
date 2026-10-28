@@ -21,13 +21,14 @@ FORM_ACTION = "/figma/jobs/5426468004"   # the saved Figma form posts back to it
 _SITE = {}
 
 
-def _posting() -> str:
-    """The saved Figma posting, served over local HTTP (not file://) so requests to its submit address are seen."""
-    if "url" not in _SITE:
-        html = (FIXTURES / "greenhouse_board_posting.html").read_bytes()
+def _posting(fixture: str = "greenhouse_board_posting.html") -> str:
+    """The saved Figma posting, served over local HTTP (not file://) so requests to its submit address are seen.
+    greenhouse_figma_live.html is the same page with its dropdowns working (tests/fixtures/src/)."""
+    if fixture not in _SITE:
+        html = (FIXTURES / fixture).read_bytes()
         srv = _serve({FORM_ACTION: (200, "text/html", lambda body=None: html)})
-        _SITE["url"] = f"http://127.0.0.1:{srv.server_port}{FORM_ACTION}"
-    return _SITE["url"]
+        _SITE[fixture] = f"http://127.0.0.1:{srv.server_port}{FORM_ACTION}"
+    return _SITE[fixture]
 
 
 def _chromium() -> str:
@@ -87,9 +88,10 @@ def _stub(store: dict, **opts) -> str:
     return f"window.__initialStore = {json.dumps(store)}; window.__opts = {json.dumps(opts)};" + CHROME_STUB
 
 
-async def _load(page, store: dict, other_tab: bool = True, wait: bool = True, **opts):
+async def _load(page, store: dict, other_tab: bool = True, wait: bool = True, fixture: str = "greenhouse_board_posting.html",
+                **opts):
     await page.add_init_script(_stub(store, **opts))
-    await page.goto(_posting())
+    await page.goto(_posting(fixture))
     await _watch_for_submits(page)
     if not other_tab:
         await page.evaluate("document.getElementById('other-extension-tab').remove()")
@@ -375,6 +377,86 @@ async def test_autofill_never_types_the_phone_number_into_the_phone_country_box(
     await _never_submitted(page)
 
 
+AUTHORIZED = "#question_12497125004"   # "Are you authorized to work in the country for which you applied?"
+WORKED_HERE = "#question_12497126004"  # "Have you ever worked for Figma before, ...?"
+
+
+async def _shown(page, sel: str) -> str:
+    """What a react-select box shows as picked."""
+    return await page.evaluate(f"document.querySelector('{sel}').closest('.select__control')"
+                               ".querySelector('.select__single-value')?.innerText || ''")
+
+
+@browser
+async def test_autofill_picks_greenhouse_dropdowns_and_the_city_from_its_lookup(page):
+    """#19: on Greenhouse's form the dropdowns open on key-up, not key-down, so autofill left Country, Location
+    (City) and every Yes/No box under Needs you. Now it opens them with a whole key press, picks the option that
+    matches the answer, finds the city through the form's own lookup, and leaves a box with no matching option
+    alone (never the first option)."""
+    await _load(page, {"panelOpen": True}, fixture="greenhouse_figma_live.html", answers={
+        "Country": {"value": "United States", "kind": "standard", "qkind": "location"},
+        "Location (City)": {"value": "Boston, MA", "pick": "Boston, Massachusetts, United States", "kind": "standard",
+                            "qkind": "location"},
+        "Are you authorized to work in the country for which you applied?": {"value": "Yes", "kind": "standard"},
+        "Have you ever worked for Figma before, as an employee or a contractor/consultant?": {"value": "Sometimes",
+                                                                                               "kind": "standard"}})
+    await page.wait_for_function("document.querySelectorAll('input[required][aria-hidden=true]').length === 4")
+    await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
+    note = "document.querySelector('#jobsmith-panel').shadowRoot.querySelector('.note')"
+    await page.wait_for_function(f"{note}?.innerText.includes('Filled')", timeout=30000)
+    assert await _shown(page, "#country") == "United States +1"
+    assert await _shown(page, "#candidate-location") == "Boston, Massachusetts, United States"   # not East Boston
+    assert await _shown(page, AUTHORIZED) == "Yes"
+    assert await _shown(page, WORKED_HERE) == ""                                        # no option says "Sometimes"
+    assert await page.evaluate("window.__lookups") == ["Boston, MA"]                    # found through the lookup
+    # react-select's hidden "required" copies: only the box left empty still has one
+    assert await page.evaluate("document.querySelectorAll('input[required][aria-hidden=true]').length") == 1
+    needs = (await page.evaluate(f"{note}.innerText")).split("Needs you:")[1]
+    assert "worked for Figma before" in needs
+    assert not any(x in needs for x in ("Country", "Location (City)", "authorized to work"))
+    await _never_submitted(page)
+
+
+@browser
+async def test_autofill_leaves_a_city_the_lookup_doesnt_have_for_you(page):
+    """A place with no matching option in the lookup isn't swapped for the nearest one."""
+    await _load(page, {"panelOpen": True}, fixture="greenhouse_figma_live.html", answers={
+        "Location (City)": {"value": "Springfield, IL", "pick": "Springfield, Illinois, United States",
+                            "kind": "standard", "qkind": "location"}})
+    await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
+    note = "document.querySelector('#jobsmith-panel').shadowRoot.querySelector('.note')"
+    await page.wait_for_function(f"{note}?.innerText.includes('Filled')", timeout=30000)
+    assert await _shown(page, "#candidate-location") == ""
+    assert "Location (City)" in (await page.evaluate(f"{note}.innerText")).split("Needs you:")[1]
+    await _never_submitted(page)
+
+
+@browser
+async def test_autofill_picks_a_city_outside_the_us_as_you_wrote_it(page):
+    """No US name to look for: the answer as written picks its own match from the lookup."""
+    await _load(page, {"panelOpen": True}, fixture="greenhouse_figma_live.html", answers={
+        "Location (City)": {"value": "Boston, England", "kind": "standard", "qkind": "location"}})
+    await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
+    note = "document.querySelector('#jobsmith-panel').shadowRoot.querySelector('.note')"
+    await page.wait_for_function(f"{note}?.innerText.includes('Filled')", timeout=30000)
+    assert await _shown(page, "#candidate-location") == "Boston, England, United Kingdom"
+    await _never_submitted(page)
+
+
+def test_a_us_city_is_named_the_way_place_lookups_name_it():
+    from jobsmith import draft
+    assert draft.location_full("Boston, MA") == "Boston, Massachusetts, United States"
+    assert draft.location_full("Atlanta, Georgia") == ""     # could be the country; the answer as written still
+                                                             # matches "Atlanta, Georgia, United States" in a lookup
+    assert draft.location_full("Austin, Texas, USA") == "Austin, Texas, United States"
+    assert draft.location_full("Atlanta, GA") == "Atlanta, Georgia, United States"
+    assert draft.location_full("New York, NY") == "New York, New York, United States"
+    assert draft.location_full("Washington, DC") == "Washington, District of Columbia, United States"
+    for not_a_us_city in ("United States", "London, UK", "", "CA", "Tbilisi, Georgia", "Paris, Texas, France",
+                          "Georgia, US", "Toronto, ON, Canada"):
+        assert draft.location_full(not_a_us_city) == "", not_a_us_city
+
+
 def test_a_phone_number_is_not_a_country():
     from jobsmith import classify, draft
     assert classify.question_kind("Country", "combobox") == "location"
@@ -507,6 +589,19 @@ async def test_engine_answers_a_form_with_no_resume_pdf():
     assert r["resume"] is None
     by = {a["id"]: a for a in r["answers"]}
     assert by["js1"]["value"] == "alex@example.com" and by["js2"]["file"] == "resume"
+
+
+async def test_engine_names_the_city_to_pick_from_a_place_lookup():
+    """For Greenhouse's Location (City) the engine sends your city as you wrote it (typed to search) and the option
+    to look for. Other dropdowns get no such hint."""
+    profile.set_answer("location", "Boston, MA", True)
+    r = await extension.answers("https://job-boards.greenhouse.io/acme/jobs/10", [
+        {"id": "candidate-location", "label": "Location (City)", "type": "combobox", "required": True},
+        {"id": "pronouns", "label": "Pronouns", "type": "combobox"}], title="Intern")
+    by = {a["id"]: a for a in r["answers"]}
+    assert by["candidate-location"]["value"] == "Boston, MA"
+    assert by["candidate-location"]["pick"] == "Boston, Massachusetts, United States"
+    assert "pick" not in by["pronouns"]
 
 
 @pytest.mark.parametrize("fact", ["first name", "legal last name", "email address", "mobile phone number",

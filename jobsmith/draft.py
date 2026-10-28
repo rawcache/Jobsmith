@@ -118,6 +118,28 @@ def state_from_location(loc: str) -> str:
     return ""
 
 
+def location_full(loc: str) -> str:
+    """'Boston, MA' -> 'Boston, Massachusetts, United States': how place lookups (Greenhouse's Location (City))
+    name a US city, so the right option can be picked from them. Only for a plain "city, state" (optionally ending
+    in the US): '' for anything else, and for "Tbilisi, Georgia", where the state name is also a country."""
+    parts = [p.strip() for p in (loc or "").split(",") if p.strip()]
+    if len(parts) == 3 and parts[2].lower().replace(".", "") in ("us", "usa", "united states", "united states of america"):
+        parts = parts[:2]
+    if len(parts) != 2:
+        return ""
+    city, st = parts
+    if st.upper() in US_STATES:
+        name = US_STATES[st.upper()]
+    else:
+        name = next((n for n in US_STATES.values() if n.lower() == st.lower() and n not in ALSO_COUNTRIES), "")
+    if not name:
+        return ""
+    return f"{city}, {name}, United States"
+
+
+ALSO_COUNTRIES = {"Georgia"}       # spelled out, it may mean the country
+
+
 def _derived(canon: str, ans: dict, job: dict | None = None) -> tuple[str, bool]:
     job = job or {}
     if canon == "referral_name":

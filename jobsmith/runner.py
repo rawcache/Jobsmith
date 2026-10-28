@@ -753,14 +753,12 @@ async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None
             if adapter is greenhouse:
                 ans = profile.answers()
                 v = lambda k: (ans.get(k) or {}).get("value", "")
-                from .draft import state_from_location
                 loc = v("location")
-                st = state_from_location(loc)
                 # Country (from citizenship) and Hispanic/Latino come only from answers you confirmed (rule 2).
                 ok = lambda k: v(k) if (ans.get(k) or {}).get("confirmed") else ""
                 extras = {"country": ok("country") or ("United States" if ok("us_citizen").lower() == "yes" else ""),
                           "hispanic_latino": ok("hispanic_latino"),
-                          "location_full": f"{loc.split(',')[0].strip()}, {st}, United States" if st else loc}
+                          "location_full": draft.location_full(loc) or loc}
                 result = await adapter.fill(page, drafts_, files, extras)
                 live_set(job_id, phase="filling", note="checking the page for anything else")
                 from .fill.sweep import sweep
