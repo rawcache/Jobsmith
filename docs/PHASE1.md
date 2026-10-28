@@ -139,7 +139,8 @@ then `ats.SUPPORTED` and the README.
 - [ ] A CI test proving the practice copy's autopilot runs end to end with every AI provider blocked.
 - [ ] A "What works without AI" table in the README.
 
-Moved out of Phase 1: the full fit breakdown ([#6](https://github.com/rawcache/Jobsmith/issues/6), Phase 2) and any
-OpenAI-compatible AI ([#7](https://github.com/rawcache/Jobsmith/issues/7), Phase 5).
+Moved out of Phase 1: the full fit breakdown ([#6](https://github.com/rawcache/Jobsmith/issues/6)) and any
+OpenAI-compatible AI ([#7](https://github.com/rawcache/Jobsmith/issues/7)), both Phase 2. The whole plan is in
+[ROADMAP.md](ROADMAP.md).
 
 Phase 1 is done when every box is ticked and both gate checks pass on real applications.

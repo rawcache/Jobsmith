@@ -148,6 +148,17 @@ in it opens a real site or sends anything.
 **A keychain prompt appeared.** If macOS asked for your login keychain password for 'Chromium Safe Storage', click
 Deny. Jobsmith's browser doesn't need it, and it never asks for passwords.
 
+## Roadmap
+
+The full plan, with each phase's gate, is in [docs/ROADMAP.md](docs/ROADMAP.md).
+
+- **Phase 0 · Go public** (October 2026): done.
+- **Phase 1 · Autopilot you can trust** (November 2026): guardrails, posting traps, confirmed submissions, more job sites.
+- **Phase 2 · Applications that win** (December 2026): fit evaluation, tailored resumes and reviewed cover letters.
+- **Phase 3 · Every job and every reply** (January 2027): Chrome Web Store, job board, more sources, inbox tracking.
+- **Phase 4 · Interviews and offers** (February 2027): prep packs, notes, mock interviews, offer comparison.
+- **Phase 5 · Platform** (March–April 2027): desktop installer, plugins, other countries, signed releases.
+
 ## Contributing
 
 ```bash
