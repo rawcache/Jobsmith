@@ -141,13 +141,20 @@ async def generate(url: str, label: str, title: str = "", site_name: str = "", d
             "qkind": classify.question_kind(f["label"], f["qtype"])}
 
 
-def submitted(url: str, title: str = "", site_name: str = "") -> dict:
-    """You pressed Submit on a posting and it said thanks: log it to Applications, and suggest a few similar roles."""
-    from . import runner
+def submitted(url: str, title: str = "", site_name: str = "", confirmation: dict | None = None) -> dict:
+    """You pressed Submit on a posting and it said thanks: log it to Applications, and suggest a few similar roles.
+    `url` and `title` are the posting's; `confirmation` is the thank-you page itself, kept as proof it landed."""
+    from . import audit, guardrails, runner
     jid = find_or_add(url, title, company_guess(url, site_name))
     job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,)))
-    if job["status"] != "submitted":
+    # Autopilot clicked Submit here without seeing a confirmation: this thank-you settles that submission rather than
+    # making a second one.
+    if job["status"] != "submitted" and not guardrails.maybe_sent(jid):
         runner.mark_submitted(jid)
+    c = confirmation or {}
+    # Also when it was already marked sent: the proof belongs to that submission.
+    audit.log_confirmation(jid, "page", url=str(c.get("url") or ""), title=str(c.get("title") or ""),
+                           text=str(c.get("text") or ""), seen_by="extension")
     similar = db.q("""SELECT id, company, title, locations FROM jobs WHERE active=1 AND status IN ('new','fetched','drafted')
                       AND id != ? AND company != ? AND (category = ? OR ? = '') ORDER BY COALESCE(fit_score,0) DESC LIMIT 3""",
                    (jid, job["company"], job.get("category") or "", job.get("category") or ""))

@@ -3,8 +3,9 @@ import { api } from "../api";
 
 type Field = { field: string; label: string; qtype: string; answer: string; source: string; source_label: string;
   detail: { ref: string; text: string }[]; approved: boolean; kind_check: string; issues: string[]; traces: boolean };
+type Proof = { kind: "page" | "email"; at: number; url: string; title: string; text: string; sender: string; seen_by: string };
 type Submission = { run_id: number; submitted_at: number; confirmed: boolean; sent_by: string; basis: string; note: string;
-  fields: Field[]; untraced: number };
+  confirmations: Proof[]; fields: Field[]; untraced: number };
 
 // What each submission sent, field by field, and where every answer came from. Written when it was sent, so
 // later edits don't change it.
@@ -29,6 +30,11 @@ export default function AuditTrail({ id, refresh }: { id: string; refresh?: unkn
               : <span className="ok-text">Every answer traces to you</span>}
           </summary>
           {s.note && <p className="small muted">{s.note}</p>}
+          {s.confirmations.map((c, j) => (
+            <p key={j} className="small"><span className="ok-text">{c.kind === "email" ? "Confirmation email" : "Confirmation page"}</span>
+              {c.kind === "email" ? ` from ${c.sender}: ` : c.seen_by === "extension" ? " seen by the extension: " : ": "}
+              {c.url && /^https?:/.test(c.url) ? <a href={c.url} target="_blank" rel="noreferrer">{c.title || c.url}</a> : (c.title || c.url)}
+              {c.text && <span className="muted"> · {c.text.slice(0, 140)}{c.text.length > 140 ? "…" : ""}</span>}</p>))}
           {s.fields.length === 0 && <p className="small muted">No answers were recorded for this one.</p>}
           {s.fields.length > 0 && <div className="audit-scroll">
             <table className="audit-t">

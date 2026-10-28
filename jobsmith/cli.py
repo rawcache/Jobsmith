@@ -3,6 +3,7 @@
     jobsmith                  the terminal app (see tui.py): prompt, live progress, review
     jobsmith serve            just the engine and the dashboard at http://127.0.0.1:8765
     jobsmith sync | ingest PATH | doctor
+    jobsmith stats | audit    the Phase 1 gate numbers (see clicmds.py)
 """
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ def main() -> None:
         from . import __version__
         print(f"jobsmith {__version__}")
         return
-    if argv and argv[0] in ("mcp", "skills", "voice", "site"):
+    if argv and argv[0] in ("mcp", "skills", "voice", "site", "stats", "audit"):
         from . import clicmds
         clicmds.main(argv)
         return

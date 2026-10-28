@@ -240,6 +240,20 @@ def live_list() -> list[dict]:
     return sorted(out, key=lambda r: r["since"] or 0)
 
 
+async def confirmation_of(page, screenshot: Path | None = None) -> dict:
+    """What the confirmation page said, kept as proof the submission landed: its address, title and text."""
+    out = {"url": "", "title": "", "text": "", "screenshot": ""}
+    try:
+        out["url"] = page.url or ""
+        out["title"] = await page.title()
+        out["text"] = (await page.inner_text("body", timeout=5000))[:4000]
+    except Exception:
+        pass
+    if screenshot is not None and (screenshot.exists() or await _shot(page, screenshot)):
+        out["screenshot"] = str(screenshot)
+    return out
+
+
 async def _shot(page, path, full: bool = True) -> bool:
     """A record of the page. Never worth failing an application over: a slow page just gets no picture."""
     try:
@@ -798,9 +812,9 @@ async def _watch(job_id: str, page, run_dir: Path, run: Run, job: dict, deadline
             if page.is_closed():
                 break
             if await page_confirms_submission(page):
-                await _shot(page, run_dir / "confirmation.png")
-                record_submission(job_id, "Confirmation page detected.", screenshot=str(run_dir / "confirmation.png"),
-                                  snapshot=str(run_dir / "answers.json"))
+                proof = await confirmation_of(page, run_dir / "confirmation.png")
+                record_submission(job_id, "Confirmation page detected.", confirmation=proof,
+                                  screenshot=proof["screenshot"], snapshot=str(run_dir / "answers.json"))
                 live_set(job_id, phase="submitted", needs_code=False, note="")
                 run.log("Submitted ✓")
                 await live_shot(job_id)
@@ -838,16 +852,20 @@ async def _watch(job_id: str, page, run_dir: Path, run: Run, job: dict, deadline
         await asyncio.sleep(2)
 
 
-def record_submission(job_id: str, note: str, **files) -> None:
+def record_submission(job_id: str, note: str, confirmation: dict | None = None, **files) -> int:
     """Every submission goes through here: counted toward the caps, logged, and its audit trail written from the
-    answers as they stood when it was sent."""
+    answers as they stood when it was sent. `confirmation` is the page that proved it landed, when one was seen.
+    Returns the submission's run id."""
     from . import audit
     by = "autopilot" if guardrails.release(job_id) else "you"
     sub = Run(job_id, "submit")
     sub.log(note)
     sub.done("done", **files)
     audit.record(job_id, sub.id, by)
+    if confirmation:
+        audit.log_confirmation(job_id, "page", run_id=sub.id, **confirmation)
     _set_status(job_id, "submitted")
+    return sub.id
 
 
 def mark_submitted(job_id: str) -> None:
@@ -862,7 +880,10 @@ async def autopilot(job_ids: list[str], force: bool = False, submit: bool | None
 
     async def one(jid):
         if not force:            # the fit gate: autopilot's own picks only, never one you chose
-            gate = guardrails.fit_gate(db.q1("SELECT fit_score, fit_reasons FROM jobs WHERE id=?", (jid,)) or {})
+            row = db.q1("SELECT fit_score, fit_reasons FROM jobs WHERE id=?", (jid,)) or {}
+            gate = guardrails.fit_gate(row)
+            from . import audit
+            audit.log_considered(jid, gate["passed"], row.get("fit_score"))   # for `jobsmith stats`, whatever comes next
             if not gate["passed"]:
                 db.x("UPDATE jobs SET hold_reason=?, updated_at=? WHERE id=?", (gate["summary"], db.now(), jid))
                 return
@@ -978,7 +999,9 @@ async def fill_multistep(job_id: str, submit: bool = False) -> None:
             if res["status"] in ("submitted", "submitted_clicked"):
                 from .fill.base import page_confirms_submission
                 if res["status"] == "submitted" or await page_confirms_submission(page):
-                    record_submission(job_id, "Submitted through the multi-page flow.", screenshot=str(shot))
+                    proof = await confirmation_of(page, run_dir / "confirmation.png")
+                    record_submission(job_id, "Submitted through the multi-page flow.", confirmation=proof,
+                                      screenshot=proof["screenshot"] or str(shot))
                     notify("Jobsmith: submitted", f"{job['company']}: {job['title']}")
                     live_set(job_id, phase="submitted", note="")
                     run.done("done")

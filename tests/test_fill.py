@@ -167,6 +167,9 @@ async def test_runner_fill_and_detect_submission(fake_llm, tmp_path):
     [sub] = audit.for_job(jid)                 # the trail is what this fill set, sent by autopilot
     assert sub["sent_by"] == "autopilot" and sub["basis"] == "filled" and sub["fields"]
     # Everything traces except the AI's "No" about outstanding offers: it cites nothing, even though you approved it.
+    [proof] = sub["confirmations"]             # the confirmation page, kept as proof it landed
+    assert proof["kind"] == "page" and proof["url"].startswith("file://") and "Thank you for applying!" in proof["text"]
+    assert proof["screenshot"].endswith("confirmation.png")
     untraced = [f for f in sub["fields"] if not f["traces"]]
     assert [(f["field"], f["source"], f["approved"]) for f in untraced] == [("question_1005", "none", True)]
     implicit = {f["label"]: f for f in sub["fields"] if f["field"] in ("country", "hispanic_ethnicity")}

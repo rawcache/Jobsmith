@@ -1380,10 +1380,14 @@ async def ext_generate(b: ExtGenerate):
         return await extension.generate(b.url, b.label, b.title, b.site_name, b.description, b.limit)
 
 
+class ExtSubmitted(ExtSave):
+    confirmation: dict | None = None     # the thank-you page: url, title, text
+
+
 @app.post("/api/ext/submitted")
-def ext_submitted(b: ExtSave):
+def ext_submitted(b: ExtSubmitted):
     from . import extension
-    return extension.submitted(b.url, b.title, b.site_name)
+    return extension.submitted(b.url, b.title, b.site_name, b.confirmation)
 
 
 # --------------------------------------------------------------------------- dashboard
