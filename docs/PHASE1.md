@@ -139,9 +139,22 @@ issue), and commit the tick with the work.
 
 ## 5. Finding jobs through public job boards
 
-- [ ] Read Greenhouse, Lever and Ashby public job-board JSON before any browser opens.
-- [ ] Filter there by experience, seniority words and pay, so unsuitable jobs never reach a browser.
-- [ ] Tests on saved board responses for each of the three.
+- [x] Read Greenhouse, Lever and Ashby public job-board JSON before any browser opens.
+      Evidence: [c8abefe](https://github.com/rawcache/Jobsmith/commit/c8abefe). `jobsmith/boards.py` turns a board
+      address (`boards.greenhouse.io/figma`, `jobs.lever.co/palantir`, `jobs.ashbyhq.com/ramp`) into a source read
+      with one GET to the board's public API; paste it in the terminal or add it in Settings. Roles taken down are put
+      away on the next sync, and an answer that isn't a board closes nothing.
+- [x] Filter there by experience, seniority words and pay, so unsuitable jobs never reach a browser.
+      Evidence: `boards.screen` leaves out senior titles (staff/principal need 7+ years, senior/lead 3+), roles
+      requiring 3+ years and more than a year beyond what the profile shows (preferred years don't count, since a
+      left-out role can't be applied to anyway), and pay under the new "Lowest pay you'd take" (hourly and monthly annualized; USD only; no
+      stated pay passes). Experience is screened only when the profile or goals say it. Each sync says how many it
+      left out and why; roles that stop passing are put away before autopilot picks them.
+- [x] Tests on saved board responses for each of the three.
+      Evidence: `tests/test_boards.py` (26 tests) on trimmed saved responses in `tests/fixtures/boards/` (Figma on
+      Greenhouse, Palantir on Lever, Ramp on Ashby), served through a mock that refuses anything but a GET.
+      [CI run](https://github.com/rawcache/Jobsmith/actions/runs/40757860637) (with the Windows encoding fix,
+      [c56b80d](https://github.com/rawcache/Jobsmith/commit/c56b80d)).
 
 ## 6. Greenhouse dropdowns and location autocomplete ([#19](https://github.com/rawcache/Jobsmith/issues/19))
 
