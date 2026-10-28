@@ -23,6 +23,11 @@
   followed. Jobsmith finds them when it fetches the posting and again on the live page, keeps them out of
   everything an AI is shown, and holds the application under "Needs you" with the line quoted. Hidden text is no
   longer stored as part of a posting's description.
+- A held application's "Full posting" shows the posting as the employer wrote it, hidden lines included, with each
+  line aimed at AI highlighted and labelled with how it was hidden. Only what goes to an AI or your agent is trimmed.
+- A visible line that only asks you to use a word or open your answer a certain way ("Mention the word 'otter' in
+  your answer") is labelled "may be an attention check for you — answer it yourself" under "Needs you", instead of
+  "aimed at AI tools". Autopilot still never follows it or sends the application on its own.
 - Each match says whether it clears your fit bar and why, with what counts for it and against it. Matches under the
   bar show "Under your fit bar" and autopilot skips them; pick one yourself and it still applies.
 

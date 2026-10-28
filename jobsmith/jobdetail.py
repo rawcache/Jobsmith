@@ -5,7 +5,7 @@ import html
 import re
 
 import httpx
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Comment
 
 from . import ats, db, traps
 
@@ -27,6 +27,27 @@ def html_to_text(s: str) -> str:
         li.insert_before("\n• ")
     text = soup.get_text("\n")
     return re.sub(r"\n\s*\n+", "\n\n", text).strip()
+
+
+def original_text(raw: str) -> str:
+    """The posting as the employer wrote it, hidden lines included, for the person to see a trap in place.
+    Never shown to an AI: that's what the description (visible text, traps trimmed) is for."""
+    if not raw or "<" not in raw:
+        return html.unescape(raw or "")
+    soup = BeautifulSoup(html.unescape(raw) if "&lt;" in raw else raw, "html.parser")
+    has_trap = lambda t: traps.is_trap(" ".join(t.split()))
+    for c in soup.find_all(string=lambda x: isinstance(x, Comment)):
+        c.replace_with("\n\n" + str(c).strip() + "\n\n" if has_trap(str(c)) else "")
+    for t in soup("template"):                            # get_text() skips template contents; a trap can hide there
+        t.replace_with("\n\n" + t.get_text(" ", types=None) + "\n\n" if has_trap(t.get_text(" ", types=None)) else "")
+    for t in soup(["script", "style", "noscript", "head"]):
+        t.decompose()
+    for t in soup(["nav", "footer", "header"]):           # page chrome, unless a trap is hiding in it
+        if not has_trap(t.get_text(" ")):
+            t.decompose()
+    for li in soup.find_all("li"):
+        li.insert_before("\n• ")
+    return re.sub(r"\n\s*\n+", "\n\n", soup.get_text("\n")).strip()[:30000]
 
 
 def normalize_greenhouse(data: dict) -> list[dict]:
@@ -203,10 +224,11 @@ async def fetch_job(job_id: str) -> dict:
             info = await fetch_ashby(job["url"], client)
         else:
             info = await fetch_generic(job["url"], client)
+    # Before any AI sees it: lines aimed at AI, hidden or not, from the posting as served. When there are any, keep
+    # the posting as written too, so the person sees each line where the employer put it.
+    found = traps.unique(traps.scan_html(info.get("html") or "") + traps.scan_text(info.get("description") or ""))
     sets = {"description": info.get("description") or "", "questions": db.enc(info.get("questions") or []),
-            # before any AI sees it: lines aimed at AI, hidden or not, from the posting as served
-            "traps": db.enc(traps.unique(traps.scan_html(info.get("html") or "") +
-                                         traps.scan_text(info.get("description") or "")))}
+            "traps": db.enc(found), "original": original_text(info.get("html") or "") if found else ""}
     if info.get("apply_url"):
         sets["url"] = info["apply_url"]
     if job["title"].startswith("(") and info.get("title"):

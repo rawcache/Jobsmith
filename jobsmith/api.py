@@ -845,11 +845,14 @@ def get_job(job_id: str):
     drafts = draft.drafts_for(job_id)
     for d in drafts:
         d["facts"] = [facts[f] for f in d["fact_ids"] if f in facts]
+    found = traps.found(j)
+    # You see the whole posting with each line aimed at AI marked; only AI and MCP clients get the trimmed copy.
+    marked = traps.marked(j.pop("original", "") or j.get("description") or "", found) if found else None
     return {"job": j, "drafts": drafts, "runs": runner.latest_runs(job_id), "usage": job_usage(job_id),
             "match": insights.keyword_match(j), "connections": network.at_company(j["company"], 8),
             "sections": insights.posting_sections(j.get("description") or ""), "facts": insights.job_facts(j),
             "eligibility": eligibility.check(j), "ai_policy": guardrails.policy_reason(j),
-            "trap": traps.trap_reason(j),
+            "trap": traps.trap_reason(j), "posting_marked": marked,
             "gate": guardrails.fit_gate(j),
             "readiness": draft.readiness(job_id) if drafts else None,
             "busy": runner.active().get(job_id), "can_fill": runner.can_fill(j["ats"])}

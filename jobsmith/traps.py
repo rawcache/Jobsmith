@@ -42,13 +42,15 @@ ADDRESS = [re.compile(p, re.I) for p in (
     # "AI models processing this posting", "any LLM reading this"
     rf"\b{_BOT}s?\s+(?:\w+\s+){{0,2}}?{_READS}\s+this\b",
 )]
-INSTRUCT = [re.compile(p, re.I) for p in (
+OVERRIDE = [re.compile(p, re.I) for p in (
     # Overriding instructions
     r"\b(?:ignore|disregard|forget|override)\s+(?:all\s+|any\s+|the\s+|your\s+|of\s+)*(?:previous|prior|above|earlier|"
     r"preceding|other|system|original|initial)\s+(?:instructions|prompts?|directions|rules|guidance|context|messages?)",
     r"\bsystem\s+prompt\b",
     r"\bnew\s+instructions\s*:",
     r"\byou\s+are\s+now\s+(?:an?\s+)?(?:AI|LLM|language model|assistant|chatbot|in\b)",
+)]
+CANARY = [re.compile(p, re.I) for p in (
     # Canaries: "include the word 'banana'", "use the phrase …", "start your cover letter with …"
     r"\b(?:include|use|insert|add|mention|write|say|put|type)\s+(?:the|this|these)\s+(?:exact\s+|following\s+|secret\s+|"
     r"special\s+|hidden\s+|code\s+)?(?:words?|phrases?|terms?|keywords?|code\s?words?|strings?|sentences?|emojis?|"
@@ -59,6 +61,7 @@ INSTRUCT = [re.compile(p, re.I) for p in (
     r"\b(?:start|begin|end|open|close|sign\s+off)\s+(?:each\s+|every\s+|all\s+)?(?:of\s+)?your\s+(?:answers?|responses?|"
     r"replies|application|cover\s+letter|message|email|essays?|submission)\s+(?:with|by\s+(?:saying|writing))\b",
 )]
+INSTRUCT = OVERRIDE + CANARY
 TRAPS = ADDRESS + INSTRUCT
 
 # Inline styles and classes that hide text from a person.
@@ -425,11 +428,20 @@ def _job_traps(job: dict) -> list[dict]:
     return [*stored, *scan_text(job.get("description") or ""), *scan_text(form)]
 
 
+def attention_check(t: dict) -> bool:
+    """A line anyone can see that only asks for a word or an opening ("Mention the word 'otter' in your answer"),
+    without talking to an AI or overriding instructions. Employers use these to check a person read the posting,
+    so the person should answer it; Jobsmith still never follows it."""
+    q = t["quote"]
+    return (t["how"] == "visible" and any(p.search(q) for p in CANARY)
+            and not any(p.search(q) for p in ADDRESS + OVERRIDE))
+
+
 def found(job: dict, nodes: list[dict] | None = None, page_text: str = "") -> list[dict]:
     """Every trap line for this job: from its posting when fetched, its form, and the live page if given."""
     # Hidden ones first: knowing a line was hidden matters more than finding it again in plain text.
     ts = unique([*scan_nodes(nodes or []), *_job_traps(job), *scan_text(page_text or "")])
-    return sorted(ts, key=lambda t: t["how"].startswith("visible"))
+    return [dict(t, attention=attention_check(t)) for t in sorted(ts, key=lambda t: t["how"].startswith("visible"))]
 
 
 def trap_reason(job: dict, nodes: list[dict] | None = None, page_text: str = "") -> str | None:
@@ -437,11 +449,45 @@ def trap_reason(job: dict, nodes: list[dict] | None = None, page_text: str = "")
     ts = found(job, nodes, page_text)
     if not ts:
         return None
-    t = next((t for t in ts if t["how"] != "visible"), ts[0])
-    where = "a line" if t["how"] == "visible" else \
-        f"a line ({t['how']})" if t["how"].startswith("visible") else f"a hidden line ({t['how']})"
-    more = f" (and {len(ts) - 1} more)" if len(ts) > 1 else ""
     co = (job.get("company") or "").strip()
-    return (f"{f'The {co} posting' if co else 'This posting'} has {where} aimed at AI tools{more}: "
-            f"\"{t['quote']}\" Jobsmith ignored it and won't send this on its own. Review it and submit it yourself "
-            "if you're comfortable.")
+    posting = f"The {co} posting" if co else "This posting"
+    aimed, checks = [t for t in ts if not t["attention"]], [t for t in ts if t["attention"]]
+    more = lambda xs: f" (and {len(xs) - 1} more)" if len(xs) > 1 else ""
+    out = []
+    if aimed:
+        t = aimed[0]
+        where = "a line" if t["how"] == "visible" else \
+            f"a line ({t['how']})" if t["how"].startswith("visible") else f"a hidden line ({t['how']})"
+        out.append(f"{posting} has {where} aimed at AI tools{more(aimed)}: \"{t['quote']}\" Jobsmith ignored it and "
+                   "won't send this on its own.")
+    if checks:
+        out.append(f"{'It also' if aimed else posting} has a line that may be an attention check for you — answer it "
+                   f"yourself{more(checks)}: \"{checks[0]['quote']}\""
+                   + ("" if aimed else " Jobsmith didn't follow it and won't send this on its own."))
+    out.append("Review it and submit it yourself if you're comfortable.")
+    return " ".join(out)
+
+
+def marked(text: str, ts: list[dict]) -> list[dict]:
+    """The posting as the employer wrote it, split so each trap line can be highlighted for the person:
+    [{"text": ..., "trap": None | {"how", "attention"}}]. Only people see this; AI is shown the trimmed copy."""
+    spans = []
+    for t in ts:
+        q = t["quote"].rstrip("…").strip()
+        if not q:
+            continue
+        # The quote is whitespace-collapsed and has no space before punctuation; the text may have either.
+        pat = "".join(r"\s+" if c.isspace() else rf"\s*{re.escape(c)}" if c in ",.;:!?" else re.escape(c)
+                      for c in " ".join(q.split()))
+        for m in re.finditer(pat, text):                 # the same line twice is marked twice
+            if not any(a < m.end() and m.start() < b for a, b, _ in spans):
+                spans.append((m.start(), m.end(), {"how": t["how"], "attention": t.get("attention", False)}))
+    out, at = [], 0
+    for a, b, info in sorted(spans, key=lambda x: x[0]):
+        if a > at:
+            out.append({"text": text[at:a], "trap": None})
+        out.append({"text": text[a:b], "trap": info})
+        at = b
+    if at < len(text):
+        out.append({"text": text[at:], "trap": None})
+    return out

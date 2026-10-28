@@ -10,6 +10,7 @@ type Resp = { job: Job; drafts: Draft[]; runs: Run[]; readiness: { ready: boolea
   busy?: string; can_fill: boolean; usage: Usage; match: Match; connections: Person[]; sections: Section[];
   eligibility: { ok: boolean; reasons: string[]; notes: string[] };
   ai_policy: string | null; trap: string | null; gate: FitGate;
+  posting_marked: { text: string; trap: { how: string; attention: boolean } | null }[] | null;
   facts: { pay: string; level: string; mode: string; category: string; sponsorship: string; degree: string } };
 
 const SOURCE: Record<string, string> = {
@@ -186,7 +187,8 @@ export default function JobPage({ id, embedded = false }: { id: string; embedded
   if (err) return <div className="jobview"><p>{err}</p></div>;
   if (!r) return <div className="jobview"><p className="muted"><Dots />Loading</p></div>;
 
-  const { job, drafts, runs, readiness, usage, match, connections, sections, eligibility, ai_policy, trap, gate } = r;
+  const { job, drafts, runs, readiness, usage, match, connections, sections, eligibility, ai_policy, trap, gate, posting_marked } = r;
+  const showTrap = () => { setTab("overview"); setFullPosting(true); };
   const unsure = eligibility && !eligibility.ok;
   const res = job.research ?? {};
   const act = async (path: string, body?: object) => { await api.post(`/api/jobs/${id}/${path}`, body); refresh(); load(); };
@@ -250,9 +252,9 @@ export default function JobPage({ id, embedded = false }: { id: string; embedded
             {gate.against.map(x => <li key={"-" + x}><span className="warn-text" aria-label="counts against">−</span> {x}</li>)}
           </ul> : <p className="small muted">No reasons recorded yet.</p>}
         </details>)}
-      {trap && !applied && !(job.hold_reason ?? "").includes(trap) && <p className="note warn">{trap}</p>}
+      {trap && !applied && !(job.hold_reason ?? "").includes(trap) && <p className="note warn">{trap}{posting_marked && <> <button className="link" onClick={showTrap}>Show it in the posting</button></>}</p>}
       {ai_policy && !applied && !(job.hold_reason ?? "").includes(ai_policy) && <p className="note warn">{ai_policy}</p>}
-      {job.hold_reason && job.status === "filled" && <p className="note warn">Held for you: {job.hold_reason}</p>}
+      {job.hold_reason && job.status === "filled" && <p className="note warn">Held for you: {job.hold_reason}{posting_marked && trap && job.hold_reason.includes(trap) && <> <button className="link" onClick={showTrap}>Show it in the posting</button></>}</p>}
       {job.error && !/connect/i.test(job.error) && <p className="note warn">{friendly(job.error)}</p>}
 
       <div className="tabs jv-tabs" role="tablist">
@@ -266,10 +268,16 @@ export default function JobPage({ id, embedded = false }: { id: string; embedded
 
           <section className="block">
             <div className="sub-h"><h3>About the job</h3>
-              {job.description && <div className="seg mini" role="tablist">
+              {(job.description || posting_marked) && <div className="seg mini" role="tablist">
                 <button role="tab" aria-selected={!fullPosting} className={!fullPosting ? "on" : ""} onClick={() => setFullPosting(false)}>Summary</button>
                 <button role="tab" aria-selected={fullPosting} className={fullPosting ? "on" : ""} onClick={() => setFullPosting(true)}>Full posting</button></div>}</div>
-            {fullPosting ? <pre className="posting">{job.description}</pre> : (<>
+            {fullPosting ? (posting_marked
+              // The whole posting as the employer wrote it, hidden lines included, each line aimed at AI marked.
+              ? <pre className="posting">{posting_marked.map((seg, i) => seg.trap
+                  ? <mark key={i} className="trap">{seg.text}<small>{seg.trap.attention ? "may be an attention check for you"
+                      : seg.trap.how === "visible" ? "aimed at AI tools" : `hidden: ${seg.trap.how}`}</small></mark>
+                  : seg.text)}</pre>
+              : <pre className="posting">{job.description}</pre>) : (<>
               {res.summary && <p>{res.summary}</p>}
               {SECTION_ORDER.filter(k => byKind[k]).map(k => (
                 <div key={k}><h4>{SECTION_TITLE[k]}</h4><ul>{byKind[k].items.map((t, i) => <li key={i}>{t}</li>)}</ul></div>))}
