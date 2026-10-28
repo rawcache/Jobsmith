@@ -484,6 +484,48 @@ def test_a_sales_posting_gets_sales_skills_not_the_company_or_plain_words():
     assert {"discovery", "value selling", "SaaS"} <= set(m["matched"])
 
 
+def _saved_posting(name: str) -> dict:
+    """A public Greenhouse posting saved from its job-board API (tests/fixtures/postings/), read as Jobsmith reads one."""
+    import json
+    from jobsmith import jobdetail
+    from conftest import FIXTURES
+    d = json.loads((FIXTURES / "postings" / f"{name}.json").read_text())
+    return {"title": d["title"], "company": d["company_name"], "description": jobdetail.html_to_text(d["content"]),
+            "html": d["content"]}
+
+
+def test_a_saved_sales_posting_gets_its_sales_skills():
+    """#20: Airtable's Corporate Account Executive posting."""
+    from jobsmith import guardrails, insights, traps
+    job = _saved_posting("airtable_account_executive")
+    assert insights.roles(job) == ["sales"]
+    wanted = insights.keyword_match(job, resume="")["missing"]
+    assert {"sales cycles", "quota", "closing", "book of business", "new business", "account planning",
+            "multi-threading", "sales process", "Force Management", "mid-market"} <= set(wanted), wanted
+    assert wanted[:3] == ["sales cycles", "mid-market", "quota"]                  # most mentioned first
+    assert not set(wanted) & {"Airtable", "networking", "performance", "communication", "Python", "AI"}
+    assert not traps.scan_html(job["html"]) and guardrails.ai_policy(job["description"]) is None
+    m = insights.keyword_match(job, resume="Closed new business in multi-threaded mid-market sales cycles; 120% of quota.")
+    assert {"new business", "multi-threading", "mid-market", "sales cycles", "quota"} <= set(m["matched"])
+    # The posting says "multi-threaded"; a resume saying "multi-threading" (or the other way round) still matches.
+    assert "multi-threading" in insights.keyword_match(job, resume="Led multi-threading across buyers.")["matched"]
+    other = dict(job, description="Run multi-threading across stakeholders.")
+    assert "multi-threading" in insights.keyword_match(other, resume="Ran multi-threaded deals.")["matched"]
+
+
+def test_a_saved_design_posting_gets_its_design_skills_but_not_the_company():
+    """#20: Figma's Product Designer posting, where the company's name is also a design tool."""
+    from jobsmith import guardrails, insights, traps
+    job = _saved_posting("figma_product_designer")
+    assert insights.roles(job) == ["design"]
+    wanted = insights.keyword_match(job, resume="")["missing"]
+    assert {"prototyping", "interaction design", "user research", "product design", "portfolio", "design critiques",
+            "design principles", "front-end development"} <= set(wanted), wanted
+    assert wanted[0] == "prototyping"
+    assert not set(wanted) & {"Figma", "networking", "performance", "communication", "accessibility", "AI"}
+    assert not traps.scan_html(job["html"]) and guardrails.ai_policy(job["description"]) is None
+
+
 def test_a_company_never_counts_as_its_own_skill():
     from jobsmith import insights
     job = {"title": "Product Designer", "company": "Figma, Inc.", "description": "Prototype in Figma and Sketch. "
