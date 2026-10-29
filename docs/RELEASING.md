@@ -23,3 +23,14 @@ They fall back to `main` only when the repo has no release at all (GitHub answer
 reached or rate-limits the lookup, they stop and ask the user to try again. So nothing reaches new installs
 until step 7 publishes the release, and a bad commit on `main` doesn't ship by itself. Publish the release only
 after CI is green on the tagged commit.
+
+## CI runners and actions
+
+Every workflow runs on `ubuntu-24.04`, not `ubuntu-latest`, so GitHub's move of `ubuntu-latest` to Ubuntu 26 can't
+change the test system under a release. Move to 26 deliberately: change the label in every workflow in one commit
+(`grep -rn ubuntu-24.04 .github/workflows`), run `tests` and `install` on it, and fix what breaks before a release.
+Actions are pinned by commit SHA with the version in a comment; update both together.
+
+If GitHub can't find a hosted macOS runner for a `tests` job ("The job was not acquired by Runner of type hosted
+even after multiple attempts"), `retry-runner` runs that job once more. It never reruns a job that started, so a
+test failure is never retried.
