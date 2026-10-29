@@ -1,7 +1,7 @@
-/* Jobsmith: warm paper and ink, like the extension's panel on a job page, with its orange used sparingly (the one
+/* Jobsmith: warm paper and ink, like the extension's panel on a job page, with its deep rust used sparingly (the one
    thing to do, where you are, focus, progress). The system font, small type, tight rows: a working tool. */
 :root {
-  /* light: the panel's paper, cards and borders; #c2410c is the panel's "Autofill this page" button */
+  /* light: the panel's paper, cards and borders; #9a3412 (deep rust) is the panel's "Autofill this page" button */
   --bg: #f2f0ec;
   --card: #fbfaf8;
   --side: #ece9e3;
@@ -15,9 +15,9 @@
   --text: #3a3631;
   --muted: #66615a;
   --faint: #8a8378;
-  --accent: #c2410c;
-  --accent-hover: #af3b0b;
-  --accent-ring: rgb(194 65 12 / .18);
+  --accent: #9a3412;
+  --accent-hover: #7c2d12;
+  --accent-ring: rgb(154 52 18 / .18);
   --tint: rgb(120 100 70 / .03);   /* the faint wash behind the greeting: a shade of the paper */
   --ok: #15803d; --ok-soft: #eef8f0; --ok-ink: #14532d;
   --warn: #a16207; --warn-soft: #fdf8e9; --warn-ink: #713f12; --warn-line: #ecd9a0; --warn-dot: #ca8a04;
@@ -30,11 +30,11 @@
   color-scheme: light;
 }
 :root[data-theme="dark"] { --dark: 1; }
-/* dark: warm charcoal, the same orange lifted a little (same hue, 17.5°) with dark text on it */
+/* dark: warm charcoal, the same rust lifted for a dark page (#e07a4f) with dark text on it */
 :root[data-theme="dark"] {
   --bg: #161412; --card: #1f1c19; --side: #1a1816; --hover: #262320; --chip: #2a2622; --line: #2f2b27; --line-2: #272420;
   --line-strong: #403a34; --ink: #ece7df; --on-strong: #161412; --text: #d2ccc2; --muted: #a39b90; --faint: #8a8378;
-  --accent: #d66638; --accent-hover: #cf5b2a; --accent-ring: rgb(214 102 56 / .28); --tint: rgb(214 102 56 / .06);
+  --accent: #e07a4f; --accent-hover: #e88c66; --accent-ring: rgb(224 122 79 / .28); --tint: rgb(224 122 79 / .06);
   --ok: #4ade80; --ok-soft: rgb(74 222 128 / .12); --ok-ink: #86efac; --warn: #facc15; --warn-soft: rgb(250 204 21 / .12);
   --warn-ink: #fde68a; --warn-line: rgb(250 204 21 / .3); --warn-dot: #eab308; --bad: #fb7185; --bad-soft: rgb(251 113 133 / .12);
   --shadow: 0 12px 32px rgb(0 0 0 / .5); --shadow-sm: 0 1px 2px rgb(0 0 0 / .3);
@@ -43,7 +43,7 @@
 @media (prefers-color-scheme: dark) { :root[data-theme="system"] {
   --bg: #161412; --card: #1f1c19; --side: #1a1816; --hover: #262320; --chip: #2a2622; --line: #2f2b27; --line-2: #272420;
   --line-strong: #403a34; --ink: #ece7df; --on-strong: #161412; --text: #d2ccc2; --muted: #a39b90; --faint: #8a8378;
-  --accent: #d66638; --accent-hover: #cf5b2a; --accent-ring: rgb(214 102 56 / .28); --tint: rgb(214 102 56 / .06);
+  --accent: #e07a4f; --accent-hover: #e88c66; --accent-ring: rgb(224 122 79 / .28); --tint: rgb(224 122 79 / .06);
   --ok: #4ade80; --ok-soft: rgb(74 222 128 / .12); --ok-ink: #86efac; --warn: #facc15; --warn-soft: rgb(250 204 21 / .12);
   --warn-ink: #fde68a; --warn-line: rgb(250 204 21 / .3); --warn-dot: #eab308; --bad: #fb7185; --bad-soft: rgb(251 113 133 / .12);
   --shadow: 0 12px 32px rgb(0 0 0 / .5); --shadow-sm: 0 1px 2px rgb(0 0 0 / .3);
@@ -549,7 +549,7 @@ details.more[open] summary::after { content: " ▾"; }
 .tc-title { color: var(--text); }
 .tcard.tc-working { border-left: 3px solid var(--ink); }
 .tcard.tc-review { border-left: 3px solid var(--warn); }
-.tcard.tc-waiting { opacity: .85; }
+.tcard.tc-waiting { background: var(--side); }   /* quieter, not faded: faded text fails AA */
 /* attention bar: codes, CAPTCHAs, sign-ins */
 .attention { background: var(--warn-soft); border-bottom: 1px solid var(--warn-line); padding: 6px 28px; position: sticky; top: 0; z-index: 9; }
 .att-row { display: flex; align-items: center; gap: 12px; max-width: 1180px; padding: 3px 0; color: var(--warn); font-size: 13px; }
@@ -875,7 +875,8 @@ a.note:hover { background: var(--hover); }
 .skill { display: flex; gap: 16px; align-items: center; margin: 0; }
 .skill-h { display: flex; gap: 8px; align-items: center; }
 .skill-h h2 { margin: 0; }
-.skill.soon { opacity: .7; }
+.skill.soon { color: var(--muted); }
+.skill.soon h2 { color: var(--text); }
 .skill p { margin: 4px 0; }
 .people-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
 .person { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); padding: 12px; }
@@ -1014,7 +1015,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .gs-cards .grow { display: flex; flex-direction: column; gap: 2px; }
 .gs-cards strong { color: var(--ink); font-weight: 600; font-size: 14px; }
 .gs-ic, .q-ic { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; flex: none; background: var(--chip); color: var(--ink); }
-.gs-cards li.done a { opacity: .6; }
+.gs-cards li.done a { color: var(--muted); background: transparent; }
+.gs-cards li.done strong { color: var(--muted); }
 .gs-cards li.done .gs-ic { background: var(--ok-soft); color: var(--ok); }
 .gs-go { color: var(--ink); font-weight: 600; align-self: center; }
 .metrics { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; text-decoration: none !important; }

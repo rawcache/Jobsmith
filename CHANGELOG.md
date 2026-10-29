@@ -13,6 +13,12 @@
   may text you (SMS, WhatsApp) is always left for you.
 
 ### Changed
+- A new accent: a deeper rust (#9A3412, and #E07A4F on dark backgrounds) in place of the orange, so Jobsmith no
+  longer reads like Claude's coral. It's on the dashboard, the extension's panel and popup, the website, the
+  terminal app and the README badge, and the extension's icon is now the hammer and anvil instead of a blue "J".
+  Every colour pair meets WCAG AA (`scripts/contrast.py`, checked in CI). To get there the panel's grey text is a
+  little darker, and finished setup steps, waiting applications and coming-soon skills are drawn in grey instead
+  of faded (faded text fell as low as 2.5:1).
 - "Have you worked for <company> before?" is no longer answered "No" by default. It's "Yes" when your resume's
   work history names the company, "No" only once you've confirmed "My resume lists every employer and contract I've
   had" on the Profile page, and otherwise left for you under "Needs you" (autopilot won't send it, even when the

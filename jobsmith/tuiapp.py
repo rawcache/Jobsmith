@@ -33,9 +33,9 @@ from textual.widgets import DataTable, Footer, Input, Static, TextArea
 
 DOWN_LOG_AFTER = 10.0  # seconds without the engine before the log says so (the status line says so at once)
 
-# Warm charcoal like the dashboard's dark theme. EMBER is the extension panel's orange lifted for a dark background
+# Warm charcoal like the dashboard's dark theme. EMBER is the extension panel's deep rust lifted for a dark background
 # (same hue), kept for the logo, "autopilot on", where you are, focus and progress; everything else is ink or grey.
-EMBER = "#d66638"     # the accent (named after the forge)
+EMBER = "#e07a4f"     # the accent (named after the forge): the deep rust, lifted for a dark terminal
 EMBER_HI = "#ece7df"
 EMBER_LO = "#a39b90"
 STEEL = "#a39b90"
