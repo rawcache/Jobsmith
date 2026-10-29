@@ -10,6 +10,7 @@ type Resp = { job: Job; drafts: Draft[]; runs: Run[]; readiness: { ready: boolea
   busy?: string; can_fill: boolean; usage: Usage; match: Match; connections: Person[]; sections: Section[];
   eligibility: { ok: boolean; reasons: string[]; notes: string[] };
   ai_policy: string | null; trap: string | null; gate: FitGate; approval: Approval | null;
+  company_limit: string | null; company_limit_lines: string[];
   posting_marked: { text: string; trap: { how: string; attention: boolean } | null }[] | null;
   facts: { pay: string; level: string; mode: string; category: string; sponsorship: string; degree: string } };
 
@@ -222,7 +223,8 @@ export default function JobPage({ id, embedded = false }: { id: string; embedded
   if (err) return <div className="jobview"><p>{err}</p></div>;
   if (!r) return <div className="jobview"><p className="muted"><Dots />Loading</p></div>;
 
-  const { job, drafts, runs, readiness, usage, match, connections, sections, eligibility, ai_policy, trap, gate, posting_marked, approval } = r;
+  const { job, drafts, runs, readiness, usage, match, connections, sections, eligibility, ai_policy, trap, gate, posting_marked, approval,
+    company_limit, company_limit_lines } = r;
   const showTrap = () => { setTab("overview"); setFullPosting(true); };
   const unsure = eligibility && !eligibility.ok;
   const res = job.research ?? {};
@@ -290,6 +292,10 @@ export default function JobPage({ id, embedded = false }: { id: string; embedded
         </details>)}
       {trap && !applied && !(job.hold_reason ?? "").includes(trap) && <p className="note warn">{trap}{posting_marked && <> <button className="link" onClick={showTrap}>Show it in the posting</button></>}</p>}
       {ai_policy && !applied && !(job.hold_reason ?? "").includes(ai_policy) && <p className="note warn">{ai_policy}</p>}
+      {(company_limit || company_limit_lines?.length > 0) && !applied && (
+        <details className="note"><summary>{company_limit ?? `${job.company} limits applications`}. Autopilot keeps to this and to your own limits.</summary>
+          <ul className="gate-why">{company_limit_lines.map(x => <li key={x}>“{x}”</li>)}</ul>
+        </details>)}
       {approval && <FirstRun id={id} company={job.company} a={approval} hold={job.hold_reason} onDone={() => { refresh(); load(); }} />}
       {job.hold_reason && job.status === "filled" && !approval && <p className="note warn">Held for you: {job.hold_reason}{posting_marked && trap && job.hold_reason.includes(trap) && <> <button className="link" onClick={showTrap}>Show it in the posting</button></>}</p>}
       {job.error && !/connect/i.test(job.error) && <p className="note warn">{friendly(job.error)}</p>}

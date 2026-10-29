@@ -324,6 +324,7 @@
       ${c ? `<div class="sec"><div class="job"><div class="t">${esc(c.title || document.title)}</div>
         <div class="muted small">${esc(c.company || "")}${c.location ? `, ${esc(c.location)}` : ""}</div>
         ${c.pay ? `<div class="mono small" style="margin-top:4px">${esc(c.pay)}</div>` : ""}
+        ${c.company_limit ? `<div class="small muted" style="margin-top:4px">${esc(c.company_limit)}</div>` : ""}
         ${c.status === "submitted" ? `<div class="ok small" style="margin-top:6px">Applied</div>` : c.fit != null ? `<div class="small muted mono" style="margin-top:6px">fit ${Math.round(c.fit)}</div>` : ""}</div></div>` : ""}
       <div class="sec"><button class="go fill">Autofill this page</button>
         <p class="small muted" style="margin:6px 0 0">From your Jobsmith profile. It never submits. (Alt+J)</p>

@@ -1,6 +1,8 @@
 """Phase 1 guardrails: caps, employer AI policies, the audit trail and the fit gate."""
 import time
 
+import pytest
+
 from jobsmith import config, db, guardrails, runner, scheduler, sources
 
 
@@ -579,3 +581,244 @@ def test_after_a_refill_the_site_is_trusted_only_once_it_lands():
     runner.record_submission(jid, "Confirmation page detected.")   # confirmed: trusted from now on
     assert guardrails.first_run_reason({"url": "https://job-boards.greenhouse.io/x/jobs/3"}) is None
     assert db.q1("SELECT sent_by FROM audit_submissions WHERE job_id=?", (jid,))["sent_by"] == "you"
+
+
+# --------------------------------------------------------------------------- limits a company states
+def _figma_posting() -> str:
+    import html
+    import json
+    from conftest import FIXTURES
+    from jobsmith import jobdetail
+    saved = json.loads((FIXTURES / "postings" / "figma_product_designer.json").read_text(encoding="utf-8"))
+    return jobdetail.html_to_text(html.unescape(saved["content"]))
+
+
+FIGMA_LINES = ["Candidates may submit up to 5 applications during any rolling 30-day period.",
+               "Candidates may not reapply to the same role while an application is active or within 90 days of "
+               "receiving a rejection."]
+
+
+def test_company_limits_are_read_from_the_saved_figma_posting():
+    assert guardrails.read_limits(_figma_posting()) == {"windows": [[5, 30]], "reapply_days": 90, "while_active": True,
+                                                        "lines": FIGMA_LINES}
+
+
+def test_limit_lines_written_other_ways_and_lines_that_arent_limits():
+    read = guardrails.read_limits
+    assert read("You may apply to no more than three roles in a 6-month period.")["windows"] == [[3, 180]]
+    assert read("Candidates can submit a maximum of 2 applications per year.") == {
+        "windows": [[2, 365]], "lines": ["Candidates can submit a maximum of 2 applications per year."]}
+    assert read("Please wait 6 months after a rejection before reapplying.")["reapply_days"] == 180
+    assert read("You can't re-apply for 12 months after being rejected.")["reapply_days"] == 360
+    for not_a_limit in ("We review applications within 30 days.", "We are hiring up to 3 positions this year.",
+                        "You may submit up to 10 applications. We respond within 30 days.",
+                        "Our team handles up to 5 applications per day for customers."):
+        assert read(not_a_limit) == {}, not_a_limit
+
+
+def test_the_stricter_of_figmas_limit_and_your_caps_stops_autopilot():
+    guardrails.note_limits("Figma", _figma_posting(), "posting")
+    db.set_settings({"max_applications_per_day": 0, "max_applications_per_company": 3})
+    for n, days in ((1, 1), (2, 2), (3, 12), (4, 20)):
+        _sent("Figma", n, ago=days * 86400)
+    nxt = _job("Figma", 9)
+    assert guardrails.limit_note("Figma") == "Figma allows 5 per 30 days — 4 used"
+    assert guardrails.cap_reason({"id": nxt, "company": "Figma", "title": "Role 9"}) is None   # 2 this week, 4 in 30 days
+    _sent("Figma", 5, ago=25 * 86400)
+    why = guardrails.cap_reason({"id": nxt, "company": "Figma", "title": "Role 9"})
+    assert why.startswith("Figma allows 5 applications per 30 days, and 5 have gone to Figma in the last 30 days")
+    db.set_settings({"max_applications_per_company": 1})                  # now yours is the stricter one
+    assert guardrails.cap_reason({"id": nxt, "company": "Figma", "title": "Role 9"}).startswith("Company cap reached")
+    db.x("UPDATE runs SET finished_at=? WHERE job_id IN (SELECT id FROM jobs WHERE company='Figma')", (time.time() - 31 * 86400,))
+    db.set_settings({"max_applications_per_company": 3})
+    assert guardrails.limit_note("Figma") == "Figma allows 5 per 30 days — 0 used"
+    assert guardrails.cap_reason({"id": nxt, "company": "Figma", "title": "Role 9"}) is None
+
+
+def test_figmas_limit_shows_on_the_match_with_how_many_are_used():
+    from fastapi.testclient import TestClient
+    from jobsmith import api
+    guardrails.note_limits("Figma", _figma_posting(), "posting")
+    _sent("Figma", 1)
+    _sent("figma", 2, ago=10 * 86400)
+    nxt, other = _job("Figma", 3), _job("Acme", 4)
+    with TestClient(api.app) as c:
+        by = {j["id"]: j for j in c.get("/api/jobs").json()["jobs"]}
+        page = c.get(f"/api/jobs/{nxt}").json()
+    assert by[nxt]["company_limit"] == "Figma allows 5 per 30 days — 2 used"
+    assert by[other]["company_limit"] is None
+    assert page["company_limit"] == "Figma allows 5 per 30 days — 2 used"
+    assert page["company_limit_lines"] == FIGMA_LINES
+
+
+def _role(n: int, title: str = "Product Designer") -> str:
+    return sources.add_job_url(f"https://job-boards.greenhouse.io/figma/jobs/{n}", "Figma", title)
+
+
+def _rejected(jid: str, days_ago: float) -> None:
+    from jobsmith import outcomes
+    runner.mark_submitted(jid)
+    db.x("UPDATE runs SET finished_at=? WHERE job_id=?", (time.time() - (days_ago + 20) * 86400, jid))
+    outcomes.record({"id": jid}, "rejected", "Your application", "no-reply@figma.com", time.time() - days_ago * 86400,
+                    f"m{jid}")
+
+
+def test_figma_isnt_reapplied_to_within_90_days_of_a_rejection():
+    db.set_settings({"max_applications_per_day": 0, "max_applications_per_company": 0})
+    guardrails.note_limits("Figma", _figma_posting(), "posting")
+    _rejected(_role(1), days_ago=40)
+    again = _role(2)                                              # the same role, posted again
+    why = guardrails.cap_reason({"id": again, "company": "Figma", "title": "Product Designer"})
+    assert why.startswith("Figma doesn't take a new application to the same role within 90 days of a rejection")
+    assert guardrails.cap_reason({"id": _role(3, "Software Engineer"), "company": "Figma",
+                                  "title": "Software Engineer"}) is None   # a different role is fine
+    db.x("UPDATE outcomes SET received_at=?", (time.time() - 91 * 86400,))
+    assert guardrails.cap_reason({"id": again, "company": "Figma", "title": "Product Designer"}) is None
+
+
+def test_figma_isnt_reapplied_to_while_an_application_to_that_role_is_open():
+    db.set_settings({"max_applications_per_day": 0, "max_applications_per_company": 0})
+    guardrails.note_limits("Figma", _figma_posting(), "posting")
+    runner.mark_submitted(_role(1))
+    why = guardrails.cap_reason({"id": _role(2), "company": "Figma", "title": "product designer "})
+    assert why.startswith("Figma doesn't take a new application to a role while one to it is open")
+
+
+def test_a_company_with_no_stated_limits_isnt_held_and_a_later_posting_keeps_what_was_read():
+    db.set_settings({"max_applications_per_day": 0, "max_applications_per_company": 0})
+    runner.mark_submitted(_role(1))
+    assert guardrails.cap_reason({"id": _role(2), "company": "Figma", "title": "Product Designer"}) is None
+    guardrails.note_limits("Figma", _figma_posting(), "a")
+    guardrails.note_limits("Figma", "We're hiring a Product Designer. Apply below.", "b")    # says nothing: kept
+    assert guardrails.company_limits("figma ")["windows"] == [[5, 30]]
+    guardrails.note_limits("Figma", "Candidates may submit up to 3 applications in any 60-day period.", "c")
+    lim = guardrails.company_limits("Figma")
+    assert (lim["windows"], lim["reapply_days"]) == ([[5, 30], [3, 60]], 90)       # limits add up, never loosen
+
+
+def test_scheduler_doesnt_pick_past_a_companys_stated_limit():
+    db.set_settings({"max_applications_per_company": 0, "max_applications_per_day": 0})
+    guardrails.note_limits("Figma", _figma_posting(), "posting")
+    for n in range(1, 4):
+        _sent("Figma", n, ago=n * 5 * 86400)
+    ids = [_job("Figma", n) for n in range(10, 14)]
+    for jid in ids:
+        db.x("UPDATE jobs SET fit_score=90 WHERE id=?", (jid,))
+    assert len(scheduler.pick_new_jobs(10)) == 2                 # 3 sent in 30 days: room for 2 more
+
+
+def test_postings_saved_before_limits_were_read_are_read_once(monkeypatch):
+    monkeypatch.setattr(guardrails, "_scanned", False)
+    jid = _job("Figma", 1)
+    db.x("UPDATE jobs SET description=? WHERE id=?", (_figma_posting(), jid))
+    assert guardrails.limit_note("Figma") == "Figma allows 5 per 30 days — 0 used"
+
+
+@pytest.mark.parametrize("text", [
+    "Candidates may submit up to 5 applications per month. Candidates may submit up to 2 applications per day.",
+    "Candidates may submit up to 2 applications per day. Candidates may submit up to 5 applications per month."])
+def test_every_window_a_company_states_holds(text):
+    db.set_settings({"max_applications_per_day": 0, "max_applications_per_company": 0})
+    assert guardrails.read_limits(text)["windows"] == [[2, 1], [5, 30]]
+    guardrails.note_limits("Figma", text, "posting")
+    _sent("Figma", 1, ago=3600)
+    _sent("Figma", 2, ago=7200)
+    nxt = _job("Figma", 9)
+    assert guardrails.limit_note("Figma") == "Figma allows 2 per day — 2 used, 5 per 30 days — 2 used"
+    why = guardrails.cap_reason({"id": nxt, "company": "Figma", "title": "Role 9"})
+    assert why.startswith("Figma allows 2 applications per day, and 2 have gone to Figma in the last day")
+    assert guardrails.company_room("Figma") == 0
+
+
+def test_a_second_tab_submitting_the_same_role_counts_as_open():
+    db.set_settings({"max_applications_per_day": 0, "max_applications_per_company": 0})
+    guardrails.note_limits("Figma", _figma_posting(), "posting")
+    first, second = _role(1), _role(2)
+    guardrails.claim(first)
+    try:
+        why = guardrails.cap_reason({"id": second, "company": "Figma", "title": "Product Designer"})
+        assert why.endswith("you applied to Product Designer and it's being sent right now.")
+        assert guardrails.cap_reason({"id": first, "company": "Figma", "title": "Product Designer"}) is None
+    finally:
+        guardrails.release(first)
+
+
+@pytest.mark.parametrize("text,note", [
+    ("Candidates may not reapply within 90 days of receiving a rejection.",
+     "Figma: no reapplying to a role within 90 days of a rejection"),
+    ("Candidates may not reapply to the same role while an application is active.",
+     "Figma: no reapplying to a role while an application to it is open")])
+def test_a_company_that_only_limits_reapplying_says_so_on_the_match(text, note):
+    guardrails.note_limits("Figma", text, "posting")
+    assert guardrails.limit_note("Figma") == note and guardrails.company_room("Figma") is None
+
+
+def test_an_early_single_limit_table_is_rebuilt(tmp_path):
+    import sqlite3
+    path = tmp_path / "old.db"
+    c = sqlite3.connect(path)
+    c.execute("CREATE TABLE company_limits (company TEXT PRIMARY KEY, name TEXT NOT NULL, per INTEGER, days INTEGER, "
+              "reapply_days INTEGER, while_active INTEGER NOT NULL DEFAULT 0, lines TEXT NOT NULL DEFAULT '[]', "
+              "job_id TEXT, updated_at REAL NOT NULL)")
+    c.commit()
+    c.close()
+    db.reset_for_tests(path)
+    assert "windows" in {r["name"] for r in db.q("PRAGMA table_info(company_limits)")}
+
+
+def test_a_rejection_after_an_interview_still_starts_the_wait():
+    from jobsmith import outcomes
+    db.set_settings({"max_applications_per_day": 0, "max_applications_per_company": 0})
+    guardrails.note_limits("Figma", _figma_posting(), "posting")
+    first = _role(1)
+    runner.mark_submitted(first)
+    outcomes.record({"id": first}, "interview", "Let's talk", "r@figma.com", time.time() - 30 * 86400, "m1")
+    again = {"id": _role(2), "company": "Figma", "title": "Product Designer"}
+    assert "while one to it is open" in guardrails.cap_reason(again)                # interviewing: still open
+    outcomes.record({"id": first}, "rejected", "Update", "r@figma.com", time.time() - 10 * 86400, "m2")
+    assert db.q1("SELECT outcome FROM jobs WHERE id=?", (first,))["outcome"] == "interview"
+    assert "within 90 days of a rejection" in guardrails.cap_reason(again)
+    db.x("UPDATE outcomes SET received_at=received_at-? WHERE job_id=?", (81 * 86400, first))   # all 81 days earlier
+    assert guardrails.cap_reason(again) is None                                     # turned down, and the wait is over
+
+
+def test_an_interview_after_a_rejection_means_the_application_is_open_again():
+    from jobsmith import outcomes
+    db.set_settings({"max_applications_per_day": 0, "max_applications_per_company": 0})
+    guardrails.note_limits("Figma", _figma_posting(), "posting")
+    first = _role(1)
+    runner.mark_submitted(first)
+    outcomes.record({"id": first}, "rejected", "Update", "r@figma.com", time.time() - 120 * 86400, "m1")
+    again = {"id": _role(2), "company": "Figma", "title": "Product Designer"}
+    assert guardrails.cap_reason(again) is None                                     # turned down long ago
+    outcomes.record({"id": first}, "interview", "Let's talk again", "r@figma.com", time.time() - 10 * 86400, "m2")
+    assert "while one to it is open" in guardrails.cap_reason(again)
+
+
+def test_a_received_email_after_a_rejection_doesnt_end_the_wait():
+    from jobsmith import outcomes
+    db.set_settings({"max_applications_per_day": 0, "max_applications_per_company": 0})
+    guardrails.note_limits("Figma", "Candidates may not reapply within 90 days of receiving a rejection.", "p")
+    first = _role(1)
+    runner.mark_submitted(first)
+    outcomes.record({"id": first}, "rejected", "Update", "r@figma.com", time.time() - 20 * 86400, "m1")
+    outcomes.record({"id": first}, "received", "We got it", "r@figma.com", time.time() - 5 * 86400, "m2")
+    assert "within 90 days of a rejection" in guardrails.cap_reason(
+        {"id": _role(2), "company": "Figma", "title": "Product Designer"})
+
+
+def test_the_startup_scan_keeps_every_window_from_saved_postings(monkeypatch):
+    monkeypatch.setattr(guardrails, "_scanned", False)
+    for n, line in enumerate(("Candidates may submit up to 2 applications per day.",
+                              "Candidates may submit up to 5 applications during any rolling 30-day period.")):
+        db.x("UPDATE jobs SET description=? WHERE id=?", (f"About us. {line}", _job("Figma", n)))
+    guardrails.note_limits("Figma", "Candidates may submit up to 2 applications per day.", "synced")
+    assert guardrails.company_limits("Figma")["windows"] == [[2, 1], [5, 30]]
+
+
+def test_every_limit_keeps_the_sentence_it_came_from():
+    for n in range(1, 11):
+        guardrails.note_limits("Figma", f"Candidates may submit up to {n + 20} applications in any {n}-day period.", "p")
+    guardrails.note_limits("Figma", "Candidates may submit up to 1 application per day.", "p")
+    lim = guardrails.company_limits("Figma")
+    assert [1, 1] in lim["windows"] and "Candidates may submit up to 1 application per day." in lim["lines"]

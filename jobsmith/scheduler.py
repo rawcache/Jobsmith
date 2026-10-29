@@ -66,6 +66,7 @@ def pick_new_jobs(limit: int) -> list[str]:
         for r in db.q(f"SELECT company FROM jobs WHERE id IN ({marks})", working):
             busy[r["company"].strip().lower()] = busy.get(r["company"].strip().lower(), 0) + 1
     per_company: dict[str, int] = {}
+    stated: dict[str, int | None] = {}      # room left under the company's own limit ("5 per 30 days"), if it has one
     out = []
     # fillable sites first; multi-step sites only get drafted
     rows.sort(key=lambda r: (not runner.can_fill(r["ats"]), -(r["fit_score"] or 0)))
@@ -73,10 +74,16 @@ def pick_new_jobs(limit: int) -> list[str]:
         co = r["company"].strip().lower()
         if co not in per_company:
             per_company[co] = guardrails.sent_to_company(r["company"]) + busy.get(co, 0)
+            room = guardrails.company_room(r["company"])
+            stated[co] = None if room is None else room - busy.get(co, 0)
         if cap > 0 and per_company[co] >= cap:
+            continue
+        if stated[co] is not None and stated[co] <= 0:
             continue
         out.append(r["id"])
         per_company[co] += 1
+        if stated[co] is not None:
+            stated[co] -= 1
         if len(out) >= limit:
             break
     return out

@@ -315,8 +315,30 @@ def store(source: dict, kind: str, roles: list[dict]) -> dict:
                                {f"AND id NOT IN ({marks})" if seen else ""}""",
                            (db.now(), source["id"], *gone, *seen)).rowcount
         c.execute("UPDATE sources SET last_synced=?, last_count=? WHERE id=?", (db.now(), len(roles), source["id"]))
+    _note_company_limits(roles)
     return {"source": source["url"], "listings": len(roles), "added": added, "updated": updated,
             "left_out": sum(why.values()), "why": dict(why), "closed": closed}
+
+
+def _note_company_limits(roles: list[dict]) -> None:
+    """Keep the application limits the board's postings state. They usually repeat the same lines word for word,
+    so each different statement is kept once; different ones (a cap here, a reapply rule there) add up."""
+    import json
+    from . import guardrails
+    from .sources import job_id_for
+    seen: set[tuple[str, str]] = set()
+    merged: dict[str, tuple[dict, str]] = {}               # company -> (everything its postings state, one posting)
+    for r in roles:
+        found = guardrails.read_limits(r["description"])
+        sig = (r["company"], json.dumps(found, sort_keys=True))
+        if not found or sig in seen:
+            continue
+        seen.add(sig)
+        had = merged.get(r["company"], ({}, ""))
+        merged[r["company"]] = (guardrails.merge_limits(had[0], found),
+                                had[1] or job_id_for(r["url"], r["company"], r["title"]))
+    for company, (found, jid) in merged.items():
+        guardrails.note_limits(company, "", jid, found=found)
 
 
 def waive(job_id: str) -> None:

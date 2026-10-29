@@ -810,7 +810,9 @@ def list_jobs(status: str = "", category: str = "", ats_name: str = "", min_scor
         f"SELECT DISTINCT job_id FROM drafts WHERE issues LIKE '%Needs your AI%' AND job_id IN ({','.join('?' * len(ids))})",
         ids)} if ids else set()
     bar = float(db.get_setting("min_fit_score") or 40)
+    limits = {c: guardrails.limit_note(c) for c in {r["company"] for r in rows}}   # "Figma allows 5 per 30 days — 2 used"
     for r in rows:
+        r["company_limit"] = limits[r["company"]]
         r["gate"] = guardrails.fit_gate(r, bar)
         r["ai_blocked"] = r["id"] in ai_blocked
         r["tokens"] = tok.get(r["id"], 0)
@@ -858,6 +860,8 @@ def get_job(job_id: str):
             "eligibility": eligibility.check(j), "ai_policy": guardrails.policy_reason(j),
             "trap": traps.trap_reason(j), "posting_marked": marked,
             "gate": guardrails.fit_gate(j), "approval": approval_of(job_id),
+            "company_limit": guardrails.limit_note(j["company"]),
+            "company_limit_lines": (guardrails.company_limits(j["company"]) or {}).get("lines", []),
             "readiness": draft.readiness(job_id) if drafts else None,
             "busy": runner.active().get(job_id), "can_fill": runner.can_fill(j["ats"])}
 

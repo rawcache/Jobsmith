@@ -149,3 +149,22 @@ def test_practice_copy_seeds_in_its_own_folder(tmp_path):
     assert (tmp_path / "demo" / "Alex_Rivera_resume.tex").exists()
     # Alex's country is a confirmed answer, so a form's Country box gets it from the profile
     assert con.execute("SELECT value, confirmed FROM answers WHERE key='country'").fetchone() == ("United States", 1)
+
+
+def test_panel_shows_a_companys_application_limit_read_from_the_page():
+    text = "Product Designer at Figma. Candidates may submit up to 5 applications during any rolling 30-day period."
+    c = extension.context("https://job-boards.greenhouse.io/figma/jobs/1", "Product Designer", text=text)
+    assert c["company"] == "Figma" and c["company_limit"] == "Figma allows 5 per 30 days — 0 used"
+    runner.mark_submitted(extension.find_or_add("https://job-boards.greenhouse.io/figma/jobs/2", "Intern", "Figma"))
+    c = extension.context("https://job-boards.greenhouse.io/figma/jobs/3", "Engineer", text="Apply below.")
+    assert c["company_limit"] == "Figma allows 5 per 30 days — 1 used"
+    assert extension.context("https://job-boards.greenhouse.io/acme/jobs/1", "", text=text.replace("Figma", "Acme"))[
+        "company_limit"] == "Acme allows 5 per 30 days — 0 used"
+    assert extension.context("https://job-boards.greenhouse.io/beta/jobs/1", "", text="Apply below.")["company_limit"] is None
+
+
+def test_panel_reads_the_limit_for_a_job_added_but_never_fetched():
+    jid = extension.find_or_add("https://job-boards.greenhouse.io/figma/jobs/7", "Designer", "Figma")
+    text = "Candidates may submit up to 5 applications during any rolling 30-day period."
+    c = extension.context("https://job-boards.greenhouse.io/figma/jobs/7", "Designer", text=text)
+    assert c["known"] and c["job_id"] == jid and c["company_limit"] == "Figma allows 5 per 30 days — 0 used"

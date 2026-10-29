@@ -643,6 +643,7 @@ async def do_scan(job: dict, run: Run) -> list[dict]:
         if not job.get("description"):
             body = await page.locator("body").inner_text()
             db.x("UPDATE jobs SET description=? WHERE id=?", (body[:20000], job["id"]))
+            guardrails.note_limits(job["company"], body, job["id"])
         run.log(f"Scanned form: {len(fields)} fields")
         return fields
     finally:
@@ -978,7 +979,7 @@ async def autopilot(job_ids: list[str], force: bool = False, submit: bool | None
                 db.x("UPDATE jobs SET hold_reason=?, updated_at=? WHERE id=?", (gate["summary"], db.now(), jid))
                 return
         if autonomous and not force:
-            capped = guardrails.cap_reason(db.q1("SELECT id, company FROM jobs WHERE id=?", (jid,)) or {"id": jid})
+            capped = guardrails.cap_reason(db.q1("SELECT id, company, title FROM jobs WHERE id=?", (jid,)) or {"id": jid})
             if capped:          # left as it is: autopilot picks it up again once there's room
                 return
         await prepare(jid)
