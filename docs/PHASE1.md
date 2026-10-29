@@ -194,7 +194,19 @@ issue), and commit the tick with the work.
 Each site is its own commit series: fixture, `test_fill.py` test, extension autofill test with the submit watcher,
 then `ats.SUPPORTED` and the README.
 
-- [ ] a. Ashby: capture and sanitize a real Ashby form to replace the hand-written fixture.
+- [x] a. Ashby: capture and sanitize a real Ashby form to replace the hand-written fixture.
+      Evidence: [7e82c3a](https://github.com/rawcache/Jobsmith/commit/7e82c3a). `tests/fixtures/ashby_ramp_form.html`
+      is Ramp's real "Software Engineer, Frontend" form, saved blank with `scripts/capture/capture.py` (the two
+      GraphQL reads above let through, nothing else; `tests/test_capture.py`), Alex Rivera only; rebuild steps in
+      `tests/fixtures/src/`. The hand-written `ashby_style_form.html` is gone. Ashby's Yes/No questions (buttons
+      beside a hidden checkbox) are now scanned and pressed by autopilot and the extension. Autopilot:
+      `test_ashby_saved_ramp_form_is_filled_and_held_before_submit` (work authorization from the confirmed profile;
+      the take-home question under Needs you; SMS and WhatsApp consent left for you; Submit never pressed) and
+      `test_autopilot_sends_the_saved_ashby_form_once_everything_is_answered` (Ashby's thank-you recorded as proof).
+      Extension, submit watcher on: `test_autofill_presses_ashby_yes_no_buttons_on_the_saved_ramp_form` (autosave
+      isn't a submit) and `test_the_submit_watcher_sees_ashbys_submit_on_the_saved_ramp_form`. Then `ats.SUPPORTED`,
+      README and site. [CI run](https://github.com/rawcache/Jobsmith/actions/runs/40832738244) (macOS failed once on
+      an unrelated timing guess in a popup test, #22, fixed in 979174e; the rerun passed on all three).
 - [ ] b. Lever: end-to-end tests.
 - [ ] c. SmartRecruiters: the good-first-issue adapter ([#1](https://github.com/rawcache/Jobsmith/issues/1)),
       only if nobody has claimed it.
