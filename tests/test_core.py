@@ -1184,3 +1184,226 @@ def test_browser_never_asks_for_the_keychain(monkeypatch, platform, args):
     from jobsmith.fill.base import browser_args
     monkeypatch.setattr(sys, "platform", platform)
     assert browser_args() == args
+
+
+# --------------------------------------------------------------------------- "have you worked for <company> before?"
+WORKED = {"field": "q", "label": "Have you ever worked for Figma before, as an employee or a contractor/consultant?",
+          "qtype": "select", "options": ["Yes", "No"], "required": True}
+FIGMA = {"id": "j1", "company": "Figma"}
+
+
+async def test_worked_here_before_is_never_a_guessed_no():
+    """A company missing from your resume isn't a fact. With nothing confirmed, the question waits for you: no
+    default "No", and it never goes to the AI."""
+    await _load_profile()
+    profile.ensure_answer_bank()
+    assert "previously_employed" not in profile.answers()
+    r = draft.deterministic(WORKED, profile.answers(), FIGMA)
+    assert r is not None and r["answer"] == "" and r["confidence"] == 0
+    assert "doesn't say whether you've worked for Figma" in r["issues"][0]
+    optional = draft.deterministic(dict(WORKED, required=False), profile.answers(), FIGMA)
+    assert optional["answer"] == "" and optional["issues"]
+
+
+def test_an_old_blanket_no_is_removed():
+    db.x("INSERT INTO answers(key, label, value, confirmed, updated_at) VALUES('previously_employed', 'x', 'No', 1, 0)")
+    profile.ensure_answer_bank()
+    assert "previously_employed" not in profile.answers()
+    assert profile.answers()["resume_lists_all_employers"]["value"] == ""
+
+
+async def test_worked_here_before_is_yes_when_your_resume_names_the_company():
+    await _load_profile()                                          # Northwind Labs is on the sample resume
+    r = draft.deterministic(dict(WORKED, label="Have you ever worked for Northwind Labs, Inc. before?"),
+                            profile.answers(), {"company": "Northwind Labs, Inc."})
+    assert r["answer"] == "Yes" and r["confidence"] == 1 and not r["issues"]
+    assert r["rationale"].startswith("Your resume lists Northwind Labs, Inc.: Northwind Labs | Boston, MA")
+
+
+async def test_a_company_named_only_in_a_bullet_isnt_an_employer():
+    await _load_profile()
+    profile.add_fact("experience", "Built a Figma plugin for the design team", subject="Northwind Labs | Intern")
+    profile.add_fact("experience", "Analyst", subject="Figma Ventures Partners | Analyst")
+    assert profile.employer_fact("Figma") is None
+    assert draft.deterministic(WORKED, profile.answers(), FIGMA)["answer"] == ""
+    profile.add_fact("experience", "Design intern", subject="Design Intern at Figma, Inc. - Summer 2025")
+    assert draft.deterministic(WORKED, profile.answers(), FIGMA)["answer"] == "Yes"
+
+
+async def test_worked_here_before_is_no_only_once_you_confirm_your_resume_lists_every_employer():
+    await _load_profile()
+    profile.set_answer("resume_lists_all_employers", "Yes", confirmed=False)    # read in, not said by you
+    assert draft.deterministic(WORKED, profile.answers(), FIGMA)["answer"] == ""
+    profile.set_answer("resume_lists_all_employers", "Yes", confirmed=True)
+    r = draft.deterministic(WORKED, profile.answers(), FIGMA)
+    assert r["answer"] == "No" and r["confidence"] == 1 and not r["issues"]
+    assert r["rationale"] == ("You confirmed your resume lists every employer and contract you've had, "
+                              "and Figma isn't on it")
+    # Confirmed, but the resume names the company: that's a Yes.
+    assert draft.deterministic(dict(WORKED, label="Have you worked for us before?"), profile.answers(),
+                               {"company": "Northwind Labs"})["answer"] == "Yes"
+    profile.set_answer("resume_lists_all_employers", "No", confirmed=True)
+    assert draft.deterministic(WORKED, profile.answers(), FIGMA)["answer"] == ""
+
+
+async def test_an_unanswered_worked_here_before_blocks_autopilot_even_when_optional():
+    await _load_profile()
+    jid = sources.add_job_url("https://job-boards.greenhouse.io/figma/jobs/1", "Figma", "Intern")
+    f = dict(WORKED, required=False)
+    draft.save_results(jid, [f], {"q": draft.deterministic(f, profile.answers(), {"company": "Figma"})})
+    blockers = draft.readiness(jid)["blockers"]
+    assert len(blockers) == 1 and "worked for Figma" in blockers[0]
+
+
+async def test_legal_yes_no_answers_say_where_they_came_from():
+    await _load_profile()
+    profile.set_answer("work_authorized_us", "Yes", confirmed=True)
+    a = profile.answers()
+    ask = lambda label: draft.deterministic({"field": "q", "label": label, "qtype": "select", "options": ["Yes", "No"],
+                                             "required": True}, a, FIGMA)
+    auth = ask("Are you legally authorized to work in the United States?")
+    assert auth["canon"] == "work_authorized_us"
+    assert auth["rationale"] == "Profile: Authorized to work in the US? (you confirmed it)"
+    sponsor = ask("Will you now or in the future require visa sponsorship?")
+    assert sponsor["canon"] == "needs_sponsorship" and sponsor["answer"] == "No"
+    assert sponsor["rationale"] == "Profile: Need visa sponsorship now or later? (not confirmed yet)"
+    pay = draft.deterministic({"field": "q", "label": "Desired salary", "qtype": "text", "options": [],
+                               "required": False}, a, FIGMA)
+    assert pay is None or "rationale" not in pay                        # only legal and employment yes/no answers
+
+
+async def test_a_longer_employer_name_isnt_the_company():
+    await _load_profile()
+    for longer in ("Figma Technologies", "Figma Group", "Figma Holdings"):
+        profile.add_fact("experience", "Analyst", subject=f"{longer} | Analyst")
+    assert profile.employer_fact("Figma") is None
+    profile.add_fact("experience", "Intern", subject="Figma, Inc. | Intern")       # a legal ending is the same company
+    assert profile.employer_fact("Figma")["subject"] == "Figma, Inc. | Intern"
+
+
+async def test_a_heading_with_no_bullets_still_counts_as_an_employer():
+    await _load_profile()
+    profile.set_answer("resume_lists_all_employers", "Yes", confirmed=True)
+    profile.add_fact("experience", "Figma | San Francisco, CA | Design Intern | Summer 2025")   # no subject
+    assert draft.deterministic(WORKED, profile.answers(), FIGMA)["answer"] == "Yes"
+
+
+async def test_the_company_the_question_names_is_the_one_answered_for():
+    await _load_profile()
+    profile.set_answer("resume_lists_all_employers", "Yes", confirmed=True)
+    ask = lambda label, company="Figma": draft.deterministic(dict(WORKED, label=label), profile.answers(),
+                                                             {"company": company})
+    parent = ask("Have you ever worked for Northwind Labs before?", company="Northwind Robotics")
+    assert parent["answer"] == "Yes" and "Northwind Labs" in parent["rationale"]
+    other = ask("Have you ever worked at Adobe?")              # another company: only your resume can say Yes
+    assert other["answer"] == "" and other["issues"]
+    own = ask("Have you ever worked at Figma?")
+    assert own["answer"] == "No" and "Figma isn't on it" in own["rationale"]
+    group = ask("Have you previously been employed by Figma or any of its subsidiaries?")
+    assert group["answer"] == "" and group["issues"]               # your resume can't rule out a subsidiary
+    assert ask("Have you previously been employed by Northwind Labs or any of its affiliates?",
+               company="Northwind Labs")["answer"] == "Yes"
+    kind = ask("Have you been employed with a government agency in the last 2 years?")
+    assert kind["answer"] == "" and kind["issues"]
+
+
+async def test_an_old_drafted_no_isnt_sent_until_something_backs_it():
+    await _load_profile()
+    jid = sources.add_job_url("https://job-boards.greenhouse.io/figma/jobs/1", "Figma", "Intern")
+    draft.save_results(jid, [WORKED], {"q": {"kind": "answer_bank", "canon": "previously_employed", "answer": "No",
+                                             "confidence": 1, "issues": []}})       # the old blanket "No"
+    blockers = draft.readiness(jid)["blockers"]
+    assert blockers == [f"{WORKED['label']}: your profile doesn't give this answer now; check it"]
+    profile.set_answer("resume_lists_all_employers", "Yes", confirmed=True)
+    assert draft.readiness(jid)["ready"] is True
+    profile.set_answer("work_authorized_us", "Yes", confirmed=True)
+    auth = {"field": "a", "label": "Are you authorized to work in the US?", "qtype": "select",
+            "options": ["Yes", "No"], "required": True}
+    draft.save_results(jid, [auth], {"a": draft.deterministic(auth, profile.answers(), {"company": "Figma"})})
+    profile.set_answer("work_authorized_us", "No", confirmed=True)                 # changed since it was drafted
+    assert draft.readiness(jid)["blockers"] == [f"{auth['label']}: your profile doesn't give this answer now; check it"]
+
+
+async def test_a_non_us_citizenship_cites_the_citizenships_field():
+    await _load_profile()
+    profile.set_answer("us_citizen", "No", confirmed=True)
+    profile.set_answer("citizenships", "Canada", confirmed=True)
+    r = draft.deterministic({"field": "q", "label": "What is your citizenship status?", "qtype": "text", "options": [],
+                             "required": True}, profile.answers(), FIGMA)
+    assert r["canon"] == "citizenship_status" and r["answer"] == "Canada"
+    assert r["rationale"] == "Profile: Citizenship(s) (you confirmed it)"
+
+
+@pytest.mark.parametrize("label,answer", [
+    ("Have you ever worked for Northwind Labs?", "Yes"),                            # on a Figma form
+    ("Are you a former employee of Northwind Labs?", ""),     # employee, not contractor: your resume may not say
+    ("Are you a former employee of Figma?", "No"),
+    ("Are you a former employee of Adobe?", ""),               # not this company: only a resume Yes is given
+    ("Did you work for Northwind Labs?", "Yes"), ("Did you work for Figma?", "No"),
+    ("Before Figma, did you work for Adobe?", ""),             # names two companies
+    ("Previous Figma employee?", "No"),
+    ("Have you worked for Northwind Labs in the last two years?", ""),             # the dates decide: yours to say
+    ("Have you worked for Figma since 2020?", "No"),          # never worked there at all: No holds for any time
+    ("Have you ever worked for Northwind Labs as a full-time employee?", ""),      # your resume may not say
+    ("Have you ever worked for Figma as a full-time employee?", "No"),
+    ("Did you work for Northwind Labs during 2020?", ""),
+    ("Have you worked for Northwind Labs from 2020 to 2021?", ""),
+    ("Have you been employed by Northwind Labs between 2019 and 2021?", ""),
+    ("Are you a former intern at Northwind Labs?", ""),                            # a role your resume may not show
+    ("Are you a former intern at Figma?", "No"),
+    ("Have you ever worked for Figma before, as an employee or a contractor/consultant?", "No"),
+    ("Prior employment?", ""),                                                     # names no company
+])
+async def test_worked_here_before_is_answered_only_when_the_question_reads_cleanly(label, answer):
+    await _load_profile()
+    profile.set_answer("resume_lists_all_employers", "Yes", confirmed=True)
+    r = draft.deterministic(dict(WORKED, label=label), profile.answers(), FIGMA)
+    assert r["answer"] == answer and (bool(r["issues"]) == (answer == ""))
+
+
+async def test_an_answer_you_unconfirm_after_drafting_isnt_sent_or_traced():
+    from jobsmith import audit, runner
+    await _load_profile()
+    profile.set_answer("work_authorized_us", "Yes", confirmed=True)
+    jid = sources.add_job_url("https://job-boards.greenhouse.io/figma/jobs/2", "Figma", "Intern")
+    auth = {"field": "a", "label": "Are you authorized to work in the US?", "qtype": "select",
+            "options": ["Yes", "No"], "required": True}
+    draft.save_results(jid, [auth], {"a": draft.deterministic(auth, profile.answers(), {"company": "Figma"})})
+    assert draft.readiness(jid)["ready"] is True
+    profile.set_answer("work_authorized_us", "Yes", confirmed=False)               # same value, no longer confirmed
+    assert draft.readiness(jid)["blockers"] == [f"{auth['label']}: your profile doesn't give this answer now; check it"]
+    runner.mark_submitted(jid)
+    [sent] = audit.for_job(jid)[0]["fields"]
+    assert sent["traces"] is False and sent["detail"][0]["ref"].endswith("(not confirmed yet)")
+
+
+@pytest.mark.parametrize("label,canon", [
+    ("Previous Figma employee?", "previously_employed"), ("Prior employment?", "previously_employed"),
+    ("Are you a former employee of Acme?", "previously_employed"), ("Prior employment with Acme?", "previously_employed"),
+    ("Did you work for Acme during 2020?", "previously_employed"),
+    ("Have you been employed by Acme?", "previously_employed"), ("Past employment history", None), ("List your previous employment", None), ("Previous employer", None),
+    ("Former interns: tell us about your project", None)])
+def test_prior_employment_questions_are_recognized_and_history_questions_arent(label, canon):
+    assert classify.canon_for(label) == canon
+
+
+async def test_company_names_with_time_words_or_digits_are_read_whole():
+    await _load_profile()
+    profile.set_answer("resume_lists_all_employers", "Yes", confirmed=True)
+    profile.add_fact("experience", "Volunteer coordinator", subject="Life After Hate | Volunteer Coordinator")
+    profile.add_fact("experience", "Intern", subject="3M | Manufacturing Intern")
+    ask = lambda label, company: draft.deterministic(dict(WORKED, label=label), profile.answers(), {"company": company})
+    assert ask("Have you worked for Life After Hate?", "Life After Hate")["answer"] == "Yes"
+    assert ask("Have you worked for 3M before?", "3M")["answer"] == "Yes"
+    assert ask("Have you worked for 3M before?", "Figma")["answer"] == "Yes"
+    assert ask("Have you worked for Day After Labs?", "Day After Labs")["answer"] == "No"
+
+
+async def test_a_company_sharing_a_first_word_with_this_one_isnt_this_one():
+    await _load_profile()
+    profile.set_answer("resume_lists_all_employers", "Yes", confirmed=True)
+    profile.add_fact("experience", "Engineer", subject="Apple | Engineer")
+    ask = lambda label, company: draft.deterministic(dict(WORKED, label=label), profile.answers(), {"company": company})
+    assert ask("Have you worked for Apple before?", "Apple Technologies")["answer"] == "Yes"     # Apple, on the resume
+    assert ask("Have you worked for Apple Technologies before?", "Apple Technologies")["answer"] == "No"
+    assert ask("Have you worked for Apple Technologies before?", "Apple")["answer"] == ""        # another company

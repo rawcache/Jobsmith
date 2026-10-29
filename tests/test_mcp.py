@@ -24,3 +24,19 @@ async def test_agent_answers_open_questions_and_jobsmith_checks_them():
     assert bad["saved"][0]["issues"]                  # stock phrases and an unsupported number get caught
     prof = json.loads(mcp_server.jobsmith_profile())
     assert "facts" in prof and "phone" not in prof["answers"]       # contact details stay out of the agent
+
+
+def test_an_agent_cant_answer_profile_questions():
+    """Work authorization, "worked here before?" and other profile answers come only from the user (rule 2)."""
+    now = db.now()
+    db.x("""INSERT INTO jobs(id, company, title, url, ats, description, status, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?)""",
+         ("j1", "Figma", "Intern", "https://x/1", "greenhouse", "", "drafted", now, now))
+    fields = [{"field": f, "label": l, "qtype": "select", "required": True, "options": ["Yes", "No"]}
+              for f, l in (("worked", "Have you ever worked for Figma before?"), ("auth", "Authorized to work in the US?"))]
+    draft.save_results("j1", fields, {
+        "worked": {"kind": "answer_bank", "canon": "previously_employed", "answer": "", "confidence": 0, "issues": ["x"]},
+        "auth": {"kind": "answer_bank", "canon": "work_authorized_us", "answer": "", "confidence": 0, "issues": ["x"]}})
+    out = json.loads(mcp_server.jobsmith_save_answers("j1", [{"field": "worked", "text": "No"},
+                                                            {"field": "auth", "text": "Yes"}]))
+    assert all("profile" in r["error"] for r in out["saved"])
+    assert all(d["answer"] == "" and d["kind"] == "answer_bank" for d in draft.drafts_for("j1"))

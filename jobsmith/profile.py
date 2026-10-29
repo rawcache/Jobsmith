@@ -64,7 +64,7 @@ ANSWER_BANK: list[tuple[str, str, str]] = [
     ("work_mode", "On-site / hybrid / remote preference", "Logistics"),
     ("desired_pay", "Pay expectation (blank = skip when optional)", "Logistics"),
     ("how_heard", "Default answer to 'How did you hear about us?'", "Common questions"),
-    ("previously_employed", "Worked at the company before?", "Common questions"),
+    ("resume_lists_all_employers", "My resume lists every employer and contract I've had", "Common questions"),
     ("relatives_at_company", "Relatives working at the company?", "Common questions"),
     ("over_18", "18 or older?", "Common questions"),
     ("acknowledge_notices", "Agree to privacy notices and terms forms ask you to acknowledge?", "Common questions"),
@@ -88,11 +88,49 @@ EEO_KEYS = {"gender", "race", "hispanic_latino", "veteran_status", "disability_s
 SENSITIVE_KEYS = {k for k, _, sec in ANSWER_BANK if sec in ("Contact", "Links", "Education", "Work authorization", "Credentials",
                                                               "Demographics (optional)")} | {
     "full_name", "desired_pay", "relatives_at_company", "over_18", "background_check_ok", "non_compete", "us_person",
-    "citizenship_status", "full_address", "acknowledge_notices", "ai_tools_consent"}
-DEFAULTS = {"previously_employed": "No"}
+    "citizenship_status", "full_address", "acknowledge_notices", "ai_tools_consent", "resume_lists_all_employers",
+    "previously_employed"}
+DEFAULTS: dict[str, str] = {}
+
+
+# Only legal-form endings: "Apple Technologies" or "Apple Group" is a different employer from Apple.
+LEGAL_ENDINGS = {"inc", "incorporated", "llc", "ltd", "limited", "corp", "corporation", "co", "company", "plc",
+                 "gmbh", "ag", "sa", "lp", "llp"}
+
+
+def employer_name(name: str) -> str:
+    """A company name for telling employers apart: lowercase, no punctuation, no "Inc."/"LLC" or leading "The"."""
+    words = re.sub(r"[^a-z0-9& ]+", " ", (name or "").lower().replace("&amp;", "&")).split()
+    while words and words[-1] in LEGAL_ENDINGS:
+        words.pop()
+    if words and words[0] == "the":
+        words.pop(0)
+    return " ".join(words)
+
+
+def employer_fact(company: str) -> dict | None:
+    """Where your resume says you worked at this company: a work-history entry, or an experience heading with the
+    company as one of its parts ("Northwind Labs | Boston, MA | Intern", "Intern at Northwind Labs"). Only a whole
+    part counts, so neither a bullet ("built an Apple Watch app") nor a longer name ("Apple Technologies") reads as
+    having worked at Apple."""
+    name = employer_name(company)
+    if len(name) < 2:
+        return None
+    for e in entries("experience"):
+        if employer_name(e.get("company", "")) == name:
+            return {"subject": " | ".join(x for x in (e.get("company"), e.get("title")) if x), "text": ""}
+    for f in facts():
+        heading = f["subject"] or f["text"]          # a heading with no bullets is stored as text, with no subject
+        parts = re.split(r"\s*[|·•–—]\s*|\s+-\s+|,\s*|\s+at\s+", heading or "")
+        if f["category"] == "experience" and any(employer_name(p) == name for p in parts):
+            return f
+    return None
 
 
 def ensure_answer_bank() -> None:
+    # "Worked at the company before?" used to start as a confirmed "No" for every company, which nobody had said.
+    # It's now answered per company (draft._derived); the blanket answer goes.
+    db.x("DELETE FROM answers WHERE key='previously_employed'")
     for key, label, _ in ANSWER_BANK:
         db.x("INSERT OR IGNORE INTO answers(key, label, value, confirmed, updated_at) VALUES(?,?,?,?,?)",
              (key, label, DEFAULTS.get(key, ""), int(key in DEFAULTS), db.now()))

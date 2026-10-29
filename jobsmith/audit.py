@@ -104,6 +104,8 @@ def provenance(d: dict, answers: dict, facts: dict, job: dict | None = None) -> 
         canon = d.get("canon") or ""
         if canon == "employment":
             return {"source": "resume", "detail": [{"ref": "Your work history", "text": value}], "traces": True}
+        if canon in draft.LEGAL_YES_NO:
+            return _legal(d, value, answers, job)
         a = answers.get(canon)
         if a:
             ref = f"Profile: {a['label']}" + ("" if a.get("confirmed") else " (not confirmed yet)")
@@ -128,6 +130,23 @@ def provenance(d: dict, answers: dict, facts: dict, job: dict | None = None) -> 
         return {"source": "resume", "traces": True,
                 "detail": [{"ref": _fact_source(f), "text": f["text"], "fact_id": f["id"]} for f in cited]}
     return {"source": "none", "detail": [], "traces": False}
+
+
+def _legal(d: dict, value: str, answers: dict, job: dict | None) -> dict:
+    """A work-authorization, sponsorship, citizenship or prior-employment answer, with the line it came from. It
+    traces only if your profile (or, for "worked here before?", your resume) gives that same answer today."""
+    canon = d["canon"]
+    line = draft.source_line(canon, answers, job, d.get("label") or "")
+    now = draft.deterministic(dict(d, required=bool(d.get("required"))), answers, job)
+    norm = lambda v: " ".join((v or "").lower().split())
+    if not line or now is None or norm(now.get("answer")) != norm(value):
+        ref = (line + " says something else") if line else "Nothing you've confirmed says this"
+        return {"source": "profile", "traces": False, "detail": [{"ref": ref, "text": (now or {}).get("answer") or ""}]}
+    src = "resume" if line.startswith("Your resume") else "profile"
+    # An answer you haven't confirmed doesn't trace back to you, even when it's the one your profile holds, unless
+    # you approved it on this application.
+    return {"source": src, "detail": [{"ref": line, "text": value}],
+            "traces": not now.get("issues") or d.get("verdict") == "green"}
 
 
 def snapshot(job_id: str, filled: set[str] | None = None) -> list[dict]:

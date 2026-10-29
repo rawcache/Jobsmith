@@ -404,7 +404,7 @@
     const r = await send({ type: "answers", body: { url: location.href, title: pageTitle(), site_name: site(), fields } });
     if (!r.ok) { say(esc(r.error), "warn"); busy = false; return; }
     const { answers, job_id, error, resume } = r.data;
-    let done = 0; const missing = [], checks = []; let needAi = 0; let noPdf = false;
+    let done = 0; const missing = [], checks = [], sources = []; let needAi = 0; let noPdf = false;
     const flag = (id, f) => { const el = els.get(id); const node = Array.isArray(el) ? el[0]?.closest("fieldset") || el[0] : el;
                               if (node && !f?.filled) node.style.outline = "2px solid #d97706"; };
     for (const a of answers) {
@@ -414,16 +414,18 @@
       if (held) { if (f && !f.filled) { missing.push(`${f.label}: ${held}`); flag(a.id, f); } continue; }   // never typed in
       if (a.file === "resume" && !resume) noPdf ||= !f?.filled;   // no resume PDF yet: skip the upload, fill the rest
       else try { ok = await fillOne(a.id, a, job_id); } catch (_) { ok = false; }
+      if (ok && a.source) sources.push(`${f?.label || "An answer"}: ${a.value}. ${a.source}`);   // legal yes/no: where from
       if (ok && a.check) { checks.push(`${f?.label || "An answer"}: ${a.check}`); flag(a.id, {}); }   // filled, not counted
       else if (ok) done++;
       else if (a.file === "resume" && !resume) { /* said once below */ }
       else if (f && f.required && !f.filled) { missing.push(f.label); if (a.kind === "generated" && !a.value) needAi++; flag(a.id, f); }
     }
-    const list = items => `<ul style="margin:4px 0 0 14px;list-style:disc">${items.slice(0, 6).map(m => `<li>${esc(m.slice(0, 110))}</li>`).join("")}</ul>`;
+    const list = (items, n = 110) => `<ul style="margin:4px 0 0 14px;list-style:disc">${items.slice(0, 6).map(m => `<li>${esc(m.slice(0, n))}</li>`).join("")}</ul>`;
     say(`<b>Filled ${done} of ${fields.length} fields.</b> Check it, then submit when you're ready.` +
       (noPdf ? `<br>Add your resume PDF to attach it (Profile → PDF employers get, in Jobsmith).` : "") +
       (missing.length ? `<br>Needs you:${list(missing)}` : "") +
       (checks.length ? `<br>Check these:${list(checks)}` : "") +
+      (sources.length ? `<br>Where these answers came from:${list(sources, 220)}` : "") +
       (needAi ? `<br><span class="small">${needAi} written answer${needAi > 1 ? "s need" : " needs"} an AI. Connect one in Jobsmith's Settings.</span>` :
        error ? `<br><span class="small">${esc(error)}</span>` : ""), missing.length || checks.length || noPdf ? "warn" : "");
     busy = false; load();
