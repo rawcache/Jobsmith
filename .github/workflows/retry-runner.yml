@@ -1,0 +1,25 @@
+name: retry-runner
+# When GitHub can't find a hosted macOS runner for a tests job, run that job once more. The rules (only that
+# failure, once only) and their tests: scripts/ci/retry_runner.py, tests/test_ci.py.
+on:
+  workflow_run:
+    workflows: [tests]
+    types: [completed]
+permissions:
+  contents: read        # to check out the script
+  actions: write        # to rerun a job
+  checks: read          # to read its annotations
+jobs:
+  retry:
+    if: github.event.workflow_run.run_attempt == 1 && github.event.workflow_run.conclusion != 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1 (main's copy of the script)
+        with: { persist-credentials: false }
+      - name: Rerun a macOS job that never got a runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN: ${{ github.event.workflow_run.id }}
+          ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        run: python3 scripts/ci/retry_runner.py
