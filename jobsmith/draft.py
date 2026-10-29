@@ -140,6 +140,93 @@ def location_full(loc: str) -> str:
 ALSO_COUNTRIES = {"Georgia"}       # spelled out, it may mean the country
 
 
+_STOP = r"(?:in|within|during|over|since|from|between|before|after|until|prior to)"
+ASKS_ABOUT = re.compile(r"(?:(?:worked|work|been employed|employed)\s+(?:for|at|by|with)|(former|previous|past)\s+"
+                        r"(?:employee|intern|contractor|worker)s?\s+(?:of|at|with))\s+(.+?)"
+                        r"(?=\s+(?:before|previously|in the past|at any time|ever)\b|\s*[,?.(]|\s+as\b"
+                        rf"|\s+(?:or|and)\s+(?:any|its|their|one)\b|\s+{_STOP}\b|$)", re.I)
+NOT_A_COMPANY = re.compile(r"^(?:a|an|any|another|other)\b", re.I)      # "worked for a government agency"
+THIS_COMPANY = re.compile(r"^(?:us|this company|the company|our company|this organi[sz]ation|here)$", re.I)
+MEANS_THIS_COMPANY = re.compile(r"\b(?:us|here|our company|this company|this organi[sz]ation)\b", re.I)
+GROUP = re.compile(r"\b(subsidiar|affiliat|parent|sister compan|related compan|any of (?:its|our))", re.I)
+# A time window ("in the last two years", "during 2020", "from 2020 to 2021"): your resume's dates would have to be
+# read against it.
+TIMED = re.compile(r"\b(?:in|within|during|over)\s+the\s+(?:last|past)\b|\b(?:last|past)\s+(?:\d+|one|two|three|"
+                   r"four|five|six|seven|ten|twelve)\b|\b(?:in|during|since|from|between|before|after|until|prior to)"
+                   r"\s+(?:\d{4}|january|february|march|april|may|june|july|august|september|october|november|"
+                   r"december)\b|\bwithin\s+\d+", re.I)
+AS_KIND = re.compile(r"\bas\s+(?:a|an)\s+([^?.]+)", re.I)               # "as a full-time employee"
+
+
+def _asked_company(job: dict, label: str) -> tuple[str, bool, bool]:
+    """(company the question asks about, whether it asks about one kind of work or one time only, whether that
+    company is this job's own).
+
+    This job's company when the question names it ("Previous Figma employee?") or means it ("worked for us
+    before?"); another company only when the question names that one alone; "" when it can't be read surely: a kind
+    of employer ("a government agency"), a name that runs on, both companies, or wording that names none. Specific:
+    "as a full-time employee", "a former intern", "in the last two years", "during 2020"."""
+    label = label or ""
+    kind = AS_KIND.search(label)
+    specific = bool(TIMED.search(label)) or bool(kind and not (re.search(r"employ", kind.group(1), re.I)
+                                                               and re.search(r"contract|consult", kind.group(1), re.I)))
+    own = (job.get("company") or "").strip()
+    own_name = profile.employer_name(own)
+    names_own = bool(own_name) and bool(re.search(rf"(?<![a-z0-9]){re.escape(own_name)}(?![a-z0-9])",
+                                                  profile.employer_name(label)))
+    m = ASKS_ABOUT.search(label)
+    named = m.group(2).strip() if m else ""
+    specific = specific or bool(m and m.group(1))                       # "former intern at", "previous employee of"
+    if named and not THIS_COMPANY.match(named):
+        name = profile.employer_name(named)
+        if names_own and own_name.startswith(name):     # "Life After Hate" in the question, cut at "after": still it
+            return own, specific, True
+        if names_own or NOT_A_COMPANY.match(named) or len(named.split()) > 6:
+            return "", specific, False                                 # two companies, a kind of one, or a run-on
+        return named, specific, False
+    if names_own or MEANS_THIS_COMPANY.search(label) or (named and THIS_COMPANY.match(named)):
+        return own, specific, True
+    return "", specific, False
+
+
+def _worked_here(job: dict, ans: dict, label: str = "") -> tuple[str, str]:
+    """("Yes" / "No" / "", where it came from) for "Have you worked for <company> before?".
+
+    Yes when your resume names the company the question asks about, unless the question asks about one kind of
+    work or one time ("as an intern", "in 2020"): your resume may not say, so that waits for you. No only for this
+    job's own company, when you've confirmed your resume lists every employer and contract you've had and the
+    company isn't on it (then it holds for any kind of work and any time), and not when the question also covers
+    subsidiaries or affiliates. A company missing from a resume isn't, on its own, a fact. Otherwise "", for you."""
+    company, specific, own = _asked_company(job, label)
+    hit = profile.employer_fact(company) if company else None
+    if hit:
+        return ("", "") if specific else ("Yes", f"Your resume lists {company}: {hit['subject'] or hit['text'][:80]}")
+    every = ans.get("resume_lists_all_employers") or {}
+    if own and company and every.get("confirmed") and (every.get("value") or "").strip().lower() == "yes" \
+            and not GROUP.search(label or ""):
+        return "No", f"You confirmed your resume lists every employer and contract you've had, and {company} isn't on it"
+    return "", ""
+
+
+# Yes/no questions with legal or employment weight: each answer says where it came from, in the extension's panel
+# and the audit trail.
+LEGAL_YES_NO = {"work_authorized_us", "needs_sponsorship", "us_citizen", "us_person", "citizenship_status",
+                "previously_employed"}
+
+
+def source_line(canon: str, ans: dict, job: dict | None = None, label: str = "") -> str:
+    """Where a legal or employment yes/no answer came from, in plain words: the same field _derived read."""
+    if canon == "previously_employed":
+        return _worked_here(job or {}, ans, label)[1]
+    citizen = ((ans.get("us_citizen") or {}).get("value") or "").strip().lower() == "yes"
+    base = {"us_person": "us_citizen",
+            "citizenship_status": "us_citizen" if citizen else "citizenships"}.get(canon, canon)
+    a = ans.get(base) or {}
+    if not (a.get("value") or "").strip():
+        return ""
+    return f"Profile: {a.get('label') or base}" + (" (you confirmed it)" if a.get("confirmed") else " (not confirmed yet)")
+
+
 def _derived(canon: str, ans: dict, job: dict | None = None) -> tuple[str, bool]:
     job = job or {}
     if canon == "referral_name":
@@ -243,7 +330,10 @@ def deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | Non
                 "issues": ["Jobsmith doesn't know what file this wants; attach it yourself"]}
     if not canon or canon in ("resume", "cover_letter"):
         return None
-    value, confirmed = _derived(canon, ans, job)
+    if canon == "previously_employed":
+        value, confirmed = _worked_here(job or {}, ans, field["label"])[0], True
+    else:
+        value, confirmed = _derived(canon, ans, job)
     sensitive = canon in profile.SENSITIVE_KEYS
     if canon in profile.EEO_KEYS and value and not confirmed:
         # Demographics are never on a resume, so an unconfirmed one has nothing behind it: never filled (rule 2).
@@ -268,13 +358,20 @@ def deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | Non
                 return None
             issues.append(f"Your answer '{value}' doesn't match any option here; pick one")
     if not value:
-        if field["required"]:
+        if canon == "previously_employed":
+            issues.append(f"Your resume doesn't say whether you've worked for {_asked_company(job or {}, field['label'])[0] or 'them'}. "
+                          "Answer it yourself, or confirm on your Profile page that your resume lists every employer "
+                          "and contract you've had")
+        elif field["required"]:
             issues.append("Add this to your answers on the Profile page" if canon not in profile.EEO_KEYS
                           else "Set your demographic answers on the Profile page (or 'Decline to self-identify')")
     elif not confirmed:
         issues.append("Read from your resume; confirm it on the Profile page")
-    return {"kind": "answer_bank", "canon": canon, "answer": out,
-            "confidence": 1.0 if (out and confirmed) else 0.5 if out else 0.0, "issues": issues}
+    out_row = {"kind": "answer_bank", "canon": canon, "answer": out,
+               "confidence": 1.0 if (out and confirmed) else 0.5 if out else 0.0, "issues": issues}
+    if canon in LEGAL_YES_NO and out:
+        out_row["rationale"] = source_line(canon, ans, job, field["label"])
+    return out_row
 
 
 # --------------------------------------------------------------------------- generation
@@ -671,6 +768,9 @@ def readiness(job_id: str) -> dict:
     autopilot = db.get_setting("autonomy") in ("autopilot", "autonomous")
     min_conf = float(db.get_setting("autopilot_min_confidence") or 0.7)
     blockers = []
+    job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (job_id,))) or {}
+    ans = profile.answers()
+    norm = lambda v: " ".join((v or "").lower().split())
     for d in drafts_for(job_id):
         val = final_value(d)
         if d["verdict"] == "red":
@@ -681,8 +781,15 @@ def readiness(job_id: str) -> dict:
             continue
         if d["verdict"] == "green" or d.get("final_answer"):
             continue
-        if not d["required"] and not val and d["kind"] == "answer_bank":
-            continue  # optional (e.g. EEO) left blank on purpose
+        if d.get("canon") in LEGAL_YES_NO and d["kind"] == "answer_bank" and val:
+            # Drafted earlier (an old blanket "No" for "worked here before?", or a profile answer you've changed
+            # since): only sent if your profile and resume give the same answer today.
+            now = deterministic(dict(d, required=bool(d["required"])), ans, job)
+            if now is None or norm(now.get("answer")) != norm(val) or now.get("issues"):
+                blockers.append(f"{d['label']}: your profile doesn't give this answer now; check it")
+                continue
+        if not d["required"] and not val and d["kind"] == "answer_bank" and d.get("canon") != "previously_employed":
+            continue  # optional (e.g. EEO) left blank on purpose; "worked here before?" waits for you either way
         if d["issues"]:
             blockers.append(f"{d['label']}: {d['issues'][0]}")
         elif d["kind"] in ("generated", "voice", "agent") and ((d["confidence"] or 0) < min_conf or not val.strip()) and \

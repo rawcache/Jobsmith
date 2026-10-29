@@ -208,3 +208,47 @@ def test_a_required_unconfirmed_demographic_holds_autopilot():
     draft.save_results(jid, [f], {"g": draft.deterministic(f, profile.answers(), job)})
     ready = draft.readiness(jid)
     assert not ready["ready"] and ready["blockers"][0].startswith("Gender: ")
+
+
+async def test_legal_and_employment_answers_carry_their_source_in_the_trail():
+    await profile.ingest_document(FIXTURES / "sample_resume.tex")
+    profile.set_answer("work_authorized_us", "Yes", confirmed=True)
+    jid = sources.add_job_url("https://job-boards.greenhouse.io/northwind/jobs/1", "Northwind Labs", "Intern")
+    job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,)))
+    fields = [{"field": "auth", "label": "Are you authorized to work in the US?", "qtype": "select",
+               "options": ["Yes", "No"], "required": True},
+              {"field": "worked", "label": "Have you ever worked for Northwind Labs before?", "qtype": "select",
+               "options": ["Yes", "No"], "required": True}]
+    ans = profile.answers()
+    draft.save_results(jid, fields, {f["field"]: draft.deterministic(f, ans, job) for f in fields})
+    runner.mark_submitted(jid)
+    by = {f["field"]: f for f in audit.for_job(jid)[0]["fields"]}
+    assert by["auth"]["detail"][0]["ref"] == "Profile: Authorized to work in the US? (you confirmed it)"
+    assert by["auth"]["traces"] is True
+    assert by["worked"]["answer"] == "Yes" and by["worked"]["source"] == "resume" and by["worked"]["traces"] is True
+    assert by["worked"]["detail"][0]["ref"].startswith("Your resume lists Northwind Labs: Northwind Labs | Boston, MA")
+
+
+async def test_a_worked_here_no_that_nothing_backs_doesnt_trace():
+    """An old draft that says "No" with nothing confirmed behind it (the blanket default this replaced)."""
+    jid = sources.add_job_url("https://job-boards.greenhouse.io/figma/jobs/1", "Figma", "Intern")
+    draft.save_results(jid, [{"field": "worked", "label": "Have you ever worked for Figma before?", "qtype": "select",
+                              "options": ["Yes", "No"], "required": True}],
+                       {"worked": {"kind": "answer_bank", "canon": "previously_employed", "answer": "No", "confidence": 1}})
+    runner.mark_submitted(jid)
+    [worked] = audit.for_job(jid)[0]["fields"]
+    assert worked["traces"] is False and worked["detail"][0]["ref"] == "Nothing you've confirmed says this"
+
+
+async def test_an_unconfirmed_legal_answer_traces_only_when_you_approved_it_and_it_still_matches():
+    await profile.ingest_document(FIXTURES / "sample_resume.tex")        # sponsorship "No", read from the resume
+    jid = sources.add_job_url("https://job-boards.greenhouse.io/acme/jobs/3", "Acme Robotics", "Intern")
+    f = {"field": "spons", "label": "Will you now or in the future require visa sponsorship?", "qtype": "select",
+         "options": ["Yes", "No"], "required": True}
+    draft.save_results(jid, [f], {"spons": draft.deterministic(f, profile.answers(), {"company": "Acme Robotics"})})
+    trail = lambda: next(x for x in audit.snapshot(jid) if x["field"] == "spons")
+    assert trail()["answer"] == "No" and trail()["traces"] is False
+    db.x("UPDATE drafts SET verdict='green' WHERE job_id=?", (jid,))                 # you approved it here
+    assert trail()["traces"] is True
+    profile.set_answer("needs_sponsorship", "Yes", confirmed=True)                 # and then your profile changed
+    assert trail()["traces"] is False and trail()["detail"][0]["ref"].endswith("says something else")

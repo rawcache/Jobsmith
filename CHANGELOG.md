@@ -3,6 +3,16 @@
 ## Unreleased
 
 ### Changed
+- "Have you worked for <company> before?" is no longer answered "No" by default. It's "Yes" when your resume's
+  work history names the company, "No" only once you've confirmed "My resume lists every employer and contract I've
+  had" on the Profile page, and otherwise left for you under "Needs you" (autopilot won't send it, even when the
+  question is optional). Work-authorization, sponsorship, citizenship and prior-employment answers now say where
+  they came from ("Profile: Authorized to work in the US? (you confirmed it)", "Your resume lists Northwind Labs")
+  in the extension's panel and in each submission's audit trail. The answer is about the company the question
+  names ("worked for Adobe?" on a Figma form); one that also asks about subsidiaries or affiliates, or about a kind
+  of employer ("a government agency"), waits for you. An answer drafted earlier, the old "No" included, is only
+  sent if your profile and resume give the same answer today. Your own AI agent (MCP) can no longer write answers
+  that come from your profile.
 - Autopilot has limits on by default: 20 applications a day and 3 to one company a week. Change them under
   Settings → Applying (blank means no limit). Home shows "12 of 20 today". At a limit, autopilot stops before
   Submit and says which limit it hit; the application waits under "Needs you" and you can still send it yourself.

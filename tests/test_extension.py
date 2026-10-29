@@ -388,6 +388,28 @@ async def _shown(page, sel: str) -> str:
 
 
 @browser
+async def test_panel_shows_where_legal_answers_came_from_and_holds_worked_here_before(page):
+    await _load(page, {"panelOpen": True}, fixture="greenhouse_figma_live.html", answers={
+        "Are you authorized to work in the country for which you applied?": {
+            "value": "Yes", "kind": "answer_bank", "source": "Profile: Authorized to work in the US? (you confirmed it)"},
+        "Have you ever worked for Figma before, as an employee or a contractor/consultant?": {
+            "value": "", "kind": "answer_bank", "hold": "nothing confirmed says, so answer it yourself"}})
+    await page.wait_for_function("document.querySelectorAll('input[required][aria-hidden=true]').length === 4")
+    await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
+    note = "document.querySelector('#jobsmith-panel').shadowRoot.querySelector('.note')"
+    await page.wait_for_function(f"{note}?.innerText.includes('Filled')", timeout=30000)
+    assert await _shown(page, AUTHORIZED) == "Yes"
+    assert await _shown(page, WORKED_HERE) == ""
+    text = await page.evaluate(f"{note}.innerText")
+    needs, sources = text.split("Needs you:")[1].split("Where these answers came from:")
+    assert "worked for Figma before" in needs and "nothing confirmed says" in needs
+    assert "authorized to work in the country for which you applied?: Yes. Profile: Authorized to work in the US? " \
+           "(you confirmed it)" in sources
+    assert "worked for Figma" not in sources
+    await _never_submitted(page)
+
+
+@browser
 async def test_autofill_picks_greenhouse_dropdowns_and_the_city_from_its_lookup(page):
     """#19: on Greenhouse's form the dropdowns open on key-up, not key-down, so autofill left Country, Location
     (City) and every Yes/No box under Needs you. Now it opens them with a whole key press, picks the option that
@@ -602,6 +624,25 @@ async def test_engine_names_the_city_to_pick_from_a_place_lookup():
     assert by["candidate-location"]["value"] == "Boston, MA"
     assert by["candidate-location"]["pick"] == "Boston, Massachusetts, United States"
     assert "pick" not in by["pronouns"]
+
+
+async def test_engine_holds_worked_here_before_and_says_where_legal_answers_came_from():
+    """"Worked for <company> before?" with nothing confirmed is held (under Needs you), not a guessed "No"; a
+    work-authorization answer carries its source for the panel."""
+    profile.set_answer("work_authorized_us", "Yes", True)
+    fields = [{"id": "auth", "label": "Are you authorized to work in the US?", "type": "combobox", "required": True},
+              {"id": "worked", "label": "Have you ever worked for Figma before?", "type": "combobox", "required": True}]
+    r = await extension.answers("https://job-boards.greenhouse.io/figma/jobs/11", fields, title="Intern", company="Figma")
+    by = {a["id"]: a for a in r["answers"]}
+    assert by["auth"]["value"] == "Yes"
+    assert by["auth"]["source"] == "Profile: Authorized to work in the US? (you confirmed it)"
+    assert by["worked"]["value"] == "" and by["worked"]["hold"] == "nothing confirmed says, so answer it yourself"
+    assert "source" not in by["worked"]
+    profile.set_answer("resume_lists_all_employers", "Yes", True)
+    r = await extension.answers("https://job-boards.greenhouse.io/figma/jobs/11", fields, title="Intern", company="Figma")
+    worked = next(a for a in r["answers"] if a["id"] == "worked")
+    assert worked["value"] == "No" and not worked["hold"]
+    assert worked["source"].startswith("You confirmed your resume lists every employer")
 
 
 @pytest.mark.parametrize("fact", ["first name", "legal last name", "email address", "mobile phone number",

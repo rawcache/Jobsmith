@@ -73,8 +73,9 @@ RULES: list[tuple[str, str]] = [
      "referral_name"),
     (r"how did you (first )?(hear|find|learn|come across)|where did you (first )?(hear|find|learn)|"
      r"referral source|source of application|how .*learn about", "how_heard"),
-    (r"(previously|ever|formerly) (been )?(employed|worked)|former employee|worked (here|for us) before|"
-     r"(have you|did you) (ever )?(worked|been employed) (for|at|with)|worked for .{0,60}(in the past|before|previously)", "previously_employed"),
+    (r"(previously|ever|formerly) (been )?(employed|worked)|(former|previous|past|prior) (\S+ )?(employee|intern|"
+     r"contractor|worker)\b|^prior employment( (with|at) .{1,60})?\??$|worked (here|for us) before|"
+     r"(have you|did you) (ever )?(worked|work|been employed) (for|at|with|by)|worked for .{0,60}(in the past|before|previously)", "previously_employed"),
     (r"(current|legal|full|permanent|residential|home|mailing) address|what is your address|^your address", "full_address"),
     (r"^(street )?address( line)?( 1)?$|street address", "address_line1"),
     (r"^city$|^city of residence|current city", "city"),

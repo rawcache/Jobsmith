@@ -73,11 +73,17 @@ async def answers(url: str, fields: list[dict], title: str = "", company: str = 
             out.append({"id": f["field"], "file": kind, "kind": "file"})
             continue
         qkind = classify.question_kind(f["label"], f["qtype"], f["options"])
+        legal = r.get("canon") in draft.LEGAL_YES_NO
+        # Nothing confirmed says whether you've worked there: it waits for you, never a guessed "No".
+        unknown = r.get("canon") == "previously_employed" and not r.get("answer")
         out.append({"id": f["field"], "value": r.get("answer", ""), "kind": r.get("kind", ""),
                     "confidence": r.get("confidence", 0), "issues": r.get("issues", []),
                     # held: left blank because the answer didn't fit; check: filled, but you should read it.
                     # qkind: what the question asks for, so the extension checks the same thing (one set of rules).
-                    "hold": r.get("held"), "check": r.get("check"), "qkind": qkind,
+                    "hold": r.get("held") or ("nothing confirmed says, so answer it yourself" if unknown else None),
+                    "check": r.get("check"), "qkind": qkind,
+                    # source: where a legal or employment yes/no answer came from, shown in the panel.
+                    **({"source": r.get("rationale", "")} if legal and r.get("answer") else {}),
                     # pick: the option to look for in a place lookup ("Boston, Massachusetts, United States" for
                     # "Boston, MA"); the extension still types the city and picks only a matching option.
                     **({"pick": draft.location_full(r.get("answer", ""))}
