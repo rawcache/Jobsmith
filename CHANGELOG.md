@@ -13,6 +13,12 @@
   may text you (SMS, WhatsApp) is always left for you.
 
 ### Changed
+- The terminal app's hammer swings down onto the anvil once (about a second) when it opens, on /help and when an
+  application is sent: it turns about the end of its handle like a real swing, throws a few sparks, and rests. It
+  no longer hammers on a loop while work runs, and once it rests its animation timers stop (only the engine check
+  every 1.5 s keeps running). With NO_COLOR, a dumb or non-interactive terminal, Reduce motion in macOS, GNOME or Windows, or
+  `JOBSMITH_REDUCED_MOTION=1`, only the resting frame is drawn. `jobsmith check`'s gallery now includes the
+  terminal app.
 - A new accent: a deeper rust (#9A3412, and #E07A4F on dark backgrounds) in place of the orange, so Jobsmith no
   longer reads like Claude's coral. It's on the dashboard, the extension's panel and popup, the website, the
   terminal app and the README badge, and the extension's icon is now the hammer and anvil instead of a blue "J".

@@ -1,11 +1,14 @@
 """The terminal app, driven like a person would: ask, review, autopilot. Runs against a real engine on a spare port."""
 import asyncio
+import itertools
+import re
 import socket
 import threading
 import time
 
 import pytest
 import uvicorn
+from rich.console import Console
 
 from jobsmith import db, draft
 
@@ -200,7 +203,7 @@ def test_job_name_prefers_the_tab_then_the_record_then_the_id():
 
 
 def test_timers_survive_the_app_closing(engine):
-    """The logo animates every 0.1 s and engine updates repaint the welcome box; a tick that lands after the
+    """The logo's swing and the live rows tick on timers and engine updates repaint the welcome box; a tick that lands after the
     widgets are removed (quitting) must be skipped, not crash. Seen on CI as NoMatches('#logo')."""
     from jobsmith.tuiapp import Jobsmith
     db.conn()
@@ -211,8 +214,9 @@ def test_timers_survive_the_app_closing(engine):
             await pilot.pause(0.3)
             for sel in ("#welcome", "#live", "#think", "#status"):
                 await app.query_one(sel).remove()
-            app.strike = 3
-            app.animate()                                          # would raise NoMatches('#logo')
+            app.motion = True
+            app.swing()                                            # would raise NoMatches('#logo')
+            app.animate()
             app.apply_state({"active": {}, "demo": True}, [], {}, {})   # would raise NoMatches('#hello')
     asyncio.run(go())
 
@@ -319,3 +323,171 @@ def test_losing_the_engine_shows_on_one_status_line_and_logs_only_a_long_outage(
             assert _texts(app).count("Back in touch with the engine") == 1
             assert "reconnecting" not in status()
     asyncio.run(go())
+
+
+def test_the_hammer_swings_once_about_the_end_of_its_handle_and_rests():
+    """About a second: the head comes down in an arc, the handle's end stays put (it's the pivot, like a real
+    swing), sparks fly only from the strike, and it ends on the resting frame."""
+    from jobsmith.tuiapp import EMBER, STRIKE, logo_text, swing_frames
+    frames = swing_frames()
+    assert 0.8 <= sum(secs for _, secs in frames) <= 1.2
+    assert frames[-1][0].plain == logo_text().plain and frames[-1][1] == 0
+    rows = [f.plain.split("\n") for f, _ in frames]
+    for i, r in enumerate(rows):
+        assert r[2][17] != " "                                  # the handle's end, in every frame
+        assert [re.sub("[✦✧·]", " ", line) for line in r[3:]] == rows[-1][3:]   # the anvil never moves
+        assert any(ch in "".join(r) for ch in "✦✧·") == (STRIKE <= i < len(rows) - 1)
+    head = [max((n for n, line in enumerate(f.split("\n")) if any(s.style == EMBER for s in line.spans)), default=-1)
+            for f, _ in frames[:STRIKE + 1]]
+    assert head == sorted(head) and head[-1] == 2               # the head only comes down, onto the anvil
+    assert "▐██▌━━━━━" in rows[-1][2]                          # resting on the anvil
+
+
+@pytest.mark.parametrize("env, tty, system, moves", [
+    ({}, True, False, True),
+    ({"NO_COLOR": "1"}, True, False, False),
+    ({"TERM": "dumb"}, True, False, False),
+    ({}, False, False, False),                                  # not a terminal: piped, CI, a log
+    ({"JOBSMITH_REDUCED_MOTION": "1"}, True, False, False),
+    ({}, True, True, False),                                    # Reduce motion in the system's settings
+    ({"JOBSMITH_REDUCED_MOTION": "0"}, True, True, True),       # asked for it anyway
+])
+def test_the_hammer_keeps_still_when_motion_is_unwelcome(monkeypatch, env, tty, system, moves):
+    from jobsmith import tuiapp
+    for k in ("NO_COLOR", "TERM", "JOBSMITH_REDUCED_MOTION"):
+        monkeypatch.delenv(k, raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setattr(tuiapp.sys.stdout, "isatty", lambda: tty, raising=False)
+    monkeypatch.setattr(tuiapp, "_system_reduces_motion", lambda: system)
+    assert tuiapp.motion_ok() is moves
+
+
+@pytest.mark.parametrize("motion", [True, None])
+def test_the_swing_plays_once_then_nothing_wakes_the_app(engine, motion):
+    """With motion it plays through and stops; without (here: headless, so not a terminal) only the resting frame is
+    drawn. Either way, once it rests no timer is left running for it, and with nothing applying or thinking the
+    0.1 s tick is paused too, so an idle terminal app costs no CPU."""
+    from textual.widgets import Static
+    from jobsmith.tuiapp import Jobsmith, logo_text
+    db.conn()
+
+    async def go():
+        app = Jobsmith(engine, splash=False, motion=motion)
+        drawn = []
+        async with app.run_test(size=(120, 40)) as pilot:
+            logo = app.query_one("#logo", Static)
+            update = logo.update
+            logo.update = lambda art="": (drawn.append(art.plain), update(art))
+            app.swing()
+            await pilot.pause(1.5)
+            assert drawn[-1] == logo_text().plain
+            assert app.swing_timer is None and not app.swing_left
+            assert app.ticker._active.is_set() is False         # paused: nothing to animate
+            app.start_busy()
+            assert app.ticker._active.is_set()                  # thinking: it ticks again
+            app.stop_busy()
+        return drawn
+    drawn = asyncio.run(go())
+    from jobsmith.tuiapp import swing_frames
+    assert len(set(drawn)) == (len({f.plain for f, _ in swing_frames()}) if motion else 1)
+
+
+def screen_text(app) -> str:
+    """What export_screenshot draws, as text (its SVG puts every block character in an element of its own)."""
+    import io
+    console = Console(width=app.size.width, height=app.size.height, file=io.StringIO(), force_terminal=True,
+                      color_system="truecolor", record=True, legacy_windows=False, safe_box=False)
+    console.print(app.screen._compositor.render_update(full=True, screen_stack=app._background_screens))
+    return console.export_text()
+
+
+@pytest.mark.parametrize("platform, says, reduces", [
+    ("darwin", "1\n", True), ("darwin", "0\n", False), ("darwin", OSError, False),
+    ("linux", "false\n", True), ("linux", "true\n", False),
+])
+def test_reduce_motion_is_read_from_the_system(monkeypatch, platform, says, reduces):
+    import subprocess
+    from jobsmith import tuiapp
+
+    def run(cmd, **kw):
+        if says is OSError:
+            raise OSError("no defaults")
+        return subprocess.CompletedProcess(cmd, 0, stdout=says)
+    monkeypatch.setattr(tuiapp.sys, "platform", platform)
+    monkeypatch.setattr(tuiapp.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr(tuiapp.subprocess, "run", run)
+    assert tuiapp._system_reduces_motion() is reduces
+
+
+@pytest.mark.parametrize("answered, animations, reduces", [(1, 1, False), (1, 0, True), (0, 0, False)])
+def test_reduce_motion_on_windows_reads_a_whole_bool(monkeypatch, answered, animations, reduces):
+    """SystemParametersInfoW writes a 4-byte BOOL; when the call fails, its answer isn't read."""
+    import ctypes
+    from ctypes import wintypes
+    from jobsmith import tuiapp
+
+    class User32:
+        def SystemParametersInfoW(self, action, _, ref, __):
+            assert action == 0x1042 and type(ref._obj) is wintypes.BOOL     # 4 bytes on Windows
+            ref._obj.value = animations
+            return answered
+    monkeypatch.setattr(tuiapp.sys, "platform", "win32")
+    monkeypatch.setattr(ctypes, "windll", type("W", (), {"user32": User32()})(), raising=False)
+    assert tuiapp._system_reduces_motion() is reduces
+
+
+def test_the_hammer_swings_after_the_splash_on_help_and_when_an_application_is_sent(engine):
+    """Not while the splash covers it; then once on /help and once when an application goes out. And the live
+    rows' tick, paused while nothing ran, picks up again when one starts."""
+    from jobsmith.tuiapp import Jobsmith, Splash
+    db.conn()
+
+    async def go():
+        app = Jobsmith(engine, splash=True, motion=True)
+        swings = []
+        app.swing = lambda real=app.swing: (swings.append(len(app.screen_stack)), real())
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause(0.2)
+            assert isinstance(app.screen, Splash) and swings == []
+            await pilot.press("x")                                  # any key skips the splash
+            await pilot.pause(0.2)
+            assert swings == [1]                                    # once it's gone, not behind it
+            await pilot.pause(1.5)
+            assert not app.ticker._active.is_set()
+            app.apply_state({"active": {"j9": "filling"}}, [], {}, {})
+            assert app.ticker._active.is_set()                      # an application started: it ticks again
+            app.apply_state({"active": {"j9": "submitted"}}, [], {}, {})
+            assert len(swings) == 2                                 # sent
+            app.query_one("#prompt").focus()
+            await pilot.press(*"/help", "enter")
+            await pilot.pause(0.2)
+            assert len(swings) == 3
+    asyncio.run(go())
+
+
+def test_the_screenshot_shows_the_resting_hammer(engine):
+    """The terminal app as it first looks, motion off: the resting frame, whole, beside the welcome."""
+    from jobsmith.tuiapp import LOGO_W, Jobsmith, logo_text
+    db.conn()
+
+    async def go():
+        app = Jobsmith(engine, splash=False)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause(0.5)
+            return screen_text(app)
+    screen = asyncio.run(go())
+    rest = logo_text().plain.split("\n")
+    at = screen.index(rest[2])
+    left = at - screen.rfind("\n", 0, at) - 1                  # the logo's column on screen
+    lines = screen.split("\n")
+    row = next(n for n, line in enumerate(lines) if line[left:left + LOGO_W] == rest[2])
+    assert [line[left:left + LOGO_W] for line in lines[row - 2:row + 4]] == [r.ljust(LOGO_W) for r in rest]
+
+
+def test_jobsmith_checks_gallery_gets_the_terminal_app_at_rest(engine, tmp_path):
+    from jobsmith.devtools import terminal_screenshot
+    db.conn()
+    asyncio.run(terminal_screenshot(engine, tmp_path / "terminal.svg"))
+    svg = (tmp_path / "terminal.svg").read_text(encoding="utf-8")
+    assert svg.startswith("<svg") and "▐" in svg and "━" in svg
