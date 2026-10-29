@@ -66,7 +66,7 @@ blocks every outward action.
 - Python 3.13 (`.python-version`), plain asyncio. Type hints, small functions, docstrings that say why.
 - User-facing words: plain, specific, active voice, no jargon ("applications waiting for you", not "pending queue").
 - UI: warm neutrals and centered column, matching the extension's on-page panel (see `web/src/style.css` tokens).
-  One accent, the panel's orange (`#c2410c`; `#d66638` in dark), only on primary buttons, where you are, focus,
+  One accent, the panel's deep rust (`#9a3412`; `#e07a4f` in dark), only on primary buttons, where you are, focus,
   progress, the logo and counts. Light theme by default.
 - Every new job site gets a fixture in `tests/fixtures/` and a test in `tests/test_fill.py`.
 - Every new skill gets `SKILL.md` frontmatter: `name`, `description`, `title`, `status` (ready|planned), `order`,

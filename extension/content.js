@@ -249,23 +249,23 @@
     :host{all:initial}
     .wrap{position:fixed;top:72px;right:0;z-index:2147483647;font:13px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;color:#16161d}
     .tab{display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 6px;background:#f2f0ec;border:1px solid #d9d4ca;border-right:0;
-      border-radius:10px 0 0 10px;box-shadow:0 6px 20px rgba(22,22,29,.12);cursor:pointer;color:#c2410c}
+      border-radius:10px 0 0 10px;box-shadow:0 6px 20px rgba(22,22,29,.12);cursor:pointer;color:#9a3412}
     .tab span{writing-mode:vertical-rl;font:600 11px ui-monospace,"SF Mono",Menlo,monospace;color:#16161d;letter-spacing:.02em}
-    .tab b{font:600 10px ui-monospace,monospace;background:#c2410c;color:#fff;border-radius:8px;padding:1px 5px}
+    .tab b{font:600 10px ui-monospace,monospace;background:#9a3412;color:#fff;border-radius:8px;padding:1px 5px}
     .p{width:330px;max-height:calc(100vh - 96px);overflow:auto;background:#f2f0ec;border:1px solid #d9d4ca;border-right:0;border-radius:12px 0 0 12px;
       box-shadow:0 10px 32px rgba(22,22,29,.16)}
-    .h{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #e0dcd4;color:#c2410c;position:sticky;top:0;background:#f2f0ec}
+    .h{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #e0dcd4;color:#9a3412;position:sticky;top:0;background:#f2f0ec}
     .h strong{font:600 13px ui-monospace,"SF Mono",Menlo,monospace;color:#16161d;flex:1}
-    .h button{border:0;background:none;color:#75716a;cursor:pointer;font-size:16px;padding:2px 6px;border-radius:5px}
+    .h button{border:0;background:none;color:#66615a;cursor:pointer;font-size:16px;padding:2px 6px;border-radius:5px}
     .h button:hover{background:#e8e4dc;color:#16161d}
     .sec{padding:12px;border-bottom:1px solid #e0dcd4}
     .sec:last-child{border-bottom:0}
     .job{background:#fbfaf8;border:1px solid #e0dcd4;border-radius:10px;padding:10px 12px}
     .job .t{font-weight:600;font-size:14px;line-height:1.3}
-    .muted{color:#75716a}.small{font-size:12px}.mono{font-family:ui-monospace,"SF Mono",Menlo,monospace}
-    .lbl{font:500 11.5px ui-monospace,"SF Mono",Menlo,monospace;color:#75716a;margin:0 0 6px}
-    .go{display:block;width:100%;border:0;border-radius:8px;padding:10px;background:#c2410c;color:#fff;font:600 14px -apple-system,system-ui,sans-serif;cursor:pointer}
-    .go:hover{background:#9a3412}.go:disabled{opacity:.6;cursor:default}
+    .muted{color:#66615a}.small{font-size:12px}.mono{font-family:ui-monospace,"SF Mono",Menlo,monospace}
+    .lbl{font:500 11.5px ui-monospace,"SF Mono",Menlo,monospace;color:#66615a;margin:0 0 6px}
+    .go{display:block;width:100%;border:0;border-radius:8px;padding:10px;background:#9a3412;color:#fff;font:600 14px -apple-system,system-ui,sans-serif;cursor:pointer}
+    .go:hover{background:#7c2d12}.go:disabled{opacity:.6;cursor:default}
     .btn{border:1px solid #cfc9bf;background:#fbfaf8;border-radius:6px;padding:5px 10px;font:500 12.5px -apple-system,system-ui,sans-serif;color:#16161d;cursor:pointer}
     .btn:hover{background:#efece6}
     a{color:#16161d}
@@ -273,7 +273,7 @@
     .ring b{display:grid;place-items:center;width:40px;height:40px;border-radius:50%;background:#f2f0ec;font:600 14px ui-monospace,monospace}
     .row{display:flex;gap:10px;align-items:center}
     .kw{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}.kw span{font:11px ui-monospace,monospace;padding:1px 6px;border-radius:4px;background:#e8e4dc}
-    .kw span.miss{background:transparent;border:1px dashed #cfc9bf;color:#75716a}
+    .kw span.miss{background:transparent;border:1px dashed #cfc9bf;color:#66615a}
     ul{list-style:none;margin:0;padding:0}li{margin:4px 0}
     .note{background:#fbeee4;border:1px solid #f3c9a8;border-radius:8px;padding:8px 10px;margin-top:8px}
     .warn{background:#fbf3dc;border-color:#ecd9a0}
@@ -461,8 +461,8 @@
       const b = document.createElement("div");
       const sr = b.attachShadow({ mode: "open" });
       sr.innerHTML = `<style>button{display:inline-flex;align-items:center;gap:6px;margin:6px 0 2px;border:1px solid #d9d4ca;background:#f2f0ec;color:#16161d;
-        border-radius:7px;padding:5px 10px;font:500 12.5px -apple-system,system-ui,sans-serif;cursor:pointer}button:hover{border-color:#c2410c}
-        svg{color:#c2410c}span{font:12px -apple-system,system-ui,sans-serif;color:#75716a;margin-left:8px}</style>
+        border-radius:7px;padding:5px 10px;font:500 12.5px -apple-system,system-ui,sans-serif;cursor:pointer}button:hover{border-color:#9a3412}
+        svg{color:#9a3412}span{font:12px -apple-system,system-ui,sans-serif;color:#66615a;margin-left:8px}</style>
         <button>${mark(13)}Write with Jobsmith</button><span></span>`;
       const btn = sr.querySelector("button"), note = sr.querySelector("span");
       btn.onclick = async (e) => {

@@ -27,8 +27,8 @@
   <text x="286" y="290" fill="#75716a">MCP server for your agent · local API for the UI</text>
   <g fill="#3a3833"><text x="706" y="100">job postings</text><text x="706" y="118">(Greenhouse, Lever,</text><text x="706" y="136">Ashby, Workday...)</text>
     <text x="706" y="182">your inbox (read-only)</text><text x="706" y="224">your AI of choice:</text><text x="706" y="242">Gemini, smith (local),</text><text x="706" y="260">Claude, OpenAI, or none</text></g>
-  <g stroke="#c2410c" stroke-width="2" fill="none" marker-end="url(#a)">
+  <g stroke="#9a3412" stroke-width="2" fill="none" marker-end="url(#a)">
     <path d="M210 110 H262"/><path d="M210 180 H262"/><path d="M210 262 H262"/><path d="M630 112 H682"/><path d="M630 276 H682"/><path d="M630 200 H682"/>
   </g>
-  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#c2410c"/></marker></defs>
+  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#9a3412"/></marker></defs>
 </svg>
