@@ -347,9 +347,11 @@ def screenshots(port: int = DEMO_PORT, out: Path | None = None) -> Path:
                 await p.close()
             await b.close()
     asyncio.run(go())
+    asyncio.run(terminal_screenshot(f"http://127.0.0.1:{port}", out / "terminal.svg"))
     cells = "".join(f'<figure><figcaption>{n} <a href="http://127.0.0.1:{port}/{f}">open</a></figcaption>'
                     f'<a href="{n}-wide.png"><img src="{n}-wide.png" loading="lazy"></a>'
                     f'<a href="{n}-phone.png"><img class="ph" src="{n}-phone.png" loading="lazy"></a></figure>' for n, f in PAGES)
+    cells += '<figure><figcaption>terminal app, at rest</figcaption><a href="terminal.svg"><img src="terminal.svg"></a></figure>'
     errs = "".join(f"<li>{k}: {e}</li>" for k, es in errors.items() for e in es)
     (out / "index.html").write_text(
         "<!doctype html><meta charset=utf-8><title>Jobsmith screenshots</title><style>body{font:14px system-ui;margin:24px;background:#f2f0ec}"
@@ -357,6 +359,15 @@ def screenshots(port: int = DEMO_PORT, out: Path | None = None) -> Path:
         "img{width:100%;border:1px solid #ddd;background:#fff}.err{color:#b91c1c}</style>"
         f"<h1>Every page, {time.strftime('%b %d %H:%M')}</h1>" + (f"<ul class=err>{errs}</ul>" if errs else "<p>No page errors.</p>") + cells)
     return out / "index.html"
+
+
+async def terminal_screenshot(base: str, path: Path) -> None:
+    """The terminal app as it first looks, its hammer resting on the anvil (headless, so it doesn't swing)."""
+    from .tuiapp import Jobsmith
+    app = Jobsmith(base, splash=False, motion=False)
+    async with app.run_test(size=(120, 36)) as pilot:
+        await pilot.pause(1.5)
+        path.write_text(app.export_screenshot(), encoding="utf-8")
 
 
 def check() -> int:

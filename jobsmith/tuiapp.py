@@ -14,7 +14,12 @@ Keys: shift+tab autopilot on/off · ctrl+o board · esc cancel · ↑ history ·
 from __future__ import annotations
 
 import json
+import math
+import os
 import random
+import shutil
+import subprocess
+import sys
 import time
 import webbrowser
 from pathlib import Path
@@ -52,46 +57,122 @@ SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 STAR = "·✢✳✶✻✽✻✶✳✢"
 VERBS = ["Forging", "Hammering", "Tempering", "Smelting", "Annealing", "Quenching", "Riveting", "Smithing", "Shaping", "Polishing"]
 
-# The anvil and hammer, in three frames: hammer raised, striking, sparks ("*").
-LOGO = [
-    ["         ▐██▌━━━━━ ",
-     "                   ",
-     "▗▄▄▄▄▄▄██████████▖ ",
-     "    ▀▀▀▀███████▀▀  ",
-     "      ▗███████▖    "],
-    ["                   ",
-     "         ▐██▌━━━━━ ",
-     "▗▄▄▄▄▄▄██████████▖ ",
-     "    ▀▀▀▀███████▀▀  ",
-     "      ▗███████▖    "],
-    ["     *    *    *   ",
-     "   *     ▐██▌━━━━━*",
-     "▗▄▄▄▄▄▄██████████▖ ",
-     "    ▀▀▀▀███████▀▀  ",
-     "      ▗███████▖    "],
-]
+# The anvil and hammer. The hammer swings down onto the anvil once (at start-up, on /help, when an application is
+# sent), turning about the end of its handle the way a real swing does, throws a few sparks, and rests there.
+ANVIL = ["▗▄▄▄▄▄▄██████████▖ ",
+         "    ▀▀▀▀███████▀▀  ",
+         "      ▗███████▖    "]
+RESTING = "         ▐██▌━━━━━ "    # the hammer lying on the anvil (row 2), its handle ending in column 17
+LOGO_W, LOGO_H = 21, 6
 WOOD = "#a39b90"
+# Geometry is in cell widths, a row being two tall, so a turn looks round. The pivot is the handle's end at rest.
+PIVOT = (18.0, 5.0)
+QUAD = " ▘▝▀▖▌▞▛▗▚▐▜▄▙▟█"      # quarter blocks, indexed by filled quarters: top-left 1, top-right 2, bottom-left 4, bottom-right 8
+# (degrees up, seconds shown): held high, falling faster, the strike, the sparks dying out, at rest
+SWING = [(78, .18), (60, .07), (40, .055), (16, .045), (0, .11), (0, .11), (0, .12), (0, .13), (0, .14), (0, 0)]
+STRIKE = 4                     # the frame the head meets the anvil; sparks fly from here
+# Sparks thrown from the head's two lower edges: (where, which way per frame), falling back as they go
+SPARKS = [((9.2, 5.8), (-1.6, -1.2)), ((9.2, 5.8), (-2.4, -0.4)), ((9.4, 5.6), (-0.8, -2.0)),
+          ((12.8, 5.6), (0.9, -2.2)), ((12.8, 5.6), (2.2, -1.6)), ((12.6, 5.4), (0.3, -2.6))]
+SPARK_LOOK = [("✦", SPARK), ("✦", SPARK), ("✧", EMBER), ("·", EMBER), ("·", DIM)]
 
 
-def logo_text(frame: int, glint: int = -1) -> Text:
-    t = Text()
-    rows = LOGO[frame]
-    for r, row in enumerate(rows):
-        for c, ch in enumerate(row):
-            if ch == "*":
-                t.append(random.choice("✦·✧*"), style=SPARK)
-            elif ch == "━":
-                t.append(ch, style=WOOD)
-            elif r < 2 and ch != " ":
-                t.append(ch, style=EMBER)
-            elif ch != " ":
-                hot = glint >= 0 and abs(c - glint) <= 1
-                t.append(ch, style=INK if hot else STEEL)
-            else:
-                t.append(ch)
-        if r < len(rows) - 1:
-            t.append("\n")
-    return t
+def _hammer_part(x: float, y: float) -> str:
+    """What of the hammer is at (x, y), measured from the pivot with the hammer resting: head, handle or nothing."""
+    if -8.5 <= x <= -5.5 and -1 <= y <= 1:
+        return "head"
+    if -5.5 < x <= 0 and -0.3 <= y <= 0.3:
+        return "wood"
+    return ""
+
+
+def _raised_hammer(degrees: float) -> dict[tuple[int, int], tuple[str, str]]:
+    """The hammer turned up by `degrees` about its pivot, drawn in quarter blocks: {(row, col): (glyph, colour)}.
+    Each quarter is sampled 3×3; the head needs half its quarter covered, the thin handle less, so it stays whole."""
+    c, s = math.cos(math.radians(degrees)), math.sin(math.radians(degrees))
+    cells = {}
+    for row in range(LOGO_H - len(ANVIL)):
+        for col in range(LOGO_W):
+            bits, kinds = 0, set()
+            for q, (qx, qy) in enumerate(((0, 0), (1, 0), (0, 1), (1, 1))):
+                here = [k for sx in (1 / 6, .5, 5 / 6) for sy in (1 / 6, .5, 5 / 6)
+                        if (k := _hammer_part(*_unturn(col + (qx + sx) / 2, row * 2 + qy + sy, c, s)))]
+                if len(here) >= (4 if "head" in here else 2):
+                    bits |= 1 << q
+                    kinds |= set(here)
+            if bits:
+                cells[(row, col)] = (QUAD[bits], EMBER if "head" in kinds else WOOD)
+    return cells
+
+
+def _unturn(x: float, y: float, c: float, s: float) -> tuple[float, float]:
+    dx, dy = x - PIVOT[0], y - PIVOT[1]
+    return dx * c + dy * s, -dx * s + dy * c
+
+
+def logo_text(degrees: float = 0, spark_age: int = -1) -> Text:
+    """The logo with the hammer `degrees` up from resting, and sparks `spark_age` frames after the strike (-1: none).
+    logo_text() is the resting frame, the only one drawn when motion is off."""
+    grid = [[(" ", "")] * LOGO_W for _ in range(LOGO_H)]
+    for r, line in enumerate(ANVIL, start=LOGO_H - len(ANVIL)):
+        grid[r] = [(ch, STEEL) for ch in line.ljust(LOGO_W)]
+    if degrees:
+        for (r, col), cell in _raised_hammer(degrees).items():
+            grid[r][col] = cell
+    else:
+        grid[2] = [(ch, WOOD if ch == "━" else EMBER) for ch in RESTING.ljust(LOGO_W)]
+    if 0 <= spark_age < len(SPARK_LOOK):
+        t = spark_age + 1
+        for (ox, oy), (vx, vy) in SPARKS:
+            col, row = int(ox + vx * t), int((oy + vy * t + .3 * t * t) // 2)
+            if 0 <= row < LOGO_H and 0 <= col < LOGO_W and grid[row][col][0] == " ":
+                grid[row][col] = SPARK_LOOK[spark_age]
+    out = Text()
+    for r, line in enumerate(grid):
+        for ch, colour in line:
+            out.append(ch, style=colour if ch != " " else "")
+        if r < LOGO_H - 1:
+            out.append("\n")
+    return out
+
+
+def swing_frames() -> list[tuple[Text, float]]:
+    """The swing, frame by frame: (frame, seconds to show it). The last is the resting frame."""
+    return [(logo_text(deg, i - STRIKE if i >= STRIKE else -1), secs) for i, (deg, secs) in enumerate(SWING[:-1])] + \
+           [(logo_text(), 0)]
+
+
+def motion_ok() -> bool:
+    """Whether to animate. Not when NO_COLOR is set, the terminal is dumb or not a terminal, or you've asked for less
+    motion: JOBSMITH_REDUCED_MOTION=1 (0 to animate anyway), or Reduce motion in macOS, GNOME or Windows settings."""
+    env = os.environ
+    if env.get("NO_COLOR") or env.get("TERM") == "dumb" or not sys.stdout.isatty():
+        return False
+    if env.get("JOBSMITH_REDUCED_MOTION") in ("0", "1"):
+        return env["JOBSMITH_REDUCED_MOTION"] == "0"
+    return not _system_reduces_motion()
+
+
+def _system_reduces_motion() -> bool:
+    try:
+        if sys.platform == "darwin":
+            r = subprocess.run(["defaults", "read", "com.apple.universalaccess", "reduceMotion"],
+                               capture_output=True, text=True, timeout=1)
+            return r.stdout.strip() == "1"
+        if sys.platform == "win32":
+            import ctypes
+            from ctypes import wintypes
+            on = wintypes.BOOL()                                  # the API writes a 4-byte BOOL
+            if not ctypes.windll.user32.SystemParametersInfoW(0x1042, 0, ctypes.byref(on), 0):   # SPI_GETCLIENTAREAANIMATION
+                return False                                      # couldn't ask: assume motion is fine
+            return not on.value
+        if shutil.which("gsettings"):
+            r = subprocess.run(["gsettings", "get", "org.gnome.desktop.interface", "enable-animations"],
+                               capture_output=True, text=True, timeout=1)
+            return r.stdout.strip() == "false"
+    except (OSError, subprocess.SubprocessError, AttributeError):
+        pass
+    return False
 
 
 def bar(step: int, total: int, width: int = 8) -> Text:
@@ -922,7 +1003,7 @@ class Jobsmith(App):
     Screen {{ background: {BG}; color: #d2ccc2; layers: base; }}
     #chat {{ height: 1fr; padding: 0 1; scrollbar-size-vertical: 1; scrollbar-color: {FAINT}; scrollbar-background: {BG}; }}
     #welcome {{ height: auto; border: round {EMBER_LO}; border-title-color: {EMBER}; border-title-style: bold; padding: 0 1; margin: 1 0; }}
-    #logo {{ width: 21; height: 5; }}
+    #logo {{ width: 21; height: 6; }}
     #hello {{ width: 1fr; height: auto; padding-left: 1; }}
     .you {{ color: {STEEL}; background: {CARD}; padding: 0 1; margin-top: 1; }}
     .blk {{ height: auto; }}
@@ -941,8 +1022,9 @@ class Jobsmith(App):
         Binding("escape", "escape", show=False),
     ]
 
-    def __init__(self, base: str, splash: bool = True, start: str = ""):
+    def __init__(self, base: str, splash: bool = True, start: str = "", motion: bool | None = None):
         super().__init__()
+        self.motion = motion       # None: decided at start-up (motion_ok); tests say True to watch the swing
         self.start = start
         self.base = base.rstrip("/")
         self.http = httpx.Client(base_url=self.base, timeout=8)
@@ -956,7 +1038,8 @@ class Jobsmith(App):
         self.menu_items: list[tuple[str, str, str]] = []
         self.menu_sel = 0
         self.ctrl_c_at = 0.0
-        self.strike = 0
+        self.swing_left: list[tuple[Text, float]] = []   # frames of the hammer's swing still to show
+        self.swing_timer = None
         self.connected = None
         self.down_since = 0.0      # when the engine stopped answering; 0 while it answers
         self.down_logged = False   # said so in the log (only once it's been down DOWN_LOG_AFTER seconds)
@@ -965,7 +1048,7 @@ class Jobsmith(App):
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="chat"):
             with Horizontal(id="welcome"):
-                yield Static(logo_text(0), id="logo")
+                yield Static(logo_text(), id="logo")
                 yield Static("", id="hello")
         yield Static("", id="think")
         yield Static("", id="live")
@@ -978,12 +1061,15 @@ class Jobsmith(App):
         self.query_one("#welcome").border_title = f" jobsmith v{__version__} "
         self.paint_hello()
         self.query_one("#prompt", Prompt).focus()
+        self.ticker = self.set_interval(0.1, self.animate)     # the thinking line and live rows; paused when still
         self.refresh_data()
         self.set_interval(1.5, self.refresh_data)
-        self.set_interval(0.1, self.animate)
-        self.strike = 6                                   # the hammer comes down a few times to say hello
+        if self.motion is None:
+            self.motion = not self.is_headless and motion_ok()
         if self.splash and not self.start:
-            self.push_screen(Splash())
+            self.push_screen(Splash(), lambda _: self.swing())  # the hammer says hello once the splash is gone
+        else:
+            self.swing()
         if self.start == "review":
             self.push_screen(Review())
         elif self.start == "matches":
@@ -1048,6 +1134,7 @@ class Jobsmith(App):
 
     def start_busy(self) -> None:
         self.busy_since = time.time()
+        self.ticker.resume()
         self.verb = random.choice(VERBS)
         self.cancel = False
         self.query_one("#think").display = True
@@ -1241,6 +1328,7 @@ class Jobsmith(App):
                                            ("/ ", INK), ("commands   ", DIM), ("↑ ", INK), ("history   ", DIM), ("esc ", INK), ("cancel   ", DIM),
                                            ("ctrl+c ", INK), ("twice to quit", DIM)), "blk gap")
             return
+        self.swing()
         self.say("[b]Ask[/] anything about your job hunt. Answers come from your records, instantly, with no AI:")
         from .ask import EXAMPLES
         for i, ex in enumerate(EXAMPLES[:6]):
@@ -1435,6 +1523,8 @@ class Jobsmith(App):
             self.say(f"[green]Back in touch with the engine[/] [dim](after {int(time.time() - self.down_since)} s)[/]")
         self.connected, self.down_since, self.down_logged = True, 0.0, False
         self.state = {"st": st, "live": live, "home": home, "notes": notes}
+        if st.get("active") or live:
+            self.ticker.resume()
         tabs = {t["job_id"]: t for t in live}
         for jid in list(dict.fromkeys(list(st.get("active", {})) + list(tabs))):   # tell you when something changes
             tab = tabs.get(jid, {})
@@ -1446,7 +1536,7 @@ class Jobsmith(App):
                 if msg:
                     self.say(msg)
                     if ph == "submitted":
-                        self.strike = 6
+                        self.swing()
             self.phases[jid] = ph
         self.paint_hello()
         self.paint_status()
@@ -1490,21 +1580,6 @@ class Jobsmith(App):
         tabs = {t["job_id"]: t for t in self.state.get("live", [])}
         rows = list(dict.fromkeys(list(st.get("active", {})) + list(tabs)))
         running = [j for j in rows if (tabs.get(j, {}).get("phase") or st.get("active", {}).get(j, "")) not in ("submitted", "code", "review", "error")]
-        # the hammer: strikes while there's work, rests otherwise
-        if self.strike or running or self.busy_since:
-            seq = [0, 0, 1, 2, 2, 0]
-            f = seq[(self.frame // 2) % len(seq)]
-            if self.strike and f == 2 and self.frame % 2 == 0:
-                self.strike -= 1
-            self.query_one("#logo", Static).update(logo_text(f))
-        elif self.frame % 40 == 0:
-            self.glint = 0
-        if getattr(self, "glint", -1) >= 0:
-            self.glint += 1
-            self.query_one("#logo", Static).update(logo_text(0, self.glint))
-            if self.glint > 20:
-                self.glint = -1
-                self.query_one("#logo", Static).update(logo_text(0))
         # the thinking line
         if self.busy_since:
             secs = int(time.time() - self.busy_since)
@@ -1530,6 +1605,32 @@ class Jobsmith(App):
             live.display = True
         else:
             live.display = False
+        if not rows and not self.busy_since:
+            self.ticker.pause()                                # nothing moving: no wake-ups until there is
+
+    # ------------------------------------------------------------------ the hammer
+    def swing(self) -> None:
+        """The hammer comes down onto the anvil once, about a second, then rests; with motion off (NO_COLOR, reduced
+        motion, not a terminal) it's only the resting frame. Each frame sets its own timer and the last sets none,
+        so nothing runs once it's resting."""
+        if self.swing_timer:
+            self.swing_timer.stop()
+            self.swing_timer = None
+        self.swing_left = swing_frames() if self.motion else [(logo_text(), 0)]
+        self._swing_step()
+
+    def _swing_step(self) -> None:
+        self.swing_timer = None
+        if not self.swing_left:
+            return
+        frame, secs = self.swing_left.pop(0)
+        try:
+            self.query_one("#logo", Static).update(frame)
+        except NoMatches:          # the app is closing
+            self.swing_left = []
+            return
+        if self.swing_left:
+            self.swing_timer = self.set_timer(secs, self._swing_step)
 
 
 def run(base: str, splash: bool = True, start: str = "") -> None:
