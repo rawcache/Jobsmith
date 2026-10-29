@@ -291,7 +291,11 @@ def test_losing_the_engine_shows_on_one_status_line_and_logs_only_a_long_outage(
     from jobsmith.tuiapp import Jobsmith
     db.conn()
     monkeypatch.setattr(tuiapp, "DOWN_LOG_AFTER", 2.5)
-    nowhere = httpx.Client(base_url="http://127.0.0.1:9", timeout=1)      # nothing answers there
+    def refuse(request):
+        raise httpx.ConnectError("refused", request=request)
+    # The engine gone, refused at once: a real closed port takes Windows about 2 s to refuse (it retries the
+    # connection), longer than the pauses below, so CI there never saw a failed poll in time.
+    nowhere = httpx.Client(base_url="http://127.0.0.1:9", transport=httpx.MockTransport(refuse))
 
     async def go():
         app = Jobsmith(engine, splash=False)
