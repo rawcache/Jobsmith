@@ -9,7 +9,8 @@ apply ("apply to nvidia hardware internships", a job link, a GitHub list) and it
 animate above the prompt. /review, /matches, /outreach, /followups, /voice and /settings open full-screen views;
 the dashboard in your browser (/web) is there for when you'd rather click.
 
-Keys: shift+tab autopilot on/off · ctrl+o board · esc cancel · ↑ history · ctrl+c twice to quit · ? shortcuts
+Keys: shift+tab autopilot on/off · ctrl+o board · shift+enter or ctrl+j new line · esc cancel · ↑ history ·
+ctrl+c twice to quit · ? shortcuts
 """
 from __future__ import annotations
 
@@ -28,11 +29,12 @@ import httpx
 from rich.console import Group
 from rich.table import Table
 from rich.text import Text
-from textual import on, work
+from textual import events, on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
+from textual.message import Message
 from textual.screen import ModalScreen, Screen
 from textual.widgets import DataTable, Footer, Input, Static, TextArea
 
@@ -960,41 +962,83 @@ class Board(View):
 
 
 # =========================================================================== the conversation
-class Prompt(Input):
-    """The input box: ↑/↓ walk your history, tab completes a /command."""
+class Prompt(TextArea):
+    """The input, like Claude Code's: no box, your words after a "> ", a line added below as they wrap. enter sends;
+    shift+enter, ctrl+j or a backslash at the end starts a new line. ↑/↓ walk your history from the first or last
+    line (elsewhere they move the cursor), tab completes a /command."""
     BINDINGS = [Binding("up", "older", show=False), Binding("down", "newer", show=False), Binding("tab", "complete", show=False)]
 
+    class Submitted(Message):
+        """enter: send what's typed."""
+        def __init__(self, prompt: "Prompt", value: str):
+            super().__init__()
+            self.prompt, self.value = prompt, value
+
+        @property
+        def control(self) -> "Prompt":
+            return self.prompt
+
     def __init__(self, **kw):
-        super().__init__(**kw)
-        self.history: list[str] = []
+        super().__init__(soft_wrap=True, show_line_numbers=False, highlight_cursor_line=False, compact=True, **kw)
+        self.sent: list[str] = []     # what you've sent, for ↑/↓ (TextArea's own `history` is its undo)
         self.pos = 0
+
+    @property
+    def value(self) -> str:
+        return self.text
+
+    @value.setter
+    def value(self, text: str) -> None:
+        self.load_text(text)
+        self.move_cursor(self.document.end)
+
+    async def _on_key(self, event: events.Key) -> None:
+        if event.key == "enter":
+            event.stop()
+            event.prevent_default()
+            if self.text.endswith("\\") and self.cursor_at_end_of_text:
+                self.value = self.text[:-1] + "\n"
+            else:
+                self.post_message(self.Submitted(self, self.text))
+            return
+        if event.key in ("shift+enter", "ctrl+j"):
+            event.stop()
+            event.prevent_default()
+            self.replace("\n", *self.selection, maintain_selection_offset=False)   # over what's selected, as typing is
+            return
+        await super()._on_key(event)
 
     def action_older(self) -> None:
         if self.app.menu_items and self.value.startswith("/"):
             self.app.menu_move(-1)
-            return
-        if self.history and self.pos > 0:
+        elif not self.on_top_row():
+            self.action_cursor_up()
+        elif self.sent and self.pos > 0:
             self.pos -= 1
-            self.value = self.history[self.pos]
-            self.cursor_position = len(self.value)
+            self.value = self.sent[self.pos]
 
     def action_newer(self) -> None:
         if self.app.menu_items and self.value.startswith("/"):
             self.app.menu_move(1)
-            return
-        if self.pos < len(self.history) - 1:
+        elif not self.on_bottom_row():
+            self.action_cursor_down()
+        elif self.pos < len(self.sent) - 1:
             self.pos += 1
-            self.value = self.history[self.pos]
-        else:
-            self.pos = len(self.history)
+            self.value = self.sent[self.pos]
+        elif self.pos < len(self.sent):
+            self.pos = len(self.sent)
             self.value = ""
-        self.cursor_position = len(self.value)
+
+    def on_top_row(self) -> bool:
+        """The cursor is on the first row you see (a wrapped line is several rows)."""
+        return self.cursor_at_first_line and self.navigator.is_first_wrapped_line(self.cursor_location)
+
+    def on_bottom_row(self) -> bool:
+        return self.cursor_at_last_line and self.navigator.is_last_wrapped_line(self.cursor_location)
 
     def action_complete(self) -> None:
         if self.app.menu_items:
-            name = self.app.menu_items[self.app.menu_sel][0]
-            self.value = name + " "
-            self.cursor_position = len(self.value)
+            self.value = self.app.menu_items[self.app.menu_sel][0] + " "
 
 
 class Jobsmith(App):
@@ -1011,8 +1055,11 @@ class Jobsmith(App):
     #think {{ height: auto; padding: 0 1; display: none; }}
     #live {{ height: auto; padding: 0 1; display: none; }}
     #menu {{ height: auto; padding: 0 2; display: none; }}
-    #prompt {{ height: 3; border: round {FAINT}; background: {BG}; margin: 0 1; padding: 0 1; }}
-    #prompt:focus {{ border: round {STEEL}; }}
+    #inputbar {{ height: auto; border-top: solid {FAINT}; border-bottom: solid {FAINT}; background: {BG}; }}
+    #caret {{ width: 2; color: {DIM}; }}
+    #inputbar:focus-within #caret {{ color: {STEEL}; }}
+    #prompt {{ height: auto; max-height: 12; background: {BG}; color: {INK}; padding: 0; }}
+    #prompt .text-area--placeholder {{ color: {DIM}; }}
     #status {{ height: 1; padding: 0 2; }}
     """
     BINDINGS = [
@@ -1053,7 +1100,9 @@ class Jobsmith(App):
         yield Static("", id="think")
         yield Static("", id="live")
         yield Static("", id="menu")
-        yield Prompt(placeholder='Ask about your job hunt, or tell it where to apply.  Try "what needs me?"', id="prompt")
+        with Horizontal(id="inputbar"):
+            yield Static("> ", id="caret")
+            yield Prompt(placeholder='Ask about your job hunt, or tell it where to apply.  Try "what needs me?"', id="prompt")
         yield Static("", id="status")
 
     def on_mount(self) -> None:
@@ -1207,11 +1256,11 @@ class Jobsmith(App):
             time.sleep(0.04)
 
     # ------------------------------------------------------------------ input
-    @on(Input.Changed, "#prompt")
-    def typing(self, e: Input.Changed) -> None:
-        v = e.value
+    @on(TextArea.Changed, "#prompt")
+    def typing(self, e: TextArea.Changed) -> None:
+        v = e.text_area.text
         if v == "?":
-            e.input.value = ""
+            e.text_area.value = ""
             self.show_help(short=True)
             return
         if v.startswith("/") and " " not in v:
@@ -1239,8 +1288,8 @@ class Jobsmith(App):
         m.update(t)
         m.display = True
 
-    @on(Input.Submitted, "#prompt")
-    def submitted(self, e: Input.Submitted) -> None:
+    @on(Prompt.Submitted, "#prompt")
+    def submitted(self, e: Prompt.Submitted) -> None:
         text = e.value.strip()
         if self.menu_items and text.startswith("/") and " " not in text and text not in [c[0] for c in COMMANDS]:
             text = self.menu_items[self.menu_sel][0]     # enter on a highlighted menu item runs it
@@ -1250,8 +1299,8 @@ class Jobsmith(App):
         self.paint_menu()
         if not text:
             return
-        p.history.append(text)
-        p.pos = len(p.history)
+        p.sent.append(text)
+        p.pos = len(p.sent)
         self.you(text)
         if text.startswith("/"):
             self.slash(text)
@@ -1325,7 +1374,7 @@ class Jobsmith(App):
     def show_help(self, short: bool = False) -> None:
         if short:
             self.mount_block(Text.assemble(("  shift+tab ", INK), ("autopilot on/off   ", DIM), ("ctrl+o ", INK), ("board   ", DIM),
-                                           ("/ ", INK), ("commands   ", DIM), ("↑ ", INK), ("history   ", DIM), ("esc ", INK), ("cancel   ", DIM),
+                                           ("/ ", INK), ("commands   ", DIM), ("shift+enter ", INK), ("new line   ", DIM), ("↑ ", INK), ("history   ", DIM), ("esc ", INK), ("cancel   ", DIM),
                                            ("ctrl+c ", INK), ("twice to quit", DIM)), "blk gap")
             return
         self.swing()
