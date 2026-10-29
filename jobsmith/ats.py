@@ -21,7 +21,7 @@ ATS_PATTERNS = [
 ]
 
 # Which ATSes Jobsmith can fill end-to-end today.
-SUPPORTED = {"greenhouse"}
+SUPPORTED = {"greenhouse", "ashby"}
 
 
 def detect(url: str) -> str:

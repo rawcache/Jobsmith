@@ -8,7 +8,7 @@ RULES: list[tuple[str, str]] = [
     (r"preferred (first )?name|nickname", "preferred_name"),
     (r"^first name|^legal first name|given name", "first_name"),
     (r"^last name|^legal last name|surname|family name", "last_name"),
-    (r"^full name|^name$|^your name", "full_name"),
+    (r"^full name|^name$|^your name|^(full )?legal (full )?name$", "full_name"),
     (r"(school|university|college|\.edu|student) e-?mail", "school_email"),
     (r"e-?mail", "email"),
     (r"phone|mobile", "phone"),
@@ -152,11 +152,17 @@ def question_kind(label: str, qtype: str, options: list[str] | None = None) -> s
     return "open" if qtype == "textarea" else "short"
 
 
+# Where to reach you, named inside a yes/no question ("Are you comfortable with a take-home? You'll receive an
+# email from CodeSignal"): the question isn't asking for it.
+CONTACT = {"email", "school_email", "phone", "linkedin", "github", "devpost", "website", "other_links"}
+ASKS_YES_NO = re.compile(r"^(are|do|does|did|have|has|will|would|can|could|is|may)\b")
+
+
 def canon_for(label: str) -> str | None:
     l = (plain_fact(label) or " ".join((label or "").split())).lower().strip(" *?:")
     for pat, key in RULES:
         if re.search(pat, l):
-            return key
+            return None if key in CONTACT and ASKS_YES_NO.match(l) else key
     return None
 
 

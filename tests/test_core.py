@@ -44,6 +44,10 @@ async def test_latex_resume_becomes_facts_and_answer_bank():
     ("Which U.S. State or Canadian Province do you reside in?", "state"),
     ("Other Links", "other_links"), ("Current Company", "current_company"),
     ("Name Pronunciation", "name_pronunciation"),
+    ("Legal Name", "full_name"), ("Full legal name", "full_name"), ("Email address", "email"),
+    # a yes/no question that mentions where to reach you isn't asking for it (Ramp's form, on Ashby)
+    ("Are you comfortable completing a frontend take-home assessment? You'll receive an email from CodeSignal.", None),
+    ("Do you have a LinkedIn profile?", None),
 ])
 def test_canon(label, key):
     assert classify.canon_for(label) == key
@@ -1253,6 +1257,54 @@ async def test_an_unanswered_worked_here_before_blocks_autopilot_even_when_optio
     draft.save_results(jid, [f], {"q": draft.deterministic(f, profile.answers(), {"company": "Figma"})})
     blockers = draft.readiness(jid)["blockers"]
     assert len(blockers) == 1 and "worked for Figma" in blockers[0]
+
+
+@pytest.mark.parametrize("label,auth,answer", [
+    ("Are you legally authorized to work in the United States?", "Yes", "Yes"),
+    ("Are you authorized to work in Canada?", "Yes", ""),
+    # Ramp's: anywhere in the list will do, so your US "Yes" answers it; your US "No" doesn't
+    ("Are you currently based in the U.S., Canada, LATAM, and/or currently authorized to work in one of these "
+     "locations?", "Yes", "Yes"),
+    ("Are you currently based in the U.S., Canada, LATAM, and/or currently authorized to work in one of these "
+     "locations?", "No", ""),
+    ("Are you authorized to work in the United Kingdom and the US?", "Yes", ""),
+    ("Will you require visa sponsorship to work in the UK?", "No", ""),
+    ("Will you require visa sponsorship to work in the US or Canada?", "No", ""),
+    ("Are you authorized to work in South Africa?", "Yes", ""),              # a country no list names
+    ("Are you authorized to work in Canada or Latin America?", "Yes", ""),   # "America" here isn't the US
+    ("Are you legally eligible to work in the United States of America?", "Yes", "Yes"),
+    ("Are you authorized to work for us in the United States?", "Yes", "Yes"),
+    ("ARE YOU AUTHORIZED TO WORK in the UNITED STATES?", "Yes", "Yes"),
+    ("Are you authorized to work in the U.S", "Yes", "Yes"),
+    ("Are you authorized to work in the U.S.A", "Yes", "Yes"),
+    ("Are you authorized to work in the UNITED STATES OF AMERICA?", "Yes", "Yes"),
+])
+async def test_work_authorization_for_somewhere_else_is_left_for_you(label, auth, answer):
+    """Your work authorization and sponsorship answers are for the US. A question about another country isn't
+    answered from them (rule 2): it waits for you."""
+    await _load_profile()
+    profile.set_answer("work_authorized_us", auth, confirmed=True)
+    profile.set_answer("needs_sponsorship", auth, confirmed=True)
+    got = draft.deterministic({"field": "q", "label": label, "qtype": "radio", "options": ["Yes", "No"],
+                               "required": True}, profile.answers(), FIGMA)
+    assert got["answer"] == answer
+    if not answer:
+        assert got["issues"] == ["Asks about working somewhere other than the US; your profile answers for the US, "
+                                 "so answer it yourself"]
+
+
+@pytest.mark.parametrize("required", [False, True])
+async def test_whether_a_company_may_text_you_is_left_for_you(required):
+    """Ramp's form asks "SMS: Yes - I consent to receiving SMS text messages / No - …". Never answered for you, and
+    never sent to the AI; a phone number box that mentions texts is still your phone number."""
+    await _load_profile()
+    a = profile.answers()
+    sms = draft.deterministic({"field": "q", "label": "SMS", "qtype": "radio", "required": required, "options": [
+        "Yes - I consent to receiving SMS text messages", "No - I do not consent to receiving SMS text messages"]}, a)
+    assert sms["answer"] == "" and bool(sms["issues"]) == required
+    phone = draft.deterministic({"field": "p", "label": "Phone (we may send SMS updates)", "qtype": "text",
+                                 "options": [], "required": True}, a)
+    assert phone["canon"] == "phone" and phone["answer"]
 
 
 async def test_legal_yes_no_answers_say_where_they_came_from():

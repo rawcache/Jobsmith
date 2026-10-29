@@ -76,8 +76,9 @@ blocks every outward action.
 
 ## Known gaps to keep honest
 
-- `ats.SUPPORTED` is only `{"greenhouse"}`; Lever and Ashby go through `fill/generic.py`. Public claims about which
-  sites work end to end must match what the tests prove.
+- `ats.SUPPORTED` is `{"greenhouse", "ashby"}` (Ashby fills through `fill/generic.py`, proven on the saved Ramp
+  form); Lever goes through `fill/generic.py` without that proof yet. Public claims about which sites work end to
+  end must match what the tests prove.
 - Workday / iCIMS: filled page by page, stop at review; sign-in is the user's.
 
 ## Working with Codex

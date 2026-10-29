@@ -24,7 +24,8 @@ Work top to bottom. Tick each box in this file as it's done and commit the tick 
 - [x] Either add fixtures + tests for Lever and Ashby (save a real public posting's form HTML, strip anything
       personal) or change the wording to "Greenhouse end to end; Lever, Ashby and most single-page forms filled
       generically". Added `tests/fixtures/lever_form.html` (sanitized real capture) and
-      `tests/fixtures/ashby_style_form.html` (hand-written, modeled on Ashby's layout) + tests through
+      `tests/fixtures/ashby_style_form.html` (hand-written, modeled on Ashby's layout; replaced in Phase 1 item 7a by
+      the saved Ramp form, `ashby_ramp_form.html`) + tests through
       `fill/generic.py`, stopping before Submit.
 - [x] Same check for the numbers in the README (tests count, sites, sources). Checked 2026-10-26; none were off.
       The README states no test count or install time (the tests and release badges are live). Python 3.11–3.13

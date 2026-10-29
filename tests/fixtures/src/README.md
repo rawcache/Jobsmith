@@ -26,3 +26,30 @@ cd - && python3 -c "
 html = open('tests/fixtures/greenhouse_board_posting.html').read(); js = open('/tmp/gh-select/bundle.js').read()
 open('tests/fixtures/greenhouse_figma_live.html', 'w').write(html.replace('</body>', '<script>' + js + '</script></body>', 1))"
 ```
+
+## `ashby_form.js` + `ashby_fixture.py` → `../ashby_ramp_form.html`
+
+`ashby_ramp_form.html` is Ramp's application form for "Software Engineer, Frontend" on Ashby
+(`jobs.ashbyhq.com/ramp/4e64ab86-4e30-403b-b1b9-41dc052570ce/application`), saved blank on 2026-10-29. Ashby builds
+the form in the browser from two GraphQL reads, so it was saved with `scripts/capture/capture.py`, which lets
+those two reads through and blocks every other non-GET (see the rule in `docs/PHASE1.md`). The capture has Ashby's
+scripts removed; `ashby_fixture.py` inlines Ashby's stylesheet (so the hidden Yes/No checkboxes stay hidden),
+drops everything that would load from the network, adds `ashby_form.js`, and refuses to write a page with an email
+address or phone number in it other than Ashby's placeholders.
+
+`ashby_form.js` is our stand-in for Ashby's script, none of Ashby's code. It does what the live form was seen
+doing: a Yes/No button sets `aria-pressed` and ticks the hidden checkbox for Yes; each answer is autosaved with a
+POST (`ApiSetFormValue`, not a submission); Submit Application sends `ApiSubmitSingleApplicationFormAction` and
+the form gives way to Ashby's thank-you text (taken from Ashby's page script; the live Submit was never pressed).
+
+To rebuild (the stylesheet is the `<link rel=stylesheet>` on the live page, saved with a plain GET):
+
+```bash
+uv run python scripts/capture/capture.py \
+  https://jobs.ashbyhq.com/ramp/4e64ab86-4e30-403b-b1b9-41dc052570ce/application /tmp/ashby/captured.html
+curl -s -o /tmp/ashby/ashby.css "<the page's stylesheet URL>"
+uv run python tests/fixtures/src/ashby_fixture.py /tmp/ashby/captured.html /tmp/ashby/ashby.css \
+  tests/fixtures/ashby_ramp_form.html
+```
+
+Check the result has no real person's details in it (the builder only catches emails and phone numbers).
