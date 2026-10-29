@@ -99,4 +99,6 @@ $("save").addEventListener("click", async () => {
 
 $("dash").addEventListener("click", e => { e.preventDefault(); send({ type: "open", path: "/" }); });
 
-init();
+// Done checking the page (the reload hint is shown, the panel asked to open): tests wait for this mark instead of
+// guessing how long reaching every frame takes.
+init().finally(() => { document.body.dataset.ready = "true"; });
