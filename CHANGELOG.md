@@ -13,6 +13,10 @@
   may text you (SMS, WhatsApp) is always left for you.
 
 ### Changed
+- A new website: a clean top bar with the GitHub star count and one Install button, a centred headline over a large
+  dashboard screenshot, then how it works (find, fill, check, submit), a terminal sample, the safety rules, skills,
+  install steps for macOS, Linux and Windows, and a short FAQ. It follows your system's light or dark setting
+  (every colour pair checked against WCAG AA) and fits a phone without sideways scrolling.
 - The terminal app's input looks and works like Claude Code's: no box, a thin line above and below across the
   window, a "> " before what you type, and it grows downward as your words wrap. shift+enter, ctrl+j or a backslash
   before enter starts a new line; ↑/↓ move between lines and bring back what you sent from the first or last one.
