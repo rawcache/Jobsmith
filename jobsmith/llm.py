@@ -120,7 +120,7 @@ class ClaudeCLI(Backend):
             env["CLAUDE_CODE_OAUTH_TOKEN"] = self.token
         return env
 
-    _probe_cache: tuple[float, bool, str] | None = None
+    _probe_cache: dict[tuple, tuple[float, bool, str]] = {}    # per CLI path and token: a new sign-in is checked
 
     async def available(self) -> tuple[bool, str]:
         exe = find_claude(self.path)
@@ -144,9 +144,11 @@ class ClaudeCLI(Backend):
 
     async def _probe(self) -> tuple[bool, str]:
         # A tiny real request, cached for 10 minutes so the dashboard doesn't burn usage.
-        now = time.time()
-        if ClaudeCLI._probe_cache and now - ClaudeCLI._probe_cache[0] < 600:
-            return ClaudeCLI._probe_cache[1], ClaudeCLI._probe_cache[2]
+        now, gen = time.time(), _checks_gen
+        key = _check_key(self)
+        hit = ClaudeCLI._probe_cache.get(key)
+        if hit and now - hit[0] < 600:
+            return hit[1], hit[2]
         try:
             await self._run("Reply with the JSON {\"ok\": true} and nothing else.", "ping", None, False, 60)
             result = (True, "connected")
@@ -154,7 +156,8 @@ class ClaudeCLI(Backend):
             msg = str(e)
             result = (False, "Not connected to Claude yet." if re.search(r"log ?in|auth|credential|token", msg, re.I)
                       else f"Claude didn't answer: {msg[:200]}")
-        ClaudeCLI._probe_cache = (now, *result)
+        if gen == _checks_gen:              # not from before you signed in or switched AI
+            ClaudeCLI._probe_cache[key] = (now, *result)
         return result
 
     async def complete_json(self, system, prompt, schema=None, web=False, timeout=240):
@@ -445,6 +448,7 @@ async def recheck_gemini() -> dict:
     _quota_hit.pop("gemini_api", None)
     for k in [k for k in _avail_cache if k[0] == "gemini_api"]:
         _avail_cache.pop(k, None)
+        _avail_checks.pop(k, None)
     ok, msg = await GeminiAPI(key, s.get("gemini_model") or "gemini-flash-latest").available()
     if ok:
         return {"ok": True, "message": "Gemini is back. Autopilot will use it again.", "quota": quota_status()}
@@ -675,17 +679,65 @@ async def complete_json(system: str, prompt: str, schema: dict | None = None, we
 
 
 _avail_cache: dict[tuple, tuple[float, bool, str]] = {}
+_avail_checks: dict[tuple, asyncio.Task] = {}
+_checks_gen = 0            # bumped by forget_checks(): a check started before then never writes its answer
+FIRST_CHECK_WAIT = 3.0     # seconds a page waits for the very first answer before it says "checking"
+
+
+def forget_checks() -> None:
+    """After you connect, sign in or switch AI: the next page asks afresh instead of showing the old answer."""
+    global _checks_gen
+    _checks_gen += 1
+    _avail_cache.clear()
+    _avail_checks.clear()
+    ClaudeCLI._probe_cache.clear()
+
+
+def _check_key(b: Backend) -> tuple:
+    """One cached answer per configuration: a new key, model, CLI path or token is a different AI to check."""
+    import hashlib
+    secret = hashlib.sha256(f"{getattr(b, 'key', '')}\0{getattr(b, 'token', '')}".encode()).hexdigest()[:16]
+    return b.name, getattr(b, "model", ""), getattr(b, "path", ""), secret
+
+
+async def _check(key: tuple, b: Backend) -> tuple[bool, str]:
+    gen = _checks_gen
+    try:
+        ok, msg = await b.available()
+    except Exception as e:     # a check that broke says so; it never leaves the next one waiting on it
+        ok, msg = False, f"Couldn't check your AI: {e.__class__.__name__}"
+    if gen == _checks_gen:                  # not from before you signed in or switched AI
+        _avail_cache[key] = (time.time(), ok, msg)
+    return ok, msg
 
 
 async def available_cached(ttl: float = 600, role: str = "write") -> tuple[bool, str]:
-    """Status checks for API backends make a real (tiny) request, so cache them."""
+    """Whether your AI answers, for pages that ask every second or two (/api/status). A check is a real request (or
+    a run of the Claude CLI), and Gemini's can wait out a rate limit for minutes, so a page never waits on one: it
+    gets the last answer at once while a single check per backend refreshes it in the background. Only ttl=0 (you
+    asked to test the connection) and the very first check wait, the first for FIRST_CHECK_WAIT seconds at most.
+    Waiting there once held every status reply past the terminal app's timeout: "Lost Jobsmith's engine"."""
     b = backend(role)
-    if isinstance(b, (ClaudeCLI, OllamaLocal, NoLLM)):
+    if isinstance(b, NoLLM):
         return await b.available()
-    key = (b.name, getattr(b, "key", "")[-8:], getattr(b, "model", ""))
+    key = _check_key(b)
+    if isinstance(b, (ClaudeCLI, OllamaLocal)):
+        ttl = min(ttl, 30)         # the CLI and smith are local and quick to check: check them more often
     hit = _avail_cache.get(key)
-    if hit and time.time() - hit[0] < ttl:
+    now = time.time()
+    if hit and now - hit[0] < ttl:
         return hit[1], hit[2]
-    ok, msg = await b.available()
-    _avail_cache[key] = (time.time(), ok, msg)
-    return ok, msg
+    if hit and ttl and _quota_hit.get(b.name, 0) > now:
+        _avail_cache[key] = (now, hit[1], hit[2])          # out of quota until the reset: asking again won't help
+        return hit[1], hit[2]
+    task = _avail_checks.get(key)
+    if task is None or task.done():
+        task = _avail_checks[key] = asyncio.create_task(_check(key, b))
+    if hit and ttl:
+        return hit[1], hit[2]                               # the last answer; the check updates it when it's back
+    if not ttl:
+        return await asyncio.shield(task)
+    try:
+        return await asyncio.wait_for(asyncio.shield(task), FIRST_CHECK_WAIT)
+    except TimeoutError:
+        return False, "Checking your AI connection…"

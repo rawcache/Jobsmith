@@ -162,7 +162,7 @@ def set_ai(kind: str, key: str = "", model: str = "") -> None:
     if kind == "ollama" and model:
         patch["ollama_model"] = model
     db.set_settings(patch)
-    llm._avail_cache.clear()
+    llm.forget_checks()
     llm._auto_cache = None
 
 

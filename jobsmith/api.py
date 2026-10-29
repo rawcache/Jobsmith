@@ -1,6 +1,7 @@
 """Local HTTP API + dashboard. Binds to 127.0.0.1 only."""
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
 import time
@@ -190,10 +191,14 @@ def _names(job_ids: list[str]) -> dict[str, dict]:
 
 @app.get("/api/status")
 async def status():
-    ok, msg = await llm.available_cached(role="write")
     s_ = db.get_settings()
     split = s_.get("research_backend") not in (None, "", "same", s_.get("llm_backend"))
-    r_ok, r_msg = (await llm.available_cached(role="research")) if split else (ok, msg)
+    # side by side: a first check waits a few seconds at most, and the two waits mustn't add up past a poll's timeout
+    if split:
+        (ok, msg), (r_ok, r_msg) = await asyncio.gather(llm.available_cached(role="write"),
+                                                        llm.available_cached(role="research"))
+    else:
+        ok, msg = r_ok, r_msg = await llm.available_cached(role="write")
     counts = {r["status"]: r["n"] for r in db.q("SELECT status, COUNT(*) n FROM jobs WHERE active=1 GROUP BY status")}
     working = list(dict.fromkeys(list(runner._active) + [t["job_id"] for t in runner.live_list()]))
     ans = profile.answers()

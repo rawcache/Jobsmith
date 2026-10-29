@@ -80,6 +80,11 @@
   bar show "Under your fit bar" and autopilot skips them; pick one yourself and it still applies.
 
 ### Fixed
+- The terminal app no longer says "Lost Jobsmith's engine… Retrying" and "Back in touch" over and over. The engine
+  was fine: every ten minutes it checked your AI, and while Gemini made it wait out a rate limit, no status reply
+  came back in time. The check now runs in the background and pages get its last answer at once. A missed reply
+  shows on the status line ("reconnecting to the engine… 4s", counting in place), and the log says so only when
+  the engine has been away for 10 seconds.
 - On Greenhouse's application form, the extension's Autofill now fills the dropdowns: phone Country, Location
   (City) from the form's own city search ("Boston, MA" picks "Boston, Massachusetts, United States"), and Yes/No
   questions. They used to all land under "Needs you": Greenhouse opens its menus when a key or the mouse button

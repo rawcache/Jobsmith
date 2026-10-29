@@ -1,4 +1,5 @@
 import os
+import socket
 import tempfile
 from pathlib import Path
 
@@ -6,6 +7,23 @@ import pytest
 
 _tmp = tempfile.mkdtemp(prefix="jobsmith-test-")
 os.environ["JOBSMITH_DATA"] = _tmp
+
+# The real engine (8765) and the practice copy (8766) may be running while tests run: no test reaches either. Code
+# that defaults to them is pointed at a port nothing listens on, and any connection or listener there fails loudly.
+ENGINE_PORTS = {8765, 8766}
+os.environ["JOBSMITH_PORT"] = "9"
+
+
+def _guard(real):
+    def check(self, address, *a):
+        if isinstance(address, tuple) and len(address) >= 2 and address[1] in ENGINE_PORTS:
+            raise AssertionError(f"a test reached port {address[1]} (the real engine or the practice copy)")
+        return real(self, address, *a)
+    return check
+
+
+for _name in ("connect", "connect_ex", "bind"):
+    setattr(socket.socket, _name, _guard(getattr(socket.socket, _name)))
 
 from jobsmith import db, llm  # noqa: E402
 

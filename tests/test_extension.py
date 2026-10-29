@@ -1052,10 +1052,11 @@ async def test_popup_reaches_a_job_site_form_in_a_frame_opened_before_the_extens
                 "Extensions.loadUnpacked", {"path": str(EXT)}))["id"]               # loaded after the tab opened
             assert await frame.evaluate("document.querySelector('[data-jobsmith-id]') === null")   # no script in it yet
 
-            setup = await ctx.new_page()
-            await setup.goto(f"chrome-extension://{ext_id}/popup.html")
-            await setup.evaluate(f"chrome.storage.local.set({{engine: 'http://127.0.0.1:{engine.server_port}'}})")
-            await setup.close()
+            # Point the extension at this test's engine from its service worker: a page (the popup) would ping
+            # the default engine, the real one on 8765, before the address was saved.
+            worker = next((w for w in ctx.service_workers if ext_id in w.url), None) or \
+                await ctx.wait_for_event("serviceworker", predicate=lambda w: ext_id in w.url, timeout=15000)
+            await worker.evaluate(f"chrome.storage.local.set({{engine: 'http://127.0.0.1:{engine.server_port}'}})")
             popup = await ctx.new_page()
             # Opened as a page, the popup's "active tab" is itself: point it at the only other tab, the careers page
             # (tab URLs are hidden without the "tabs" permission). Everything else is the real extension.
