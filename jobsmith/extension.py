@@ -123,7 +123,10 @@ def context(url: str, title: str = "", site_name: str = "", text: str = "") -> d
                                  "category": (job or {}).get("category"), "description": desc}, insights.resume_text())
     people = network.at_company(company, 5) if company else []
     letter = letters.cover_text(job["id"]) if job else ""
-    return {"known": bool(job), "job_id": (job or {}).get("id"), "company": company, "title": (job or {}).get("title") or title,
+    from . import guardrails
+    if company and text and not (job or {}).get("description"):
+        guardrails.note_limits(company, text, (job or {}).get("id"))   # a posting Jobsmith hasn't fetched: read it here
+    return {"company_limit": guardrails.limit_note(company) if company else None, "known": bool(job), "job_id": (job or {}).get("id"), "company": company, "title": (job or {}).get("title") or title,
             "pay": insights.pay_of(desc), "location": ", ".join(((job or {}).get("locations") or [])[:2]),
             "fit": (job or {}).get("fit_score"), "status": (job or {}).get("status"), "outcome": (job or {}).get("outcome"),
             "match": {"score": km["score"], "matched": km["matched"][:12], "missing": km["missing"][:12], "total": km["total"]},

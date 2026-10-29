@@ -361,3 +361,39 @@ def test_every_left_out_role_can_be_reached_however_many_there_are():
     assert first["left_out"] == first["total"] == 201 and len(first["jobs"]) == 100
     more = c.get("/api/jobs", params={"status": "left_out", "limit": 300}).json()["jobs"]   # "Show more", /matches
     assert len(more) == 201 and "lo200" in {j["id"] for j in more}
+
+
+async def test_syncing_figmas_board_keeps_its_stated_application_limits():
+    from jobsmith import guardrails
+    src = sources.add_source(SAVED["greenhouse"][0])
+    async with _client([]) as client:
+        await boards.sync(src, client)
+    lim = guardrails.company_limits("Figma")
+    assert (lim["windows"], lim["reapply_days"], lim["while_active"]) == ([[5, 30]], 90, 1)
+    assert guardrails.limit_note("Figma") == "Figma allows 5 per 30 days — 0 used"
+
+
+@pytest.mark.parametrize("order", [0, 1])
+async def test_different_limit_lines_across_a_boards_postings_add_up(order, monkeypatch):
+    from jobsmith import guardrails
+    monkeypatch.setattr(guardrails, "_scanned", True)
+    lines = ["Candidates may submit up to 5 applications during any rolling 30-day period.",
+             "Candidates may not reapply within 90 days of receiving a rejection.",
+             "Candidates may submit up to 2 applications per day."]
+    if order:
+        lines.reverse()
+    roles = [{"company": "Figma", "title": f"Role {i}", "url": f"https://job-boards.greenhouse.io/figma/jobs/{i}",
+              "description": f"About the role. {line}"} for i, line in enumerate(lines + lines)]
+    boards._note_company_limits(roles)
+    lim = guardrails.company_limits("Figma")
+    assert (lim["windows"], lim["reapply_days"]) == ([[2, 1], [5, 30]], 90)
+
+
+def test_two_companies_with_the_same_limit_line_each_keep_it(monkeypatch):
+    from jobsmith import guardrails
+    monkeypatch.setattr(guardrails, "_scanned", True)
+    line = "Candidates may submit up to 5 applications during any rolling 30-day period."
+    boards._note_company_limits([{"company": c, "title": "Intern", "url": f"https://jobs.lever.co/{c}/1",
+                                  "description": line} for c in ("Acme", "Beta")])
+    assert guardrails.limit_note("Acme") == "Acme allows 5 per 30 days — 0 used"
+    assert guardrails.limit_note("Beta") == "Beta allows 5 per 30 days — 0 used"

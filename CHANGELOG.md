@@ -18,6 +18,13 @@
   Submit and says which limit it hit; the application waits under "Needs you" and you can still send it yourself.
   Applications you send yourself count toward the limits too. Before, there were no limits unless you set them,
   and the per-company limit never reset.
+- Limits a company states in its postings are kept too: "Candidates may submit up to 5 applications during any
+  rolling 30-day period", "may not reapply to the same role while an application is active or within 90 days of
+  receiving a rejection". Jobsmith reads them when it fetches a posting or syncs a job board, keeps them per
+  company (a posting can add a limit, never loosen one), and autopilot stays inside whichever is stricter, the
+  company's limit or yours. The match shows "Figma
+  allows 5 per 30 days — 2 used" on the Matches page, the job's page (with the company's own sentences), the
+  terminal's /matches and the extension's panel.
 - When a posting or its form asks applicants not to use AI or automated tools ("Please do not use AI to write your
   answers", "AI-generated responses will be rejected"), autopilot fills it but never sends it. It waits under "Needs
   you" with the employer's own sentence quoted, and the job's page shows the same line.

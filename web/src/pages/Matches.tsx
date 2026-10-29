@@ -144,6 +144,7 @@ export default function Matches({ selected }: { selected?: string }) {
                     {j.match != null && <MatchText score={j.match} matched={j.match_hits} total={j.match_total} />}
                     {(j.connections ?? 0) > 0 && <span className="accent-text">{j.match != null ? ". " : ""}{j.connections} you know</span>}
                   </span>
+                  {j.company_limit && <span className="mx-meta">{j.company_limit}</span>}
                   {stateLine(j, status?.active[j.id])}
                 </div>
               </a>

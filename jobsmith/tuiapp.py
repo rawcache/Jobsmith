@@ -522,11 +522,14 @@ class Matches(View):
                 "   job board roles autopilot won't apply to · enter apply anyway · o open · l back to matches", DIM)))
         else:
             t.border_title = "Best matches"
-            t.add_columns("Fit", "Company", "Role", "Where", "Pay", "Posted")
+            t.add_columns("Fit", "Company", "Role", "Where", "Pay", "Posted", "Company allows")
             for j in rows:
                 fit = round(j.get("fit_score") or 0)
+                # "Figma allows 5 per 30 days — 2 used": the company is in its own column
+                limit = (j.get("company_limit") or "").split(" allows ", 1)[-1]
                 t.add_row(Text(f"{fit:>3}", style=f"bold {INK}" if fit >= 70 else INK if fit >= 50 else DIM), Text(j["company"][:22], style="bold"),
-                          j["title"][:46], (j.get("locations") or [""])[0][:22], j.get("pay") or "", ago(j.get("date_posted")), key=j["id"])
+                          j["title"][:46], (j.get("locations") or [""])[0][:22], j.get("pay") or "", ago(j.get("date_posted")),
+                          Text(limit, style=DIM), key=j["id"])
             self.query_one("#t", Static).update(self.heading((f"Matches  {len(rows)}", "bold"), (
                 "   enter apply · f fill only · x not for me · o open" + (f" · l left out ({left_out})" if left_out else "")
                 + " · esc back", DIM)))

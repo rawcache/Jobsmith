@@ -239,4 +239,7 @@ async def fetch_job(job_id: str) -> dict:
         sets["status"] = "fetched"
     cols = ", ".join(f"{k}=?" for k in sets)
     db.x(f"UPDATE jobs SET {cols}, error=NULL, updated_at=? WHERE id=?", (*sets.values(), db.now(), job_id))
-    return db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (job_id,)))
+    job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (job_id,)))
+    from . import guardrails
+    guardrails.note_limits(job["company"], job["description"], job_id)    # "up to 5 applications per 30 days"
+    return job

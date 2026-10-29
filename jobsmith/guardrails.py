@@ -4,6 +4,7 @@ Every submission counts toward the caps, yours included, so "12 of 20 today" mea
 stop autopilot: you can always submit an application yourself."""
 from __future__ import annotations
 
+import json
 import re
 import time
 
@@ -81,6 +82,232 @@ def cap_reason(job: dict) -> str | None:
         if n >= company:
             return (f"Company cap reached: {n} of {company} sent to {job['company'].strip()} this week. "
                     "Autopilot waits a week before sending another.")
+    return company_limit_reason(job)
+
+
+# --------------------------------------------------------------------------- limits a company states
+# Some employers cap how often you may apply ("Candidates may submit up to 5 applications during any rolling 30-day
+# period") or when you may apply again ("may not reapply to the same role ... within 90 days of receiving a
+# rejection"). Read from their postings, kept per company, and checked next to your own caps: whichever is
+# stricter stops autopilot.
+NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+                "ten": 10, "eleven": 11, "twelve": 12, "fifteen": 15, "twenty": 20, "thirty": 30, "sixty": 60,
+                "ninety": 90}
+UNIT_DAYS = {"day": 1, "week": 7, "month": 30, "year": 365}
+_N = r"(\d{1,3}|" + "|".join(NUMBER_WORDS) + r")"
+_SPAN = rf"(?:{_N}[- ]?(day|week|month|year)s?|(day|week|month|year))"
+_CAP = r"(?:up to|no more than|a maximum of|maximum of|at most|limit(?:ed)? (?:of |to )?)"
+PER_WINDOW = re.compile(
+    rf"(?:{_CAP}\s*{_N}\s+(?:job\s+)?applications?|apply (?:to|for)\s+{_CAP}\s*{_N}\s+(?:roles|positions|jobs|openings))"
+    rf"\b[^.;]{{0,40}}?\b(?:during|in|within|per|every|each|over|for)\s+"
+    rf"(?:any|a|an|each|every|one|the)?\s*(?:rolling|calendar|consecutive)?\s*{_SPAN}", re.I)
+REAPPLY = re.compile(
+    rf"(?:\bnot\b|n't|\bcannot\b|\bunable to\b)[^.;]{{0,30}}?\bre-?apply\b[^.;]{{0,120}}?\b(?:within|for)\s+"
+    rf"{_N}[- ]?(day|week|month)s?\b[^.;]{{0,40}}?\breject", re.I)
+REAPPLY_WAIT = re.compile(
+    rf"\bwait\s+(?:at least\s+)?{_N}[- ]?(day|week|month)s?\s+(?:after|following|from)\s+[^.;]{{0,30}}?reject", re.I)
+WHILE_ACTIVE = re.compile(
+    r"(?:\bnot\b|n't|\bcannot\b)[^.;]{0,30}?\bre-?apply\b[^.;]{0,60}?\bwhile\s+(?:an?|your|their)\s+"
+    r"(?:application|candidacy)\s+(?:is|remains)\s+(?:active|open|under review|in process|being considered)", re.I)
+
+
+# A limit is a rule for applicants: its sentence talks to or about them ("Candidates may…", "You can…").
+FOR_APPLICANTS = re.compile(r"\b(candidates?|applicants?|you|your|per (?:candidate|person|applicant))\b", re.I)
+
+
+def _num(s: str) -> int:
+    return int(s) if s.isdigit() else NUMBER_WORDS[s.lower()]
+
+
+def _sentence(text: str, m: re.Match) -> str:
+    """The sentence (or list item) a match is in, as the posting wrote it."""
+    start = max(text.rfind(c, 0, m.start()) for c in ".\n•;") + 1
+    ends = [i for i in (text.find(c, m.end()) for c in ".\n") if i >= 0]
+    return " ".join(text[start:(min(ends) + 1) if ends else len(text)].split())
+
+
+def read_limits(text: str) -> dict:
+    """The application limits a posting states, if any: {"windows": [[per, days], …], "reapply_days",
+    "while_active", "lines"}. Every window is kept ("2 a day" and "5 a month" both hold)."""
+    out: dict = {"lines": []}
+    text = text or ""
+    windows = []
+    for m in PER_WINDOW.finditer(text):
+        line = _sentence(text, m)
+        if not FOR_APPLICANTS.search(line):
+            continue
+        n, k, unit, bare = m.group(1) or m.group(2), m.group(3), m.group(4), m.group(5)
+        w = [_num(n), _num(k) * UNIT_DAYS[unit.lower()] if k else UNIT_DAYS[bare.lower()]]
+        if w not in windows:
+            windows.append(w)
+        if line not in out["lines"]:
+            out["lines"].append(line)
+    if windows:
+        out["windows"] = sorted(windows, key=lambda w: w[1])
+    m = REAPPLY.search(text) or REAPPLY_WAIT.search(text)
+    if m:
+        out["reapply_days"] = _num(m.group(1)) * UNIT_DAYS[m.group(2).lower()]
+        out["lines"].append(_sentence(text, m))
+    m = WHILE_ACTIVE.search(text)
+    if m:
+        out["while_active"] = True
+        if _sentence(text, m) not in out["lines"]:
+            out["lines"].append(_sentence(text, m))
+    return out if len(out) > 1 else {}
+
+
+def merge_limits(a: dict, b: dict) -> dict:
+    """Two statements of a company's limits together: every window and line, the longer reapply wait. Limits only
+    add up, so no posting (or the order they're read in) can loosen what another said."""
+    if not a or not b:
+        return a or b
+    windows = sorted({tuple(w) for w in a.get("windows", []) + b.get("windows", [])}, key=lambda w: w[1])
+    out = {"lines": a["lines"] + [x for x in b["lines"] if x not in a["lines"]]}
+    if windows:
+        out["windows"] = [list(w) for w in windows]
+    if a.get("reapply_days") or b.get("reapply_days"):
+        out["reapply_days"] = max(a.get("reapply_days") or 0, b.get("reapply_days") or 0)
+    if a.get("while_active") or b.get("while_active"):
+        out["while_active"] = True
+    return out
+
+
+def note_limits(company: str, text: str, job_id: str | None = None, found: dict | None = None) -> dict:
+    """Keep what this posting (or `found`, already read) says about the company's limits, added to what its other
+    postings said. A posting that says nothing changes nothing."""
+    found = found if found is not None else read_limits(text)
+    key = (company or "").strip().lower()
+    if not found or not key or key.startswith("("):
+        return found
+    old = db.q1("SELECT * FROM company_limits WHERE company=?", (key,))
+    kept = {}
+    if old:
+        kept = {"lines": json.loads(old["lines"]), "windows": json.loads(old["windows"])}
+        if old["reapply_days"]:
+            kept["reapply_days"] = old["reapply_days"]
+        if old["while_active"]:
+            kept["while_active"] = True
+    both = merge_limits(kept, found)
+    db.x("""INSERT INTO company_limits(company, name, windows, reapply_days, while_active, lines, job_id, updated_at)
+            VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(company) DO UPDATE SET name=excluded.name, windows=excluded.windows,
+            reapply_days=excluded.reapply_days, while_active=excluded.while_active, lines=excluded.lines,
+            job_id=excluded.job_id, updated_at=excluded.updated_at""",
+         (key, company.strip(), db.enc(both.get("windows", [])), both.get("reapply_days"),
+          int(bool(both.get("while_active"))), db.enc(both["lines"]), job_id, db.now()))
+    return found
+
+
+_scanned = False
+
+
+def _scan_saved_postings() -> None:
+    """Once per run: read the limits in postings saved before Jobsmith looked for them."""
+    global _scanned
+    if _scanned:
+        return
+    _scanned = True
+    for r in db.q("""SELECT id, company, description FROM jobs WHERE description LIKE '%appl%'
+                     AND (description LIKE '%applications%' OR description LIKE '%reapply%'
+                          OR description LIKE '%re-apply%' OR description LIKE '%apply to%')
+                     ORDER BY updated_at"""):
+        note_limits(r["company"], r["description"], r["id"])
+
+
+def company_limits(company: str) -> dict | None:
+    """What this company has said about how often you may apply, or None."""
+    _scan_saved_postings()
+    row = db.q1("SELECT * FROM company_limits WHERE company=?", ((company or "").strip().lower(),))
+    return dict(row, lines=json.loads(row["lines"]), windows=json.loads(row["windows"])) if row else None
+
+
+def company_used(company: str, days: int) -> int:
+    """Applications to this company in the last `days` days, yours included."""
+    return len(_submitted_since(time.time() - days * 86400, company) | _in_flight(company))
+
+
+def company_room(company: str) -> int | None:
+    """How many more applications the company's own limits allow right now; None when it states none."""
+    lim = company_limits(company)
+    if not lim or not lim["windows"]:
+        return None
+    return min(per - company_used(company, days) for per, days in lim["windows"])
+
+
+def _per(days: int) -> str:
+    return "per day" if days == 1 else f"per {days} days"
+
+
+def limit_note(company: str) -> str | None:
+    """"Figma allows 5 per 30 days — 2 used", for the match. A company that only limits reapplying says that."""
+    lim = company_limits(company)
+    if not lim:
+        return None
+    if lim["windows"]:
+        return f"{lim['name']} allows " + ", ".join(
+            f"{per} {_per(days)} — {company_used(company, days)} used" for per, days in lim["windows"])
+    if lim.get("reapply_days"):
+        return f"{lim['name']}: no reapplying to a role within {lim['reapply_days']} days of a rejection"
+    if lim.get("while_active"):
+        return f"{lim['name']}: no reapplying to a role while an application to it is open"
+    return None
+
+
+def _day(t: float) -> str:
+    lt = time.localtime(t)
+    return f"{time.strftime('%b', lt)} {lt.tm_mday}"
+
+
+def _same_role(job: dict) -> list[dict]:
+    """Your other applications to this role (same company, same title): sent, or being submitted in another tab
+    right now (sent_at None)."""
+    from . import outcomes
+    if not (job.get("company") or "").strip() or not (job.get("title") or "").strip():
+        return []
+    outcomes._ensure()
+    args = (job.get("company") or "", job.get("title") or "")
+    same = "lower(trim(j.company))=lower(trim(?)) AND lower(trim(j.title))=lower(trim(?))"
+    # rejected_at: when the latest word on it was a rejection (a later interview means it's open again; a "we got
+    # your application" email says nothing either way)
+    rows = db.q(f"""SELECT j.id, j.title, j.outcome, MAX(r.finished_at) sent_at,
+                          (SELECT CASE WHEN o.kind='rejected' THEN o.received_at END FROM outcomes o
+                           WHERE o.job_id=j.id AND o.kind!='received' ORDER BY o.received_at DESC LIMIT 1) rejected_at,
+                          (SELECT COUNT(*) FROM outcomes o WHERE o.job_id=j.id AND o.kind!='received') heard
+                   FROM jobs j JOIN runs r ON r.job_id=j.id AND r.kind='submit' AND r.status IN ('done','unconfirmed')
+                   WHERE {same} GROUP BY j.id""", args)
+    sent = {r["id"] for r in rows}
+    flying = [i for i in _submitting if i not in sent]
+    if flying:
+        marks = ",".join("?" * len(flying))
+        rows += [dict(r, outcome=None, sent_at=None, rejected_at=None, heard=0) for r in db.q(
+            f"SELECT j.id, j.title FROM jobs j WHERE j.id IN ({marks}) AND {same}", (*flying, *args))]
+    return [r for r in rows if r["id"] != job.get("id")]
+
+
+def company_limit_reason(job: dict) -> str | None:
+    """Why the company's own stated limits stop autopilot on this application now, or None."""
+    lim = company_limits(job.get("company") or "")
+    if not lim:
+        return None
+    name, others = lim["name"], {job.get("id")}
+    for per, days in lim["windows"]:
+        n = len((_submitted_since(time.time() - days * 86400, job["company"]) | _in_flight(job["company"])) - others)
+        if n >= per:
+            return (f"{name} allows {per} applications {_per(days)}, and {n} have gone to {name} in the last "
+                    f"{'day' if days == 1 else f'{days} days'}. Autopilot waits until there's room again.")
+    for prev in _same_role(job):
+        # From the emails: the latest one decides (the job's outcome keeps the furthest stage, so a rejection after
+        # an interview doesn't show there). With none, a rejection you marked yourself.
+        rejected = prev["rejected_at"] if prev["heard"] else (prev["sent_at"] if prev["outcome"] == "rejected" else None)
+        if rejected and lim.get("reapply_days"):
+            when = rejected
+            if when >= time.time() - lim["reapply_days"] * 86400:
+                return (f"{name} doesn't take a new application to the same role within {lim['reapply_days']} days "
+                        f"of a rejection, and your application to {prev['title']} was turned down "
+                        f"{_day(when)}.")
+        elif not rejected and lim.get("while_active") and prev["outcome"] != "offer":
+            when = f"on {_day(prev['sent_at'])}" if prev["sent_at"] else "and it's being sent right now"
+            return (f"{name} doesn't take a new application to a role while one to it is open, and you applied to "
+                    f"{prev['title']} {when}.")
     return None
 
 

@@ -149,6 +149,19 @@ CREATE TABLE IF NOT EXISTS first_runs (
   answers TEXT,                    -- the answers you approved when its tab had closed: sent only if a refill matches
   files TEXT                       -- the resume and transcript (by content) when it was filled and held
 );
+
+-- Limits a company states in its postings ("up to 5 applications during any rolling 30-day period", "may not
+-- reapply to the same role within 90 days of a rejection"). Autopilot keeps to them as well as to your own caps.
+CREATE TABLE IF NOT EXISTS company_limits (
+  company TEXT PRIMARY KEY,        -- lower(trim(company)), the way the caps match companies
+  name TEXT NOT NULL,              -- as the posting names it
+  windows TEXT NOT NULL DEFAULT '[]',        -- [[per, days], …]: at most `per` applications in `days` days
+  reapply_days INTEGER,            -- not to the same role within this many days of a rejection
+  while_active INTEGER NOT NULL DEFAULT 0,   -- not to the same role while an application to it is open
+  lines TEXT NOT NULL DEFAULT '[]',          -- the posting's own sentences
+  job_id TEXT,                     -- the posting they were read from
+  updated_at REAL NOT NULL
+);
 """
 
 _lock = threading.RLock()
@@ -163,6 +176,10 @@ def conn() -> sqlite3.Connection:
         c.row_factory = sqlite3.Row
         c.execute("PRAGMA journal_mode=WAL")
         c.execute("PRAGMA foreign_keys=ON")
+        # company_limits is read again from saved postings, so an early copy with a single limit is just rebuilt
+        lim = {r[1] for r in c.execute("PRAGMA table_info(company_limits)").fetchall()}
+        if lim and "windows" not in lim:
+            c.execute("DROP TABLE company_limits")
         c.executescript(SCHEMA)
         cols = {r[1] for r in c.execute("PRAGMA table_info(jobs)").fetchall()}
         for col in ("referral_name", "referral_url", "hold_reason", "outcome"):
