@@ -253,7 +253,7 @@ async def setup(model: str = "", allow_install: bool = True) -> dict:
             _set("downloading", f"Downloading {model}", 0.0, model=model)
             await pull(model)
         db.set_settings({"llm_backend": "ollama", "ollama_model": model, "research_backend": "same"})
-        llm._avail_cache.clear()
+        llm.forget_checks()
         llm._auto_cache = None
         _set("ready", f"smith is ready ({model})", 1.0, model=model)
     except Exception as e:  # noqa: BLE001 - shown to the user

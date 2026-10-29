@@ -100,6 +100,7 @@ class LoginFlow:
 
     async def _finish(self, token: str) -> None:
         """Save the token only after a real request with it succeeds."""
+        from . import llm
         from .llm import ClaudeCLI, LLMError
         s = db.get_settings()
         cli = ClaudeCLI(s.get("claude_path") or "claude", "haiku", token)
@@ -109,7 +110,7 @@ class LoginFlow:
             self.state, self.message = "error", f"Signed in, but Claude rejected the connection ({e}). Try again."
             return
         db.set_settings({"claude_oauth_token": token, "llm_backend": "claude_cli"})
-        ClaudeCLI._probe_cache = None
+        llm.forget_checks()
         self.state, self.message = "done", "Connected to Claude."
 
     async def send_code(self, code: str) -> dict:
@@ -143,5 +144,5 @@ flow = LoginFlow()
 
 def disconnect() -> None:
     db.set_settings({"claude_oauth_token": ""})
-    from .llm import ClaudeCLI
-    ClaudeCLI._probe_cache = None
+    from . import llm
+    llm.forget_checks()

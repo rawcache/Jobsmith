@@ -279,3 +279,39 @@ def test_matches_shows_left_out_roles_on_l_and_enter_applies_anyway(engine, monk
             await pilot.pause(0.5)
     asyncio.run(go())
     assert started == [("m2", "autopilot")]
+
+
+def test_losing_the_engine_shows_on_one_status_line_and_logs_only_a_long_outage(engine, monkeypatch):
+    """The terminal app said "Lost Jobsmith's engine… Retrying" and "Back in touch" over and over, one pair per slow
+    reply. Now a missed poll shows on the status line, counting in place; the log hears once, and only after the
+    engine has been away for DOWN_LOG_AFTER seconds, and then once more when it's back."""
+    import httpx
+    from textual.widgets import Static
+    from jobsmith import tuiapp
+    from jobsmith.tuiapp import Jobsmith
+    db.conn()
+    monkeypatch.setattr(tuiapp, "DOWN_LOG_AFTER", 2.5)
+    nowhere = httpx.Client(base_url="http://127.0.0.1:9", timeout=1)      # nothing answers there
+
+    async def go():
+        app = Jobsmith(engine, splash=False)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause(1)
+            real = app.http
+            status = lambda: str(app.query_one("#status", Static).render())
+            for _ in range(3):                                   # three short blips: the log stays quiet
+                app.http = nowhere
+                await pilot.pause(1.7)
+                assert "reconnecting to the engine…" in status()
+                app.http = real
+                await pilot.pause(1.7)
+                assert "reconnecting" not in status()
+            assert "engine" not in _texts(app)
+            app.http = nowhere                                   # a long one: said once, then once more when back
+            await pilot.pause(5)
+            assert _texts(app).count("Can't reach Jobsmith's engine") == 1
+            app.http = real
+            await pilot.pause(2)
+            assert _texts(app).count("Back in touch with the engine") == 1
+            assert "reconnecting" not in status()
+    asyncio.run(go())

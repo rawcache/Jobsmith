@@ -31,6 +31,8 @@ from textual.css.query import NoMatches
 from textual.screen import ModalScreen, Screen
 from textual.widgets import DataTable, Footer, Input, Static, TextArea
 
+DOWN_LOG_AFTER = 10.0  # seconds without the engine before the log says so (the status line says so at once)
+
 # Warm charcoal like the dashboard's dark theme. EMBER is the extension panel's orange lifted for a dark background
 # (same hue), kept for the logo, "autopilot on", where you are, focus and progress; everything else is ink or grey.
 EMBER = "#d66638"     # the accent (named after the forge)
@@ -956,6 +958,8 @@ class Jobsmith(App):
         self.ctrl_c_at = 0.0
         self.strike = 0
         self.connected = None
+        self.down_since = 0.0      # when the engine stopped answering; 0 while it answers
+        self.down_logged = False   # said so in the log (only once it's been down DOWN_LOG_AFTER seconds)
 
     # ------------------------------------------------------------------ layout
     def compose(self) -> ComposeResult:
@@ -1409,9 +1413,15 @@ class Jobsmith(App):
         self.call_from_thread(self.apply_state, st, live, home, notes)
 
     def lost(self) -> None:
+        """A poll got no answer. The status line says so and keeps counting, in place; the log hears about it once,
+        and only if it lasts (a slow reply or the Mac waking up isn't news)."""
+        now = time.time()
         if self.connected is not False:
             self.connected = False
-            self.say(f"[yellow]Lost Jobsmith's engine at {self.base}. Retrying…[/]")
+            self.down_since = now
+        if not self.down_logged and now - self.down_since >= DOWN_LOG_AFTER:
+            self.down_logged = True
+            self.say(f"[yellow]Can't reach Jobsmith's engine at {self.base}. Still trying.[/]")
         self.paint_status()
 
     def apply_state(self, st: dict, live: list, home: dict, notes: dict) -> None:
@@ -1421,9 +1431,9 @@ class Jobsmith(App):
             pass
 
     def _paint_state(self, st: dict, live: list, home: dict, notes: dict) -> None:
-        if self.connected is False:
-            self.say("[green]Back in touch with the engine.[/]")
-        self.connected = True
+        if self.connected is False and self.down_logged:
+            self.say(f"[green]Back in touch with the engine[/] [dim](after {int(time.time() - self.down_since)} s)[/]")
+        self.connected, self.down_since, self.down_logged = True, 0.0, False
         self.state = {"st": st, "live": live, "home": home, "notes": notes}
         tabs = {t["job_id"]: t for t in live}
         for jid in list(dict.fromkeys(list(st.get("active", {})) + list(tabs))):   # tell you when something changes
@@ -1460,7 +1470,7 @@ class Jobsmith(App):
             if notes.get("unread"):
                 right += [(f"● {notes['unread']} new", INK), ("  ", "")]
             if self.connected is False:
-                right += [("engine offline", BAD), ("  ", "")]
+                right += [(f"reconnecting to the engine… {int(time.time() - self.down_since)}s", BAD), ("  ", "")]
             if st.get("demo"):
                 right += [("practice copy", STEEL), ("  ", "")]
             right += [("? for shortcuts", DIM)]
