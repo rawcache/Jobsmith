@@ -46,6 +46,7 @@ browser = pytest.mark.skipif(not Path(CHROMIUM).exists(), reason="no browser ava
 CHROME_STUB = """
 window.__calls = []; window.__listeners = []; window.__store = Object.assign({}, window.__initialStore || {});
 window.__opts = window.__opts || {}; let injected = false;
+window.__tabAnswers = new Promise(r => { window.__letTabAnswer = r; });
 const ANSWERS = {"First Name": "Alex", "Last Name": "Rivera", "Email": "alex.rivera@example.com", "Phone": "555-010-2030"};
 const reply = msg => {
   if (msg.type === "ping") return { ok: true, data: { ai: "Gemini", ai_ok: true, resume: __opts.resume || null } };
@@ -64,6 +65,7 @@ Object.defineProperty(window, "chrome", { configurable: true, value: {
   storage: { local: { get: async k => ({ [k]: __store[k] }), set: async o => { Object.assign(__store, o); } } },
   tabs: { query: async () => [{ id: 1, url: "https://example.com", title: "Posting" }],
           sendMessage: async (id, msg) => { __calls.push({ tab: msg });
+            if (__opts.holdTab) await window.__tabAnswers;    // a page that answers only when the test lets it
             if (__opts.noReceiver && !injected) throw new Error("Could not establish connection. Receiving end does not exist.");
             return { application: true, fields: 12 }; } },
   scripting: { executeScript: async t => { __calls.push({ inject: t.files, allFrames: !!t.target.allFrames }); injected = true; return []; } },
@@ -645,11 +647,25 @@ async def test_autofill_attaches_the_resume_pdf_when_there_is_one(page):
 
 
 @browser
+async def test_popup_marks_itself_ready_only_once_it_has_checked_the_page(page):
+    """CI on macOS once read the popup's reload hint before the popup had finished reaching the page's frames (a fixed
+    one-second wait). The popup now marks itself ready when it's done, and the tests wait for that: while the page
+    hasn't answered, no mark; once it has, the mark comes after the panel was told to open."""
+    await page.add_init_script(_stub({}, holdTab=True))
+    await page.goto((EXT / "popup.html").resolve().as_uri())
+    await page.wait_for_function("__calls.some(c => c.tab && c.tab.type === 'info')")   # asked; the page hasn't answered
+    assert await page.evaluate("document.body.dataset.ready") is None
+    await page.evaluate("__letTabAnswer()")
+    await page.wait_for_selector("body[data-ready]", timeout=10000)
+    assert await page.evaluate("__calls.filter(c => c.tab).map(c => c.tab.type)") == ["info", "open"]
+
+
+@browser
 async def test_popup_autopilot_box_starts_unchecked_and_remembers(page):
     async def popup(p, store):
         await p.add_init_script(_stub(store))
         await p.goto((EXT / "popup.html").resolve().as_uri())
-        await p.wait_for_selector("#actions:not([hidden])")
+        await p.wait_for_selector("body[data-ready]")
 
     await popup(page, {})
     assert not await page.is_checked("#apply")
@@ -1045,10 +1061,9 @@ async def test_popup_reaches_a_job_site_form_in_a_frame_opened_before_the_extens
             # (tab URLs are hidden without the "tabs" permission). Everything else is the real extension.
             await popup.add_init_script(ONLY_THE_CAREERS_TAB)
             await popup.goto(f"chrome-extension://{ext_id}/popup.html")
-            await popup.wait_for_selector("#actions:not([hidden])")
+            await popup.wait_for_selector("body[data-ready]", timeout=20000)           # done reaching every frame
             await tab.wait_for_selector("#jobsmith-panel", state="attached", timeout=10000)   # the popup opened the panel
             await _watch_for_submits(tab, frame)
-            await popup.wait_for_timeout(500)
             hint = None if await popup.is_hidden("#result") else await popup.inner_text("#result")
             await popup.click("#fill")                                                     # (closes the popup)
             if form_host == LISTED:
@@ -1068,8 +1083,7 @@ async def test_popup_reaches_a_job_site_form_in_a_frame_opened_before_the_extens
             again = await ctx.new_page()
             await again.add_init_script(ONLY_THE_CAREERS_TAB)
             await again.goto(f"chrome-extension://{ext_id}/popup.html")
-            await again.wait_for_selector("#actions:not([hidden])")
-            await again.wait_for_timeout(1000)
+            await again.wait_for_selector("body[data-ready]", timeout=20000)
             assert await again.inner_text("#fill") != "Can't fill this page"                 # it reached the tab
             if form_host == LISTED:
                 assert await again.is_hidden("#result")                                     # the frame has it now
