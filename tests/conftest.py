@@ -43,6 +43,11 @@ def fresh_db(tmp_path):
     db.set_settings({"research_enabled": False, "llm_backend": "none"})
     yield
     llm.set_backend_override(None)
+    # The runner keeps what it's working on, and the tabs it watches, in memory. A test that fills and holds a form
+    # leaves its tab there, as the app does until you act on it; the next test (a fresh database) starts with none.
+    from jobsmith import runner
+    runner._active.clear()
+    runner.LIVE.clear()
 
 
 def trust(*sites: str) -> None:
