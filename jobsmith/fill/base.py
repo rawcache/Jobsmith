@@ -44,12 +44,14 @@ SCAN_JS = r"""
   const groupFor = el => { let g = ''; for (const h of heads) { if (h.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) g = clean(h.innerText); else break; } return g.slice(0, 60); };
   const starred = el => { const l = el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
     return /\*\s*$/.test(((l || el.closest('label') || {}).innerText || '').trim()); };
+  // "#name" when the id is a plain CSS name; Ashby's ids can start with a digit, so those are [id="…"]
+  const byId = id => /^[A-Za-z_][\w-]*$/.test(id) ? `#${id}` : `[id="${id}"]`;
   const out = []; const seenGroups = new Set();
   for (const el of document.querySelectorAll('input, textarea, select')) {
     const type = (el.type || el.tagName).toLowerCase();
     if (['hidden', 'submit', 'button', 'image', 'reset', 'search'].includes(type)) continue;
     if (!vis(el) && type !== 'file') continue;
-    const key = el.id ? `#${el.id}` : (el.name ? `[name="${el.name}"]` : null);
+    const key = el.id ? byId(el.id) : (el.name ? `[name="${el.name}"]` : null);
     if (!key) continue;
     if (type === 'radio' || type === 'checkbox') {
       const g = el.name || el.id; if (seenGroups.has(g)) continue;
@@ -57,9 +59,13 @@ SCAN_JS = r"""
       seenGroups.add(g);
       const fs = el.closest('fieldset'); const legend = fs && fs.querySelector('legend');
       let label = legend ? clean(legend.innerText) : '';
-      if (!label) { let p = el.parentElement; for (let i = 0; i < 5 && p; i++, p = p.parentElement) {
-        const t = clean((p.innerText || '').split('\n')[0]); if (t && group.every(x => p.contains(x)) && t.length > 3) { label = t; break; } } }
       const opts = group.map(x => labelFor(x));
+      // the first line of the nearest box holding every option, unless that line is an option itself (Ashby's
+      // SMS consent: "Yes - I consent…" first, the question "SMS" one box further out). A lone checkbox's own
+      // label is its question.
+      const isOpt = t => /^(yes|no)\W*$/i.test(t) || (group.length > 1 && opts.some(o => o && (t.startsWith(o) || o.startsWith(t))));
+      if (!label) { let p = el.parentElement; for (let i = 0; i < 5 && p; i++, p = p.parentElement) {
+        const t = clean((p.innerText || '').split('\n')[0]); if (t && group.every(x => p.contains(x)) && t.length > 2 && !isOpt(t)) { label = t; break; } } }
       out.push({ field: el.name ? `[name="${el.name}"]` : key, label: label || opts[0], value: group.some(x => x.checked) ? 'set' : '',
                  qtype: group.length > 1 ? (type === 'radio' ? 'radio' : 'multiselect') : 'checkbox',
                  required: group.some(x => x.required), options: group.length > 1 ? opts : [], description: '', group: groupFor(el) });
@@ -76,11 +82,27 @@ SCAN_JS = r"""
       options: el.tagName === 'SELECT' ? [...el.options].map(o => clean(o.text)).filter(t => t && !/^select|^--|^please/i.test(t)) : [],
       description: '', group: groupFor(el) });
   }
+  // Yes/No buttons (Ashby): two buttons that toggle aria-pressed, and often a hidden checkbox holding the answer.
+  // Reported as a radio question with the options Yes and No, keyed by the hidden input (or the box's id).
+  for (const box of new Set([...document.querySelectorAll('button[aria-pressed]')].map(b => b.parentElement))) {
+    const bs = [...box.children].filter(b => b.tagName === 'BUTTON' && b.hasAttribute('aria-pressed'));
+    if (bs.length !== 2 || !bs.every(b => /^(yes|no)$/i.test(clean(b.innerText))) || !vis(bs[0])) continue;
+    const named = box.querySelector('input[name]');
+    const key = named ? `[name="${named.name}"]` : (box.id ? byId(box.id) : null);
+    if (!key) continue;
+    let head = null;
+    for (let p = box.parentElement, i = 0; p && i < 3 && !head; p = p.parentElement, i++) head = p.querySelector('label, legend');
+    const pressed = bs.find(b => b.getAttribute('aria-pressed') === 'true');
+    out.push({ field: key, label: head ? clean(head.innerText) : labelFor(bs[0]), value: pressed ? clean(pressed.innerText) : '',
+               qtype: 'radio', options: bs.map(b => clean(b.innerText)), buttons: true,
+               required: !!head && (/required/i.test(head.className) || /\*\s*$/.test(head.innerText.trim())),
+               description: '', group: groupFor(box) });
+  }
   // custom dropdowns (Workday and others): <button aria-haspopup="listbox">Select One</button>
   for (const el of document.querySelectorAll('button[aria-haspopup="listbox"], [role="button"][aria-haspopup="listbox"]')) {
     if (!vis(el)) continue;
     const auto = el.getAttribute('data-automation-id');
-    const key = el.id ? `#${el.id}` : (auto ? `[data-automation-id="${auto}"]` : null);
+    const key = el.id ? byId(el.id) : (auto ? `[data-automation-id="${auto}"]` : null);
     if (!key) continue;
     const txt = clean(el.innerText);
     out.push({ field: key, label: labelFor(el), qtype: 'listbox', value: /^select/i.test(txt) ? '' : txt,
@@ -289,6 +311,17 @@ async def fill_choice(page: Page, selector: str, value: str | list[str]) -> bool
     return ok
 
 
+async def fill_buttons(page: Page, selector: str, value: str) -> bool:
+    """Yes/No buttons beside a hidden input (Ashby): click the one that matches, then check the page took it."""
+    box = page.locator(selector).first.locator("xpath=..")
+    buttons = box.locator(":scope > button[aria-pressed]")
+    idx = _best_option([t.strip() for t in await buttons.all_inner_texts()], value)
+    if idx is None:
+        return False
+    await buttons.nth(idx).click(timeout=5000)
+    return await buttons.nth(idx).get_attribute("aria-pressed") == "true"
+
+
 async def fill_listbox(page: Page, selector: str, value: str) -> bool:
     btn = page.locator(selector).first
     await btn.scroll_into_view_if_needed(timeout=5000)
@@ -317,6 +350,9 @@ async def fill_field(page: Page, selector: str, qtype: str, value: str, file_pat
         await page.locator(selector).first.set_input_files(file_path, timeout=8000)
         return True
     if qtype in ("radio", "multiselect", "checkbox"):
+        if await page.locator(selector).first.evaluate(
+                "e => !!e.parentElement && !!e.parentElement.querySelector(':scope > button[aria-pressed]')"):
+            return await fill_buttons(page, selector, value)
         if qtype == "checkbox":
             if value.lower() in ("yes", "true", "checked", "i agree", "agree"):
                 await page.locator(selector).first.check(force=True)
@@ -340,6 +376,7 @@ SUBMIT_SELECTORS = [
     'button:has-text("Submit Application")', 'input[type="submit"]', 'button[type="submit"]',
 ]
 CONFIRM_RE = re.compile(r"thank you for applying|application (has been )?(received|submitted)|"
+                        r"application was successfully submitted|"                          # Ashby
                         r"we('ve| have) received your application|thanks for applying", re.I)
 
 

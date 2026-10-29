@@ -409,6 +409,79 @@ async def test_panel_shows_where_legal_answers_came_from_and_holds_worked_here_b
     await _never_submitted(page)
 
 
+RAMP_AUTH = "Are you currently based in the U.S., Canada, LATAM, and/or currently authorized to work in one of these locations?"
+RAMP_REACT = ("Have you built and deployed production-level applications using React, TypeScript (or JavaScript), and other "
+              "modern front-end technologies?")
+RAMP_TAKE_HOME = "Are you comfortable completing a frontend take-home assessment?"
+
+
+async def _pressed(page, question: str) -> str:
+    """The pressed button under an Ashby Yes/No question, '' when neither is."""
+    return await page.evaluate("""q => { const e = [...document.querySelectorAll('.ashby-application-form-field-entry')]
+        .find(x => x.querySelector('label')?.innerText.startsWith(q));
+        return [...e.querySelectorAll('button[aria-pressed=true]')].map(b => b.innerText.trim()).join(); }""", question)
+
+
+@browser
+async def test_autofill_presses_ashby_yes_no_buttons_on_the_saved_ramp_form(page):
+    """The saved Ramp form (Ashby): its Yes/No questions are two buttons beside a hidden checkbox, so a scan that
+    skips hidden inputs missed all four. Autofill presses the answer's button, leaves the ones it has no answer
+    for under Needs you, and says where the work authorization answer came from. Ashby autosaves each answer with
+    a POST; that isn't sending the application, and nothing here is."""
+    saves = []
+    page.on("request", lambda r: "op=ApiSetFormValue" in r.url and saves.append(r.method))
+    await _load(page, {"panelOpen": True}, fixture="ashby_ramp_form.html", answers={
+        "Legal Name": {"value": "Alex Rivera", "kind": "standard"},
+        RAMP_AUTH: {"value": "Yes", "kind": "answer_bank", "source": "Profile: Authorized to work in the US? (you confirmed it)"},
+        RAMP_REACT: {"value": "No", "kind": "generated"}})
+    await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
+    note = "document.querySelector('#jobsmith-panel').shadowRoot.querySelector('.note')"
+    await page.wait_for_function(f"{note}?.innerText.includes('Filled')", timeout=30000)
+    assert await page.input_value("#_systemfield_name") == "Alex Rivera"
+    assert await _pressed(page, RAMP_AUTH) == "Yes"
+    assert await page.is_checked('[name="9c5b0358-1bae-4437-b3e6-e3541fdcf473"]')       # the answer Ashby sends
+    assert await _pressed(page, RAMP_REACT) == "No"
+    assert await _pressed(page, RAMP_TAKE_HOME) == ""
+    text = await page.evaluate(f"{note}.innerText")
+    needs, sources = text.split("Needs you:")[1].split("Where these answers came from:")
+    assert RAMP_TAKE_HOME in needs and RAMP_AUTH[:40] not in needs
+    assert "Profile: Authorized to work in the US? (you confirmed it)" in sources
+    assert saves and set(saves) == {"POST"}                     # autosaved, and the watcher let that be
+    assert await page.evaluate("window.__submits") == 0
+    await _never_submitted(page)
+
+
+@browser
+async def test_autofill_labels_a_lone_checkbox_by_its_own_label(page):
+    """Skipping an option's own text when naming a radio question ("SMS") never applies to a lone checkbox."""
+    html = (b"<form><label for='fn'>First Name</label><input id='fn'><label for='em'>Email</label><input id='em'>"
+            b"<label for='ph'>Phone</label><input id='ph'>"
+            b"<div><label><input type='checkbox' name='terms'> I agree to the privacy policy</label></div>"
+            b"<div><p>Are you authorized to work in Canada?</p><label><input type='checkbox' name='ca'> Yes</label></div></form>")
+    await page.route("**/*", lambda r: r.fulfill(status=200, content_type="text/html", body=html))
+    await page.add_init_script(_stub({"panelOpen": False}))
+    await page.goto("https://careers.acme.test/apply")
+    await _watch_for_submits(page)
+    await page.add_script_tag(path=str(EXT / "content.js"))
+    await page.evaluate("__listeners.forEach(l => l({type: 'fill'}, {}, () => {})); 0")
+    await page.wait_for_function("__calls.some(c => c.type === 'answers')")
+    labels = await page.evaluate("__calls.find(c => c.type === 'answers').body.fields.map(f => f.label)")
+    assert "I agree to the privacy policy" in labels
+    assert "Are you authorized to work in Canada?" in labels and "Yes" not in labels      # "Yes" isn't the question
+    await _never_submitted(page)
+
+
+@browser
+async def test_the_submit_watcher_sees_ashbys_submit_on_the_saved_ramp_form(page):
+    """The other side of the watcher on Ashby: pressing Submit Application (which sends Ashby's submit operation,
+    with no <form> on the page) is caught."""
+    await _load(page, {"panelOpen": False}, fixture="ashby_ramp_form.html")
+    await page.click(".ashby-application-form-submit-button")
+    await page.wait_for_timeout(500)
+    assert page._jobsmith_sent and "op=ApiSubmitSingleApplicationFormAction" in page._jobsmith_sent[0]
+    page._jobsmith_sent.clear()                         # caught; don't fail the fixture for it
+
+
 @browser
 async def test_autofill_picks_greenhouse_dropdowns_and_the_city_from_its_lookup(page):
     """#19: on Greenhouse's form the dropdowns open on key-up, not key-down, so autofill left Country, Location

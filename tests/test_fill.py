@@ -290,45 +290,158 @@ async def test_multistep_signin_handoff_and_review(fake_llm, tmp_path, page):
     assert saved["#why"]["kind"] == "generated" and saved["#first"]["kind"] == "answer_bank"
 
 
-async def test_generic_fills_ashby_style_form_stops_before_submit(page, tmp_path):
-    """The generic filler (fill/generic.py) handles a hand-written Ashby-style form: scan the fields,
-    fill them from the made-up demo profile, and stop before Submit. Sponsorship is left for the
-    user (confirmed profile only), so the filler is never handed an answer for it."""
-    from jobsmith.fill import generic
-    resume = tmp_path / "resume.pdf"
-    resume.write_bytes(b"%PDF-1.4\n%%EOF\n")
-    await page.goto((FIXTURES / "ashby_style_form.html").resolve().as_uri())
+RAMP_ASHBY = "https://jobs.ashbyhq.com/ramp/4e64ab86-4e30-403b-b1b9-41dc052570ce/application"
+WORK_AUTH = '[name="9c5b0358-1bae-4437-b3e6-e3541fdcf473"]'
+TAKE_HOME = '[name="dc1720d1-f410-411c-83a5-9040cb1f059e"]'
 
+
+async def _yes_no(page, sel):
+    """The pressed button of an Ashby Yes/No question, and whether its hidden checkbox is ticked."""
+    return await page.eval_on_selector(sel, """e => [[...e.parentElement.querySelectorAll('button[aria-pressed=true]')]
+        .map(b => b.innerText.trim()).join(), e.checked]""")
+
+
+async def test_scan_reads_the_saved_ashby_form_as_ashby_shows_it(page):
+    """Ashby's Yes/No questions are two buttons beside a hidden checkbox: each is a radio question with Yes and No.
+    Ids that start with a digit are keyed [id="…"] (a "#2143…" selector is invalid), and the SMS consent radios are
+    labelled "SMS", not by their first option."""
+    await page.goto((FIXTURES / "ashby_ramp_form.html").resolve().as_uri())
     fields = {f["label"]: f for f in await scan_form(page)}
-    # the demo profile's answers, keyed by the label the form shows
-    answers = {
-        "Name": "Alex Rivera",
-        "Email": "alex.rivera@example.edu",
-        "LinkedIn Profile": "https://www.linkedin.com/in/alexrivera",
-        "GitHub Profile": "https://github.com/alexrivera",
-        "Why do you want to work here?": "I built perception systems on NVIDIA Jetson and want to keep shipping them.",
-        "How did you hear about us?": "LinkedIn",
-    }
-    drafts = []
-    for label, value in answers.items():
-        f = fields[label]
-        drafts.append({**f, "value": value})
-    drafts.append({**fields["Resume"], "value": ""})            # file comes from the files map
+    yes_no = [f for f in fields.values() if f["options"] == ["Yes", "No"]]
+    assert len(yes_no) == 4 and all(f["qtype"] == "radio" and f["required"] for f in yes_no)
+    assert fields["Do you have proficiency in JavaScript and React? Please describe."]["field"] == \
+        '[id="05186312-a133-4c6b-9859-5a359975a53b"]'
+    assert fields["SMS"]["options"][0] == "Yes - I consent to receiving SMS text messages"
+    assert "WhatsApp" in fields
+    for f in fields.values():
+        assert await page.locator(f["field"]).count(), f["field"]          # every key finds its field
 
-    res = await generic.fill(page, drafts, {"resume": str(resume)})
-    assert not res["failed"], res
-    assert len(res["sent"]) == len(res["filled"])
 
-    assert await page.input_value("#_systemfield_name") == "Alex Rivera"
-    assert await page.input_value("#_systemfield_email") == "alex.rivera@example.edu"
-    assert await page.input_value("#field-linkedin") == "https://www.linkedin.com/in/alexrivera"
-    assert "Jetson" in await page.input_value("#field-why")
-    assert await page.input_value("#field-heard") == "LinkedIn"
-    assert await page.evaluate("document.querySelector('#_systemfield_resume').files.length") == 1
-    assert await page.input_value("#field-sponsorship") == ""      # left for the user
-    # counted directly: the blank required sponsorship field alone would block a submit
-    assert await page.evaluate("[window.submitClicks, window.submitEvents]") == [0, 0]
-    assert not await page_confirms_submission(page)                # nothing submitted
+async def test_a_lone_checkbox_is_labelled_by_its_own_label(page):
+    """The radio fix that skips an option's own text for the question ("SMS") doesn't apply to a lone checkbox:
+    its label is the question, never an earlier field's text from the box around it."""
+    await page.set_content("""<form><label for="em">Email</label><input id="em">
+      <div><label><input type="checkbox" name="terms"> I agree to the privacy policy</label></div>
+      <div><p>Are you authorized to work in Canada?</p><label><input type="checkbox" name="ca"> Yes</label></div></form>""")
+    fields = {f["field"]: f for f in await scan_form(page)}
+    assert fields['[name="terms"]']["label"] == "I agree to the privacy policy"
+    assert fields['[name="ca"]']["label"] == "Are you authorized to work in Canada?"     # "Yes" isn't the question
+
+
+async def test_runner_finds_ashbys_submit_button_and_its_thank_you(page):
+    """Autopilot's side of a real submit on Ashby, on the saved form: the first visible SUBMIT_SELECTORS match is
+    Ashby's own button, and the thank-you Ashby shows afterwards ("Your application was successfully submitted",
+    from Ashby's page script) counts as the confirmation. The form itself never confirms anything."""
+    await page.goto((FIXTURES / "ashby_ramp_form.html").resolve().as_uri())
+    assert not await page_confirms_submission(page)
+    btn = None
+    for sel in base.SUBMIT_SELECTORS:                                       # as runner.fill picks it
+        b = page.locator(sel).first
+        if await b.count() and await b.is_visible():
+            btn = b
+            break
+    assert btn and "ashby-application-form-submit-button" in await btn.get_attribute("class")
+    await btn.click()
+    assert await page.evaluate("window.__submits") == 1
+    assert await page_confirms_submission(page)
+
+
+async def test_autopilot_sends_the_saved_ashby_form_once_everything_is_answered(fake_llm, tmp_path):
+    """The whole path on Ashby, through runner.fill: every required answer resolved (yours approved), autopilot
+    presses Ashby's Submit Application, sees Ashby's thank-you, and records the submission with its proof."""
+    from jobsmith import audit
+    await profile.ingest_document(FIXTURES / "sample_resume.tex")
+    profile.set_answer("work_authorized_us", "Yes", confirmed=True)
+    pdf = tmp_path / "resume.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    db.x("INSERT INTO documents(kind, filename, path, text, is_primary, created_at) VALUES('resume','resume.pdf',?,'',1,?)",
+         (str(pdf), db.now()))
+    jid = sources.add_job_url(RAMP_ASHBY, "Ramp", "Software Engineer, Frontend")
+    db.x("UPDATE jobs SET url=?, description='Frontend work at Ramp.' WHERE id=?",
+         ((FIXTURES / "ashby_ramp_form.html").resolve().as_uri(), jid))
+    jetson = [f["id"] for f in profile.facts() if "Jetson" in f["text"]]
+    said = {'[id="05186312-a133-4c6b-9859-5a359975a53b"]': "I built the dashboard for my detection model in React.",
+            '[id="2143a185-34d7-46b3-97cd-eb849e81a0a2"]': "I deployed a fire and smoke detection model on NVIDIA Jetson Nano.",
+            '[name="307c94b5-e8a1-491d-b89a-2c7c8e5b1c7d"]': "Yes", '[name="bd294cea-24ad-4d51-b626-a0ceed8541f9"]': "No",
+            TAKE_HOME: "Yes", "cover_letter": "I built perception systems on Jetson."}
+    fake_llm(lambda s, p: {"answers": [{"field": k, "answer": v, "fact_ids": jetson, "confidence": 0.9}
+                                       for k, v in said.items() if json.dumps(k)[1:-1] in p]})
+    trust("ashby")
+    db.set_settings({"browser_channel": "", "headless": True, "autonomy": "autonomous", "trust_threshold": 0})
+    await runner.prepare(jid, research=False)
+    for d in draft.drafts_for(jid):                       # you approved every answer
+        db.x("UPDATE drafts SET verdict='green' WHERE id=?", (d["id"],))
+    assert draft.readiness(jid)["ready"], draft.readiness(jid)["blockers"]
+    try:
+        await runner.fill(jid, submit=True)
+    finally:
+        await runner.browser.close()
+    runs = db.q("SELECT kind, status, log FROM runs WHERE job_id=? ORDER BY id", (jid,))
+    assert db.q1("SELECT status FROM jobs WHERE id=?", (jid,))["status"] == "submitted", runs
+    assert [r["status"] for r in runs if r["kind"] == "submit"] == ["done"]
+    [sub] = audit.for_job(jid)
+    assert sub["sent_by"] == "autopilot" and sub["fields"]
+    [proof] = sub["confirmations"]
+    assert "Your application was successfully submitted" in proof["text"]
+    auth = next(f for f in sub["fields"] if f["label"].startswith("Are you currently based in the U.S."))
+    assert auth["answer"] == "Yes" and auth["traces"]
+
+
+async def test_ashby_saved_ramp_form_is_filled_and_held_before_submit(fake_llm, tmp_path, monkeypatch):
+    """The saved Ramp form (tests/fixtures/ashby_ramp_form.html, captured read-only from jobs.ashbyhq.com) through
+    the whole autopilot path: scan, draft, fill, hold. Ashby's Yes/No questions are buttons beside a hidden
+    checkbox. Work authorization comes from the confirmed profile; the questions only Alex can answer (a
+    take-home, whether Ramp may text them) land under Needs you; Submit is never pressed."""
+    async def no_watch(*a):
+        return None
+    monkeypatch.setattr(runner, "watch_tab", no_watch)
+    await profile.ingest_document(FIXTURES / "sample_resume.tex")
+    profile.set_answer("work_authorized_us", "Yes", confirmed=True)
+    pdf = tmp_path / "resume.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    db.x("INSERT INTO documents(kind, filename, path, text, is_primary, created_at) VALUES('resume','resume.pdf',?,'',1,?)",
+         (str(pdf), db.now()))
+    jid = sources.add_job_url(RAMP_ASHBY, "Ramp", "Software Engineer, Frontend")
+    assert db.q1("SELECT ats FROM jobs WHERE id=?", (jid,))["ats"] == "ashby"
+    db.x("UPDATE jobs SET url=?, description='Frontend work at Ramp.' WHERE id=?",
+         ((FIXTURES / "ashby_ramp_form.html").resolve().as_uri(), jid))
+    jetson = [f["id"] for f in profile.facts() if "Jetson" in f["text"]]
+    asked = []
+
+    def responder(system, prompt):
+        qs = prompt.split("QUESTIONS TO ANSWER:")[1]
+        asked.append(qs)
+        return {"answers": [{"field": '[id="2143a185-34d7-46b3-97cd-eb849e81a0a2"]', "fact_ids": jetson, "confidence": 0.9,
+                             "answer": "I deployed a fire and smoke detection model on NVIDIA Jetson Nano."}]}
+    fake_llm(responder)
+    trust("ashby")
+    db.set_settings({"browser_channel": "", "headless": True, "autonomy": "autonomous", "trust_threshold": 0})
+    await runner.prepare(jid, research=False)
+    try:
+        await runner.fill(jid, submit=True)
+        page = runner.LIVE[jid]["page"]
+        assert await page.input_value("#_systemfield_name") == "Alex Rivera"
+        assert await page.input_value("#_systemfield_email") == profile.answers()["email"]["value"]
+        assert await page.evaluate("document.querySelector('#_systemfield_resume').files.length") == 1
+        assert "Jetson" in await page.input_value('[id="2143a185-34d7-46b3-97cd-eb849e81a0a2"]')
+        assert await _yes_no(page, WORK_AUTH) == ["Yes", True]            # your confirmed answer, pressed
+        assert await _yes_no(page, TAKE_HOME) == ["", False]              # not an email question; yours
+        assert not await page.locator('[name="smsConsent"]:checked, [name="whatsAppConsent"]:checked').count()
+        assert await page.evaluate("window.__submits") == 0
+        assert not await page_confirms_submission(page)
+    finally:
+        await runner.browser.close()
+    drafts = {d["label"]: d for d in draft.drafts_for(jid)}
+    auth = next(d for l, d in drafts.items() if l.startswith("Are you currently based in the U.S."))
+    assert auth["answer"] == "Yes" and auth["rationale"].endswith("(you confirmed it)")
+    assert not any("authorized to work" in q or "SMS" in q for q in asked)   # never sent to the AI (rule 2)
+    job = db.q1("SELECT status, hold_reason FROM jobs WHERE id=?", (jid,))
+    assert job["status"] == "filled" and job["hold_reason"]
+    needs_you = draft.readiness(jid)["blockers"]
+    print(needs_you)
+    assert any(b.startswith("Are you comfortable completing a frontend take-home") for b in needs_you)
+    assert not any(b.startswith(("SMS", "WhatsApp", "Are you currently based")) for b in needs_you)
+    assert not db.q("SELECT 1 FROM runs WHERE job_id=? AND kind='submit'", (jid,))
 
 
 async def test_real_react_select_ignores_other_option_lists(page):

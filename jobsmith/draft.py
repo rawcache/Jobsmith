@@ -227,6 +227,28 @@ def source_line(canon: str, ans: dict, job: dict | None = None, label: str = "")
     return f"Profile: {a.get('label') or base}" + (" (you confirmed it)" if a.get("confirmed") else " (not confirmed yet)")
 
 
+# Work authorization and sponsorship in the profile are for the US. A question about somewhere else ("authorized to
+# work in Canada?") isn't answered by them.
+ELSEWHERE = re.compile(r"\b(canad(a|ian)|mexic(o|an)|latam|latin america|south america|central america|europe(an)?|"
+                       r"\beu\b|\beea\b|\buk\b|united kingdom|britain|england|ireland|germany|france|netherlands|spain|"
+                       r"portugal|poland|switzerland|sweden|india|china|japan|korea|singapore|philippines|australia|"
+                       r"new zealand|brazil|argentina|colombia|chile|israel|emea|apac|outside (of )?the (u\.?s|united))",
+                       re.I)
+# Case matters: "US" is the country, "us" is the company asking. "America" alone is left out ("Latin America").
+NAMES_US = re.compile(r"\bU\.\s?S\b\.?(\s?A\b\.?)?|\bUSA?\b|\b(?i:united states( of america)?)\b")
+# Any place named after "in" ("authorized to work in South Africa?"), so a country missing from ELSEWHERE still counts
+PLACE = re.compile(r"\b(?:in|within)\s+(?:the\s+)?([A-Z][\w.'’-]*(?:\s+(?:of\s+)?[A-Z][\w.'’-]*)*)")
+ANY_OF = re.compile(r"\bor\b|and/or|one of|any of|either", re.I)
+
+
+def _place_scope(label: str) -> str:
+    """'us' (no other place named), 'any' (the US or somewhere else will do) or 'other'."""
+    us = lambda p: NAMES_US.fullmatch(p) or NAMES_US.fullmatch(p.rstrip(".,")) or p in US_STATES.values()
+    if not ELSEWHERE.search(label) and all(us(p) for p in PLACE.findall(label)):
+        return "us"
+    return "any" if NAMES_US.search(label) and ANY_OF.search(label) else "other"
+
+
 def _derived(canon: str, ans: dict, job: dict | None = None) -> tuple[str, bool]:
     job = job or {}
     if canon == "referral_name":
@@ -304,7 +326,16 @@ def _edu_date(field: dict) -> tuple[str, int] | None:
     return None
 
 
+# "SMS: Yes - I consent to receiving SMS text messages": whether a company may text you is yours to decide.
+MESSAGING = re.compile(r"\b(sms|text messages?|texts? (from|about)|whatsapp)\b", re.I)
+
+
 def deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | None:
+    if field["qtype"] in ("radio", "checkbox", "select", "multiselect") and \
+            MESSAGING.search(" ".join([field["label"], *(field.get("options") or [])])):
+        return {"kind": "answer_bank", "canon": None, "answer": "", "confidence": 0.0 if field["required"] else 1.0,
+                "issues": ["Asks whether they may text you; answer it yourself"] if field["required"] else [],
+                "rationale": "Whether they may text you is your call; left for you"}
     edu = _edu_date(field)
     if edu:
         key, idx = edu
@@ -334,6 +365,13 @@ def deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | Non
         value, confirmed = _worked_here(job or {}, ans, field["label"])[0], True
     else:
         value, confirmed = _derived(canon, ans, job)
+    if canon in ("work_authorized_us", "needs_sponsorship"):
+        scope = _place_scope(field["label"])
+        # "Authorized in the US, Canada or LATAM?": your US "Yes" answers it; a US "No" or a US sponsorship need doesn't
+        if scope == "other" or (scope == "any" and not (canon == "work_authorized_us" and value.lower() == "yes")):
+            return {"kind": "answer_bank", "canon": canon, "answer": "", "confidence": 0.0,
+                    "issues": ["Asks about working somewhere other than the US; your profile answers for the US, so "
+                               "answer it yourself"] if field["required"] else []}
     sensitive = canon in profile.SENSITIVE_KEYS
     if canon in profile.EEO_KEYS and value and not confirmed:
         # Demographics are never on a resume, so an unconfirmed one has nothing behind it: never filled (rule 2).

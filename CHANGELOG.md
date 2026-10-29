@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added
+- Ashby forms are filled end to end, proven on a saved copy of Ramp's real application form. Ashby's Yes/No
+  questions (two buttons, not a checkbox you can see) are now found and answered, by autopilot and by the
+  extension; autopilot recognizes Ashby's "Your application was successfully submitted" page. Along the way:
+  "Legal Name" is your full name; a yes/no question that mentions an email ("You'll receive an email from
+  CodeSignal") is no longer taken for your email address; a work-authorization or sponsorship question about
+  another country ("authorized to work in Canada?") waits for you instead of getting your US answer, and one that
+  takes the US or elsewhere ("based in the U.S., Canada or LATAM?") gets your US "Yes" only; and whether a company
+  may text you (SMS, WhatsApp) is always left for you.
+
 ### Changed
 - "Have you worked for <company> before?" is no longer answered "No" by default. It's "Yes" when your resume's
   work history names the company, "No" only once you've confirmed "My resume lists every employer and contract I've

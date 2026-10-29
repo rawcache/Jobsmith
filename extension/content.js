@@ -57,8 +57,11 @@
         const group = el.name ? [...document.querySelectorAll(`input[name="${CSS.escape(el.name)}"]`)] : [el];
         const fs = el.closest("fieldset"); const legend = fs && fs.querySelector("legend");
         let label = legend ? clean(legend.innerText) : "";
+        // the first line of the nearest box holding every option, unless that line is an option itself (a lone
+        // checkbox's own label is its question)
+        const opts = group.map(labelFor), isOpt = t => /^(yes|no)\W*$/i.test(t) || (group.length > 1 && opts.some(o => o && (t.startsWith(o) || o.startsWith(t))));
         if (!label) { let p = el.parentElement; for (let i = 0; i < 5 && p; i++, p = p.parentElement) {
-          const t = clean((p.innerText || "").split("\n")[0]); if (t && t.length > 3 && group.every(x => p.contains(x))) { label = t; break; } } }
+          const t = clean((p.innerText || "").split("\n")[0]); if (t && t.length > 2 && !isOpt(t) && group.every(x => p.contains(x))) { label = t; break; } } }
         const id = tag(el); els.set(id, group);
         out.push({ id, label: label || labelFor(el), type: group.length > 1 ? (type === "radio" ? "radio" : "multiselect") : "checkbox",
                    required: group.some(x => x.required), options: group.length > 1 ? group.map(labelFor) : [],
@@ -72,6 +75,17 @@
         required: el.required || el.getAttribute("aria-required") === "true" || starred(el),
         options: el.tagName === "SELECT" ? [...el.options].map(o => clean(o.text)).filter(t => t && !/^select|^--|^please/i.test(t)) : [],
         filled: type === "file" ? !!(el.files && el.files.length) : !!el.value });
+    }
+    // Yes/No buttons (Ashby): two buttons that toggle aria-pressed beside a hidden checkbox. A radio question.
+    for (const box of new Set([...document.querySelectorAll("button[aria-pressed]")].map(b => b.parentElement))) {
+      const bs = [...box.children].filter(b => b.tagName === "BUTTON" && b.hasAttribute("aria-pressed"));
+      if (bs.length !== 2 || !bs.every(b => /^(yes|no)$/i.test(clean(b.innerText))) || !visible(bs[0])) continue;
+      let head = null;
+      for (let p = box.parentElement, i = 0; p && i < 3 && !head; p = p.parentElement, i++) head = p.querySelector("label, legend");
+      const id = tag(box); els.set(id, bs);
+      out.push({ id, label: head ? clean(head.innerText) : labelFor(bs[0]), type: "radio",
+                 required: !!head && (/required/i.test(head.className) || /\*\s*$/.test(head.innerText.trim())),
+                 options: bs.map(b => clean(b.innerText)), filled: bs.some(b => b.getAttribute("aria-pressed") === "true") });
     }
     return out.filter(f => f.label);
   }
@@ -193,6 +207,11 @@
     const value = (a.value || "").trim();
     if (!value) return false;
     if (Array.isArray(target)) {
+      if (target[0].tagName === "BUTTON") {     // Yes/No buttons: press the one that matches, and check it took
+        const i = best(target.map(b => b.innerText), value); if (i < 0) return false;
+        if (target[i].getAttribute("aria-pressed") !== "true") target[i].click();
+        return target[i].getAttribute("aria-pressed") === "true";
+      }
       if (target.length === 1) {
         const want = /^(yes|true|i agree|agree|checked)/i.test(value);
         if (want !== target[0].checked) target[0].click();
