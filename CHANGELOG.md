@@ -13,6 +13,9 @@
   may text you (SMS, WhatsApp) is always left for you.
 
 ### Changed
+- The terminal app's input looks and works like Claude Code's: no box, a thin line above and below across the
+  window, a "> " before what you type, and it grows downward as your words wrap. shift+enter, ctrl+j or a backslash
+  before enter starts a new line; ↑/↓ move between lines and bring back what you sent from the first or last one.
 - The terminal app's hammer swings down onto the anvil once (about a second) when it opens, on /help and when an
   application is sent: it turns about the end of its handle like a real swing, throws a few sparks, and rests. It
   no longer hammers on a loop while work runs, and once it rests its animation timers stop (only the engine check

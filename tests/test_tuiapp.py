@@ -491,3 +491,59 @@ def test_jobsmith_checks_gallery_gets_the_terminal_app_at_rest(engine, tmp_path)
     asyncio.run(terminal_screenshot(engine, tmp_path / "terminal.svg"))
     svg = (tmp_path / "terminal.svg").read_text(encoding="utf-8")
     assert svg.startswith("<svg") and "▐" in svg and "━" in svg
+
+
+def test_the_input_is_a_line_above_and_below_with_a_prompt_and_grows_as_you_type(engine):
+    """Like Claude Code's: no box, a thin rule above and below across the whole width, "> " then your words. It
+    starts one line tall with its placeholder, grows downward as a long line wraps or you add a line (shift+enter,
+    ctrl+j, or a backslash then enter), and enter sends it all and shrinks it back."""
+    from textual.widgets.text_area import Selection
+    from jobsmith.tuiapp import Jobsmith
+    db.conn()
+
+    async def go():
+        app = Jobsmith(engine, splash=False)
+        sent = []
+        async with app.run_test(size=(100, 40)) as pilot:
+            await pilot.pause(0.3)
+            app.run_request = sent.append
+            app.ask = sent.append
+            bar, prompt = app.query_one("#inputbar"), app.query_one("#prompt")
+            lines = screen_text(app).split("\n")
+            top = bar.region.y
+            assert lines[top].strip() == "─" * 100 and lines[top + 2].strip() == "─" * 100   # full width, no corners
+            assert lines[top + 1].startswith("> Ask about your job hunt, or tell it where to apply.")       # no side border
+            assert prompt.region.height == 1
+            await pilot.press(*"apply to the robotics and embedded software internships at acme, northwind and every other company nearby that is hiring")
+            await pilot.pause(0.1)
+            assert prompt.region.height == 2                     # wrapped: one line more, below
+            assert bar.region.y == top - 1                       # the conversation gives up the room, not the status
+            await pilot.press("ctrl+j", *"then tell me", "shift+enter", *"and more\\", "enter")
+            await pilot.pause(0.1)
+            assert prompt.value.count("\n") == 3 and prompt.region.height == 5
+            await pilot.press(*"done", "enter")
+            await pilot.pause(0.2)
+            assert prompt.value == "" and prompt.region.height == 1
+            await pilot.press("up")
+            assert prompt.value == sent[0]                       # ↑ from the first line brings the last one back
+            await pilot.press("up")
+            assert prompt.value == sent[0] and prompt.cursor_location[0] < 3   # inside it, ↑ moves the cursor
+            long = "a draft long enough to wrap onto a second row of the input without any new line in it " * 2
+            prompt.value = long                                  # one line, wrapped: the cursor is on its last row
+            await pilot.pause(0.1)
+            assert prompt.region.height >= 2
+            await pilot.press("up")
+            assert prompt.value == long and prompt.cursor_location[1] < len(long)   # up a row, the draft kept
+            prompt.move_cursor((0, 0))
+            await pilot.press("down")
+            assert prompt.value == long and prompt.cursor_location[1] > 0
+            for key in ("ctrl+j", "shift+enter"):                # a new line in place of what's selected
+                for chosen in (Selection((0, 1), (0, 4)), Selection((0, 4), (0, 1))):   # dragged either way
+                    prompt.value = "abcdef"
+                    prompt.selection = chosen
+                    await pilot.press(key, "X")                  # and the next key types after it
+                    assert prompt.value == "a\nXef", (key, chosen)
+        return sent
+    sent = asyncio.run(go())
+    assert sent == ["apply to the robotics and embedded software internships at acme, northwind and every other company nearby that is hiring\n"
+                    "then tell me\nand more\ndone"]
