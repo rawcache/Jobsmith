@@ -65,7 +65,8 @@
   .hero { text-align: center; padding: 88px 0 56px; }
   .pill { display: inline-flex; align-items: center; gap: 8px; font: 500 13px var(--font); color: var(--muted); border: 1px solid var(--line);
     background: var(--card); border-radius: 999px; padding: 4px 12px; margin: 0 0 24px; }
-  /* two lines, each kept whole: the longer ("Apply to internships") is 8.7em wide, so the size follows the window */
+  /* two lines, each kept whole: the longer ("Apply to internships") is 8.7em wide, so the size follows the window;
+     a wider fallback font is shrunk to fit by the script at the bottom */
   h1 { margin: 0 auto; color: var(--ink); font: 750 clamp(28px, calc((100vw - 40px) / 9.2), 72px)/1.04 var(--font); letter-spacing: -0.035em; }
   h1 span { display: block; white-space: nowrap; }
   .sub { margin: 22px auto 34px; max-width: 34em; font-size: clamp(17px, 1.6vw, 19px); line-height: 1.55; color: var(--text); text-wrap: pretty; }
@@ -160,6 +161,10 @@
     .term { font-size: 11.5px; padding: 14px; }
     .term p { white-space: pre-wrap; }
     .shot { border-radius: 10px; }
+  }
+  @media (max-width: 400px) {
+    .bar .stars { display: none; }
+    .bar nav a { padding: 6px 8px; }
   }
   @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } header.top, .faq summary::after { transition: none; } }
 </style>
@@ -344,6 +349,17 @@
   const edge = () => header.classList.toggle("scrolled", scrollY > 8);
   addEventListener("scroll", edge, { passive: true }); edge();
   // The release and star count, from GitHub's public API; the page reads fine without them.
+  // the headline's size assumes a system font; where the fallback is wider (DejaVu, Verdana), shrink it to fit
+  const h1 = document.querySelector("h1");
+  const fit = () => {
+    h1.style.fontSize = "";
+    const over = Math.max(...[...h1.children].map(s => s.scrollWidth / h1.clientWidth));
+    if (over > 1) h1.style.fontSize = parseFloat(getComputedStyle(h1).fontSize) / over + "px";
+  };
+  fit();
+  addEventListener("resize", fit);
+  if (document.fonts) document.fonts.ready.then(fit);
+
   fetch("https://api.github.com/repos/rawcache/Jobsmith/releases/latest").then(r => r.ok ? r.json() : null).then(r => {
     if (!r || !r.tag_name) return;
     document.getElementById("ver").textContent = r.tag_name.startsWith("v") ? r.tag_name : "v" + r.tag_name;
