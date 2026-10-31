@@ -44,7 +44,7 @@ RULES: list[tuple[str, str]] = [
     (r"\bgender\b|\bsex\b", "gender"),
     (r"\brace\b|ethnicity", "race"),
     (r"veteran", "veteran_status"),
-    (r"disabilit", "disability_status"),
+    (r"disabilit|\bpwds?\b", "disability_status"),     # PWD: a person with a disability (password boxes never get here)
     (r"pronoun", "pronouns"),
     (r"\bgpa\b|grade point", "gpa"),
     (r"\bminor\b", "minor"),

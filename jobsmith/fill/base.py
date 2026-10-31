@@ -57,6 +57,7 @@ SCAN_JS = r"""
     return /[*✱]\s*$/.test((l ? l.innerText : wrap ? own(wrap, el) : '').trim()); };
   // "#name" when the id is a plain CSS name; Ashby's ids can start with a digit, so those are [id="…"]
   const byId = id => /^[A-Za-z_][\w-]*$/.test(id) ? `#${id}` : `[id="${id}"]`;
+  const CHOICE_TYPES = ['checkbox', 'radio', 'select-one', 'select-multiple', 'file', 'range', 'color'];
   const out = []; const seenGroups = new Set();
   for (const el of document.querySelectorAll('input, textarea, select')) {
     const type = (el.type || el.tagName).toLowerCase();
@@ -65,8 +66,9 @@ SCAN_JS = r"""
     // ...and one switched to plain text by "Show password" is still a password
     // (an id or name like user_password or newPassword has no word breaks; a label must say the word. "pwd" only as
     // the whole name or its last part: isPWD is a person with a disability)
-    // Only a text box can be one: a checkbox named is_pwd asks about a disability
-    if (type === 'text' && (/password/i.test(el.autocomplete || '') || /pass(word|wd)/i.test(`${el.name || ''} ${el.id || ''}`) ||
+    // Only a box you type into can be one (any type: a PIN can be tel or number); a checkbox named is_pwd asks about
+    // a disability
+    if (!CHOICE_TYPES.includes(type) && (/password/i.test(el.autocomplete || '') || /pass(word|wd)/i.test(`${el.name || ''} ${el.id || ''}`) ||
         [el.name, el.id].some(n => /(^|[_-])pwd$/i.test(n || '')) ||
         /\bpass(word|wd)\b/i.test(labelFor(el)))) continue;
     if (!vis(el) && type !== 'file') continue;
