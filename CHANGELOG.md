@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Added
+- When a site shows a bot check instead of its form (SmartRecruiters' "Access is temporarily restricted", Cloudflare,
+  DataDome, PerimeterX), autopilot stops before typing anything, holds the application under "Needs you" with the
+  line the site showed, tells you, and doesn't try it again by itself. Jobsmith never tries to get past one.
 - Lever forms are filled end to end, proven on a saved copy of Palantir's real application form. Each question is
   read by its own words (not its dropdown's options or "ATTACH RESUME/CV"), and Lever's ✱ marks it required;
   Current location is picked from Lever's own list of places (typing alone is emptied when you leave the box); a

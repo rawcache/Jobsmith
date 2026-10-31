@@ -210,6 +210,10 @@ then `ats.SUPPORTED` and the README.
 - [ ] b. Lever: end-to-end tests.
 - [ ] c. SmartRecruiters: the good-first-issue adapter ([#1](https://github.com/rawcache/Jobsmith/issues/1)),
       only if nobody has claimed it.
+      Status (2026-10-31): unclaimed. Read-only, SmartRecruiters shows DataDome's bot check ("Access is temporarily
+      restricted") in place of the form, and getting past it is not ours to do, so the form is to be saved from the
+      maintainer's own Chrome ([docs/guides/save-smartrecruiters-form.md](guides/save-smartrecruiters-form.md)).
+      Meanwhile autopilot treats that page as a stop and hands it to the user (`tests/test_bot_walls.py`).
 - [ ] d. Workday: page by page, stopping at review; the sign-in and account step is handed to the user. Public
       pages captured read-only; a short guide for the maintainer to save the signed-in steps, which are then
       sanitized.

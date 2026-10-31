@@ -14,7 +14,7 @@ from typing import Callable
 
 from playwright.async_api import Page
 
-from .base import CONFIRM_RE, css_for, dismiss_banners, fill_field, scan_form
+from .base import CONFIRM_RE, BotWall, bot_wall, css_for, dismiss_banners, fill_field, scan_form
 
 START_BUTTONS = ['[data-automation-id="adventureButton"]', 'a:has-text("Apply Now")', 'button:has-text("Apply Now")',
                  'a:has-text("Apply")', 'button:has-text("Apply")']
@@ -86,7 +86,8 @@ async def run(page: Page, url: str, *, answer: Callable, files: dict, log: Calla
     """answer(fields) -> {field: value}; wait_for_user(message, check) waits until check() is true.
     on_page(text) gets each page's text once it's filled, before allow_submit() is asked on that page;
     on_nodes(nodes) the same page's text with what's hidden (traps.PAGE_JS), for lines aimed at AI;
-    on_filled(field) each field it actually set (the audit trail records only those)."""
+    on_filled(field) each field it actually set (the audit trail records only those).
+    Raises BotWall when a page is a bot check instead of the form."""
     await page.goto(url, wait_until="domcontentloaded", timeout=60000)
     await page.wait_for_timeout(2500)
     filled_total, issues = 0, []
@@ -98,6 +99,8 @@ async def run(page: Page, url: str, *, answer: Callable, files: dict, log: Calla
         await page.wait_for_timeout(2500)
 
     for page_no in range(1, max_pages + 1):
+        if wall := await bot_wall(page):        # never got past: the runner hands it to you
+            raise BotWall(wall)
         if await needs_sign_in(page):
             log("This site needs you to sign in or create an account. Do it in the Jobsmith browser window; "
                 "Jobsmith continues automatically (it never types passwords).")
