@@ -13,6 +13,14 @@ from rich.console import Console
 from jobsmith import db, draft
 
 
+async def _until(pilot, check, timeout: float = 20.0):
+    """Wait until check() holds, not a fixed time: CI's Windows runner can take seconds to draw a frame (#24)."""
+    end = time.monotonic() + timeout
+    while not check() and time.monotonic() < end:
+        await pilot.pause(0.1)
+    return check()
+
+
 def _port() -> int:
     s = socket.socket()
     s.bind(("127.0.0.1", 0))
@@ -168,15 +176,11 @@ def test_a_running_job_is_named_before_its_tab_opens(engine):
     async def go():
         app = Jobsmith(engine, splash=False)
         async with app.run_test(size=(120, 40)) as pilot:
-            for _ in range(30):
-                await pilot.pause(0.1)
-                if app.state.get("st"):
-                    break
-            await pilot.pause(0.3)
+            await _until(pilot, lambda: "Northwind Labs" in str(app.query_one("#live").render()))
             live = str(app.query_one("#live").render())
             assert "Northwind Labs" in live and "gh_7f3a91" not in live, live
             await pilot.press("ctrl+o")
-            await pilot.pause(0.8)
+            await _until(pilot, lambda: isinstance(app.screen, Board) and app.screen.query_one("#live", DataTable).row_count)
             assert isinstance(app.screen, Board)
             row = [str(c) for c in app.screen.query_one("#live", DataTable).get_row_at(0)]
             assert "Northwind Labs" in row and "Firmware Intern" in row and "gh_7f3a91" not in row, row
