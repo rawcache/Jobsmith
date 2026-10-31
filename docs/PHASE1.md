@@ -207,7 +207,24 @@ then `ats.SUPPORTED` and the README.
       isn't a submit) and `test_the_submit_watcher_sees_ashbys_submit_on_the_saved_ramp_form`. Then `ats.SUPPORTED`,
       README and site. [CI run](https://github.com/rawcache/Jobsmith/actions/runs/40832738244) (macOS failed once on
       an unrelated timing guess in a popup test, #22, fixed in 979174e; the rerun passed on all three).
-- [ ] b. Lever: end-to-end tests.
+- [x] b. Lever: end-to-end tests.
+      Evidence: [981bfd2](https://github.com/rawcache/Jobsmith/commit/981bfd2),
+      [99f3f9b](https://github.com/rawcache/Jobsmith/commit/99f3f9b),
+      [5546b48](https://github.com/rawcache/Jobsmith/commit/5546b48). `tests/fixtures/lever_palantir_form.html` is
+      Palantir's real "Forward Deployed Software Engineer, Internship" form on Lever, saved blank through
+      `jobsmith/readonly.py` (GETs only), Alex Rivera only, Lever's account and editor ids and hCaptcha's site key
+      blanked; rebuild steps in `tests/fixtures/src/`. The hand-written `lever_form.html` is gone. Autopilot:
+      `test_lever_saved_palantir_form_is_filled_and_held_before_submit` (each question read by its own words, not its
+      options; the place picked from Lever's lookup; work authorization from the confirmed profile only because the
+      job is in the US; high school questions and the AI notetaker consent left for you; the disability question
+      blank because any answer needs your signature; Submit never pressed) and
+      `test_autopilot_sends_the_saved_lever_form_once_everything_is_answered` ("Application submitted!" recorded as
+      proof). Extension, submit watcher on: `test_autofill_on_the_saved_lever_form_picks_the_place_and_never_signs`,
+      the place tests, and `test_the_submit_watcher_sees_levers_submit_on_the_saved_palantir_form`. Lever's cookie
+      banner covered the Languages checkboxes: every adapter now closes cookie banners with a real click on the most
+      private choice, never Accept (`tests/test_banners.py`, Lever's saved banner plus eight written examples). Then
+      `ats.SUPPORTED`, README and site. [CI run](https://github.com/rawcache/Jobsmith/actions/runs/41241943968)
+      (Linux, macOS, Windows).
 - [ ] c. SmartRecruiters: the good-first-issue adapter ([#1](https://github.com/rawcache/Jobsmith/issues/1)),
       only if nobody has claimed it.
       Status (2026-10-31): unclaimed. Read-only, SmartRecruiters shows DataDome's bot check ("Access is temporarily
