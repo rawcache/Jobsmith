@@ -1631,7 +1631,7 @@
 //   - Sign in with email shows Email Address and Password with Create Account below; Create Account shows the new
 //     account form (Email, Password, Verify, "I agree");
 //   - Sign In and Create Account never send anything here: window.__signInPresses counts them, so a test can check
-//     Jobsmith never pressed one.
+//     Jobsmith never pressed one. Which start button was pressed is kept in window.name.
 // Each page also has Workday's hidden "This input is for robots only" box, a honeypot.
 (() => {
   const page = document.documentElement.dataset.jobsmithPage;
@@ -1643,7 +1643,8 @@
   if (page === "posting") {
     on("adventureButton", () => box(true));
     on("closeButton", () => box(false));
-    ["applyManually", "autofillWithResume", "useMyLastApplication"].forEach(id => on(id, () => go("signin")));
+    // the choice is kept for the next page (window.name survives the move), so a test can see which was pressed
+    ["applyManually", "autofillWithResume", "useMyLastApplication"].forEach(id => on(id, () => { window.name = id; go("signin"); }));
   }
   on("SignInWithEmailButton", () => go("signin_email"));
   on("createAccountLink", () => go("create_account"));
