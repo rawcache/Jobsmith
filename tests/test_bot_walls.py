@@ -59,6 +59,8 @@ async def test_an_application_form_is_never_a_bot_check(page, form):
 @pytest.mark.parametrize("fields", [
     "<label>Email <input type=email name=e></label>",                                # one field is enough
     "<label>Name <input name=n></label><label>Why? <textarea name=w></textarea></label>",
+    "<p>Are you 18 or older?</p><label><input type=radio name=a value=y> Yes</label><label><input type=radio "
+    "name=a value=n> No</label>",                                                   # a page of choices
 ])
 async def test_a_form_that_mentions_robots_is_still_a_form(page, fields):
     await page.set_content(f"<form>{fields}<p>Please verify you are human below.</p></form>")
