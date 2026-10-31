@@ -1,4 +1,6 @@
 """The per-application audit trail: what each submission sent and where every answer came from."""
+import re
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -205,7 +207,16 @@ PWD = [{"field": "a", "label": "Are you a PWD?", "qtype": "select", "options": [
        {"field": "c", "label": "PWD card holder", "qtype": "select", "options": ["Yes", "No"], "required": True},
        {"field": "d", "label": "PWD ID number", "qtype": "text", "required": False},
        {"field": "e", "label": "Do you need a disability accommodation to interview?", "qtype": "select",
-        "options": ["Yes", "No"], "required": True}]
+        "options": ["Yes", "No"], "required": True},
+       {"field": "f", "label": "Disability type", "qtype": "text", "required": True},
+       {"field": "g", "label": "Disability number", "qtype": "text", "required": True},
+       {"field": "h", "label": "Do you require assistance due to a disability?", "qtype": "select",
+        "options": ["Yes", "No"], "required": True},
+       {"field": "i", "label": "Do you require reasonable accommodation for the interview?", "qtype": "select",
+        "options": ["Yes", "No"], "required": True},
+       {"field": "j", "label": "Disability Status", "qtype": "select", "options": ["Yes", "No"], "required": True},
+       {"field": "k", "label": "Do you have a disability?", "qtype": "select", "options": ["Yes", "No"],
+        "required": True}]
 
 
 @pytest.mark.parametrize("answer, confirmed", [(None, False), ("Yes", False), ("Yes", True)])
@@ -220,10 +231,12 @@ async def test_a_pwd_question_is_never_the_ais_and_its_details_are_yours(fake_ll
     jid = sources.add_job_url("https://job-boards.greenhouse.io/acme/jobs/13", "Acme", "Intern")
     got, _ = await draft.answer_fields(db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,))),
                                        [dict(f) for f in PWD])
-    assert not [p for p in asked if "PWD" in str(p) or "accommodation" in str(p)], asked
-    assert {k: got[k]["answer"] for k in "cde"} == {"c": "", "d": "", "e": ""}
-    assert all(got[k]["issues"] for k in "ce") and not got["d"]["issues"]
-    assert got["a"]["answer"] == ("Yes" if confirmed else "") and got["b"]["canon"] == "disability_status"
+    assert not [p for p in asked if re.search(r"PWD|disabilit|accommodat", str(p), re.I)], asked
+    assert {k: got[k]["answer"] for k in "cdefghi"} == dict.fromkeys("cdefghi", "")
+    assert all(got[k]["issues"] for k in "cefghi") and not got["d"]["issues"]      # required ones block autopilot
+    for k in "ajk":                                                                 # "do you have one": your answer
+        assert got[k]["answer"] == ("Yes" if confirmed else ""), (k, got[k])
+    assert got["b"]["canon"] == "disability_status"
     if not confirmed:
         assert got["a"]["issues"]
 
