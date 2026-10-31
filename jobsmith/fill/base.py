@@ -638,9 +638,10 @@ class BotWall(Exception):
 async def bot_wall(page: Page) -> str:
     """The bot check's own words if the page is one (else ''). Only a page with nothing to fill counts: an
     application with a reCAPTCHA box ("I'm not a robot") under even one field is a form, and its CAPTCHA is handled
-    at Submit. (Cloudflare's and DataDome's checks draw their widget in a frame; the page itself has no fields.)"""
-    fillable = ('input:visible:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="submit"])'
-                ':not([type="button"]), textarea:visible, select:visible')
+    at Submit. Every challenge (Cloudflare, DataDome, reCAPTCHA, hCaptcha) draws its controls in a frame of its own,
+    so any control on the page itself, a radio button too, is the application's."""
+    fillable = ('input:visible:not([type="hidden"]):not([type="submit"]):not([type="button"]), textarea:visible, '
+                'select:visible')
     try:
         if await page.locator(fillable).count():
             return ""
