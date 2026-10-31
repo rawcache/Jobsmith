@@ -287,10 +287,11 @@ async def test_lever_asks_about_the_jobs_own_country_so_a_london_job_waits_for_y
     assert draft.deterministic(fields[0], profile.answers(), job)["answer"] == ""
     for remote in (["Remote"], ["Remote - Worldwide"], ["New York, NY", "Remote (Canada)"],  # no country, or not
                    ["Remote - US / EMEA"], ["United States / Argentina"], ["New York, NY or London"],  # only the US
-                   ["United States / Remote"]):
+                   ["United States / Remote"], ["United States, Argentina"], ["US - EMEA"]):
         job["locations"] = remote
         assert draft.deterministic(fields[0], profile.answers(), job)["answer"] == "", remote
-    for us in (["Remote - US"], ["Hybrid - Boston, MA"], ["Remote, United States"]):
+    for us in (["Remote - US"], ["Hybrid - Boston, MA"], ["Remote, United States"], ["Boston, MA, USA"],
+               ["Washington, DC"], ["New York, New York, United States"]):
         job["locations"] = us
         assert draft.deterministic(fields[0], profile.answers(), job)["answer"] == "Yes", us
 

@@ -252,13 +252,27 @@ _ANYWHERE = re.compile(r"\b(worldwide|global(ly)?|anywhere|international)\b", re
 
 def _names_us(loc: str) -> bool:
     """Whether a job location names only places in the US. Stricter than match._in_us, which takes plain "Remote"
-    as a match: "Remote" and "Remote - Worldwide" name no country, and "Remote - US / EMEA" names more than one, so
-    none of them can say which country a question means."""
+    as a match: "Remote" and "Remote - Worldwide" name no country, and "Remote - US / EMEA" or "United States,
+    Argentina" name more than one, so none of them can say which country a question means."""
     from .match import _in_us
     if _ANYWHERE.search(loc):
         return False
-    parts = [_NOT_A_PLACE.sub(" ", p).strip(" -–—,:() ") for p in re.split(r"[/|;&]|\bor\b|\band\b", loc, flags=re.I)]
-    return all(p and _in_us(p) for p in parts)          # "United States / Remote": the Remote part names no country
+    us = {k.lower() for k in US_STATES} | {v.lower() for v in US_STATES.values()} | \
+        {"us", "usa", "u.s.", "u.s.a.", "united states", "united states of america"}
+
+    def one_place(p: str) -> bool:
+        # "Boston, MA, USA": a city, then only US states or the US itself after it
+        segs = [x.strip() for x in p.split(",") if x.strip()]
+        return bool(segs) and _in_us(p) and all(x.lower() in us for x in segs[1:])
+
+    for alt in re.split(r"[/|;&]|\bor\b|\band\b", loc, flags=re.I):     # alternatives: each must be in the US
+        # "Remote - US", "Hybrid - Boston, MA": a work mode, then the place; "US - EMEA" names two
+        pieces = [_NOT_A_PLACE.sub(" ", x).strip(" ,:()") for x in re.split(r"\s[-–—]\s", alt)]
+        if not _NOT_A_PLACE.sub(" ", alt).strip(" -–—,:()"):
+            return False                                  # "United States / Remote": Remote names no country
+        if not all(one_place(x) for x in pieces if x):
+            return False
+    return True
 
 
 def _place_scope(label: str, job: dict | None = None) -> str:
