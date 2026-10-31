@@ -52,6 +52,7 @@ RULES: list[tuple[str, str]] = [
     (r"class standing|year in school|current (academic )?year|class level|academic (standing|level)", "class_standing"),
     (r"(start|begin|enroll)(ed|ment)? (date )?(of|at|in) (your )?(degree|program|school|university|education)|"
      r"enrollment (start|date)", "enrollment_start"),
+    (r"high school|secondary school", "high_school"),            # before graduation: not your college's year
     (r"graduation (year)|year of graduation|grad(uation)? year|class of", "graduation_year"),
     (r"graduat", "graduation_date"),
     (r"^(school|university|college)( name)?\b|which (school|university)|what (school|university)|"

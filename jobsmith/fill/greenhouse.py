@@ -7,7 +7,7 @@ import re
 from playwright.async_api import Page, TimeoutError as PWTimeout
 
 from .. import ats
-from .base import combobox_text, css_for, fill_combobox, fill_field
+from .base import combobox_text, css_for, dismiss_banners, fill_combobox, fill_field
 
 # The new job-boards UI renames a few API fields.
 FIELD_ALIASES = {
@@ -20,11 +20,12 @@ FIELD_ALIASES = {
 }
 
 
-async def open_form(page: Page, url: str) -> None:
+async def open_form(page: Page, url: str) -> list[str]:
+    """Open the form (the embeddable one if the page has none). Returns any cookie-banner buttons pressed."""
     await page.goto(url, wait_until="domcontentloaded", timeout=45000)
     try:
         await page.locator("#first_name").first.wait_for(timeout=15000)
-        return
+        return await dismiss_banners(page)
     except PWTimeout:
         pass
     # Company-hosted page or legacy board: fall back to the embeddable form.
@@ -32,6 +33,7 @@ async def open_form(page: Page, url: str) -> None:
     host = "boards.eu.greenhouse.io" if region == "eu" else "boards.greenhouse.io"
     await page.goto(f"https://{host}/embed/job_app?for={board}&token={job_id}", wait_until="domcontentloaded")
     await page.locator("#first_name").first.wait_for(timeout=20000)
+    return await dismiss_banners(page)
 
 
 async def selector_for(page: Page, field: str) -> str | None:
@@ -69,6 +71,7 @@ async def fill_implicit(page: Page, extras: dict) -> list[tuple[str, str]]:
 async def fill(page: Page, drafts: list[dict], files: dict[str, str], extras: dict | None = None) -> dict:
     """files: {'resume': path, 'cover_letter': path}. Returns per-field results."""
     filled, failed, sent = [], [], []    # sent: the field ids actually set, for the audit trail
+    banners = await dismiss_banners(page)      # one that showed up after the page opened
     done = await fill_implicit(page, extras or {})
     filled += done
     implicit = [{"field": control, "label": label, "canon": canon, "profile": (extras or {}).get(canon, "")}
@@ -116,4 +119,4 @@ async def fill(page: Page, drafts: list[dict], files: dict[str, str], extras: di
     implicit = [i for i in implicit if i["field"] not in sent]
     for i in implicit:
         i["answer"] = await combobox_text(page, f'#{i["field"]}') or i["profile"]
-    return {"filled": filled, "failed": failed, "sent": sent, "implicit": implicit}
+    return {"filled": filled, "failed": failed, "sent": sent, "implicit": implicit, "banners": banners}

@@ -4,7 +4,7 @@
   if (window.__jobsmith) return;
   window.__jobsmith = true;
 
-  const clean = t => (t || "").replace(/\s+/g, " ").replace(/\*\s*$/, "").trim();
+  const clean = t => (t || "").replace(/\s+/g, " ").replace(/[*✱]\s*$/, "").trim();   // ✱: Lever's required mark
   const esc = t => String(t).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   const norm = t => clean(t).toLowerCase().replace(/[^a-z0-9 ]/g, "");
   const visible = el => {
@@ -14,12 +14,24 @@
   const send = msg => new Promise(res => chrome.runtime.sendMessage(msg, r => res(r || { ok: false, error: chrome.runtime.lastError?.message })));
 
   // ------------------------------------------------------------------ reading the form
+  // a <label> wrapping its control: its text without the part that holds the control, so a dropdown's options or
+  // an upload button's words ("ATTACH RESUME/CV") aren't read as the question (Lever wraps every question this way).
+  // When that part holds the words too (<label><span>Email <input></span></label>), that part's words.
+  const own = (wrap, el) => {
+    let box = el; while (box.parentElement && box.parentElement !== wrap) box = box.parentElement;
+    const rest = [...wrap.childNodes].filter(n => n !== box).map(n => n.nodeType === 3 ? n.textContent : (n.innerText || "")).join(" ");
+    if (clean(rest) || box === el) return rest;
+    const w = document.createTreeWalker(box, NodeFilter.SHOW_TEXT); let out = "";   // the box's words, not the control's
+    while (w.nextNode()) if (!el.contains(w.currentNode)) out += " " + w.currentNode.textContent;
+    return out;
+  };
+
   function labelFor(el) {
     if (el.id) { const l = document.querySelector(`label[for="${CSS.escape(el.id)}"]`); if (l) return clean(l.innerText); }
     const by = el.getAttribute("aria-labelledby");
     if (by) { const t = by.split(/\s+/).map(i => document.getElementById(i)).filter(Boolean).map(n => n.innerText).join(" "); if (clean(t)) return clean(t); }
     if (el.getAttribute("aria-label")) return clean(el.getAttribute("aria-label"));
-    const wrap = el.closest("label"); if (wrap) return clean(wrap.innerText);
+    const wrap = el.closest("label"); if (wrap) return clean(own(wrap, el));
     const fs = el.closest("fieldset"); if (fs && fs.querySelector("legend")) return clean(fs.querySelector("legend").innerText);
     let p = el.parentElement;
     for (let i = 0; i < 4 && p; i++, p = p.parentElement) {
@@ -29,10 +41,11 @@
     return clean(el.placeholder || el.name || el.id);
   }
 
-  // "First Name*": the asterisk marks a required field (labelFor strips it)
+  // "First Name*": the asterisk (Lever: ✱) marks a required field (labelFor strips it)
   const starred = el => {
     const l = el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
-    return /\*\s*$/.test(((l || el.closest("label") || {}).innerText || "").trim());
+    const wrap = !l && el.closest("label");
+    return /[*✱]\s*$/.test((l ? l.innerText : wrap ? own(wrap, el) : "").trim());
   };
 
   let nextId = 1;
@@ -70,7 +83,7 @@
       }
       const id = tag(el); els.set(id, el);
       const combo = el.getAttribute("role") === "combobox" || el.getAttribute("aria-autocomplete") === "list";
-      out.push({ id, label: labelFor(el),
+      out.push({ id, label: labelFor(el), name: el.name || el.id,      // name: so the engine knows Lever's eeo[…] fields
         type: type === "file" ? "file" : el.tagName === "SELECT" ? "select" : el.tagName === "TEXTAREA" ? "textarea" : combo ? "combobox" : "text",
         required: el.required || el.getAttribute("aria-required") === "true" || starred(el),
         options: el.tagName === "SELECT" ? [...el.options].map(o => clean(o.text)).filter(t => t && !/^select|^--|^please/i.test(t)) : [],
@@ -188,6 +201,39 @@
     return false;
   }
 
+  // Lever's Current location: a text box with its own list of places under it. A key press looks places up, and
+  // leaving the box without picking one empties it, so the place has to be picked from the list.
+  // the one listed place that is `want`: the same city and every state or country it names ("York, PA" is never
+  // "East York, PA, USA"; plain "Boston" with two Bostons listed is no one's guess). Same rule as base.place_match.
+  const parts = t => t.split(",").map(p => p.trim().toLowerCase()).filter(Boolean)
+    .map(p => /^(us|usa|united states( of america)?)$/.test(p) ? "usa" : p);
+  const placeIndex = (texts, want) => {
+    const w = parts(want); if (!w.length) return -1;
+    const hits = texts.map((t, i) => [parts(t), i]).filter(([g]) => g[0] === w[0] && w.slice(1).every(x => g.slice(1).includes(x)));
+    return hits.length === 1 ? hits[0][1] : -1;
+  };
+  const isLookup = el => el.classList.contains("location-input") && !!el.parentElement.querySelector(".dropdown-container");
+  async function fillLookup(el, wants) {
+    const typed = v => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(el, v);
+                         el.dispatchEvent(new Event("input", { bubbles: true })); };
+    el.focus();
+    typed(wants[0].split(",")[0].trim());
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true }));
+    for (let t = 0; t < 30; t++) {
+      await sleep(200);
+      const opts = [...el.parentElement.querySelectorAll(".dropdown-location")].filter(visible);
+      if (!opts.length) continue;
+      const texts = opts.map(o => o.innerText.trim());
+      const i = wants.map(w => placeIndex(texts, w)).find(k => k >= 0) ?? -1;
+      if (i < 0) break;
+      opts[i].dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      return el.value.trim() === texts[i];
+    }
+    typed("");
+    el.dispatchEvent(new Event("blur", { bubbles: true }));   // closes the list (Lever empties the box on blur)
+    return false;
+  }
+
   async function attach(el, kind, jobId) {
     const f = await send({ type: "file", kind, job_id: jobId });
     if (!f.ok) return false;
@@ -234,6 +280,7 @@
     }
     if (target.getAttribute("role") === "combobox" || target.getAttribute("aria-autocomplete") === "list") return fillCombobox(target, value, a.pick || value);
     if (target.value && target.value.trim()) return true;   // never overwrite what you typed
+    if (isLookup(target)) return fillLookup(target, [value, a.pick].filter(Boolean));
     setNative(target, value);
     return true;
   }
