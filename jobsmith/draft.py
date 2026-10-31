@@ -376,20 +376,29 @@ SIGNED_ANSWER = re.compile(r"disabilitySelectElement|eeo\[disability\]")
 # Your profile's disability answer says one thing: whether you have a disability. It fills only a question that asks
 # exactly that. Anything else about a disability or an accommodation (a PWD card or ID, its type, help you'd need) is
 # yours: never guessed from the nearest answer, and never the AI's (rule 2).
-DISABILITY_ANY = re.compile(r"disabilit|\bdisabled\b|\bpwds?\b|accommodat|handicap", re.I)
+# "Accommodate" alone is ordinary ("how would you accommodate changing requirements?"); help for a disability says so.
+DISABILITY_ANY = re.compile(r"disabilit|\bdisabled\b|\bpwds?\b|handicap|reasonable accommodation|"
+                            r"(need|require|request)\w* (an? |any )?accommodations?\b|"
+                            r"accommodations? (for|during|in|with) (the |your |our )?(interview|application|hiring|assessment)",
+                            re.I)
+# The question, whole: an intro ("Please indicate your") may come first, and nothing may follow but "(PWD)" or "or had
+# one in the past". "Do you have a disability that requires treatment?" asks more than your answer says.
+DISABILITY_INTRO = re.compile(r"^(please )?(indicate|select|state|choose|provide|specify|tell us|share)( your)?\s+|"
+                              r"^what is your\s+")
 DISABILITY_STATUS = re.compile(
-    r"^(disability( status)?|disabled|pwd|(voluntary )?self[- ]identification of disability( form)?)$|"
-    r"^(do|did) you (currently )?(have|had) (a |any )?disabilit(y|ies)\b|"
-    r"^(are you|i am) (a )?(pwd|disabled|(person|individual) with (a )?disabilit(y|ies))\b|"
-    r"^(do you )?(identify as|consider yourself)( to be| to have)? (a |having a )?(disabled|disabilit|person with)", re.I)
-DISABILITY_DETAIL = re.compile(r"\b(cards?|ids?|certificates?|number|no\.|registration|registered|udid|accommodat\w*|"
-                               r"assist\w*|support|percent(age)?|type|kind|nature|describe|details?|which|what)\b", re.I)
+    r"^(disability( status)?|disabled|pwd|(voluntary )?self[- ]identification of disability( form)?|"
+    r"(do|did) you (currently )?(have|had) (a |any )?disabilit(y|ies)|"
+    r"(are you|i am) (a )?(pwd|disabled|(person|individual) with (a )?disabilit(y|ies))|"
+    r"(do you )?(identify as|consider yourself)( to be| to have)? (a |having a )?"
+    r"(disabled|disability|(person|individual) with (a )?disabilit(y|ies))( person)?)"
+    r"(\s*\(pwds?\))?(,? or (have |had |have had )?(had )?(one|a disability)( in the past)?|"
+    r",? or (a )?(history|record) of (having )?(one|a disability))?$")
 
 
 def _disability_detail(label: str) -> bool:
-    """A question about a disability that isn't "do you have one" (see above)."""
-    l = " ".join((label or "").split()).lower().strip(" *?:")
-    return bool(DISABILITY_ANY.search(l)) and not (DISABILITY_STATUS.search(l) and not DISABILITY_DETAIL.search(l))
+    """A question about a disability, or help for one, that isn't "do you have one" (see above)."""
+    l = " ".join((label or "").split()).lower().strip(" *?:.")
+    return bool(DISABILITY_ANY.search(l)) and not DISABILITY_STATUS.search(DISABILITY_INTRO.sub("", l, count=1))
 
 
 def deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | None:

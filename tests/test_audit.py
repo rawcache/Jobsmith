@@ -216,7 +216,13 @@ PWD = [{"field": "a", "label": "Are you a PWD?", "qtype": "select", "options": [
         "options": ["Yes", "No"], "required": True},
        {"field": "j", "label": "Disability Status", "qtype": "select", "options": ["Yes", "No"], "required": True},
        {"field": "k", "label": "Do you have a disability?", "qtype": "select", "options": ["Yes", "No"],
-        "required": True}]
+        "required": True},
+       {"field": "l", "label": "Please indicate your disability status", "qtype": "select", "options": ["Yes", "No"],
+        "required": True},
+       {"field": "m", "label": "Do you have a disability, or have had one in the past?", "qtype": "select",
+        "options": ["Yes", "No"], "required": True},
+       {"field": "n", "label": "Do you have a disability that requires treatment?", "qtype": "select",
+        "options": ["Yes", "No"], "required": True}]
 
 
 @pytest.mark.parametrize("answer, confirmed", [(None, False), ("Yes", False), ("Yes", True)])
@@ -232,13 +238,21 @@ async def test_a_pwd_question_is_never_the_ais_and_its_details_are_yours(fake_ll
     got, _ = await draft.answer_fields(db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,))),
                                        [dict(f) for f in PWD])
     assert not [p for p in asked if re.search(r"PWD|disabilit|accommodat", str(p), re.I)], asked
-    assert {k: got[k]["answer"] for k in "cdefghi"} == dict.fromkeys("cdefghi", "")
-    assert all(got[k]["issues"] for k in "cefghi") and not got["d"]["issues"]      # required ones block autopilot
-    for k in "ajk":                                                                 # "do you have one": your answer
+    assert {k: got[k]["answer"] for k in "cdefghin"} == dict.fromkeys("cdefghin", "")
+    assert all(got[k]["issues"] for k in "cefghin") and not got["d"]["issues"]     # required ones block autopilot
+    for k in "ajklm":                                                                 # "do you have one": your answer
         assert got[k]["answer"] == ("Yes" if confirmed else ""), (k, got[k])
     assert got["b"]["canon"] == "disability_status"
     if not confirmed:
         assert got["a"]["issues"]
+
+
+@pytest.mark.parametrize("label", ["How would you accommodate changing requirements?",
+                                   "Describe a time you accommodated a teammate's schedule"])
+def test_accommodate_in_an_ordinary_question_is_still_drafted(label):
+    """Only help for a disability is left for you; the everyday verb is a normal question."""
+    assert draft.deterministic({"field": "q", "label": label, "qtype": "textarea", "options": [], "required": True},
+                               profile.answers(), {"id": "x", "company": "Acme", "description": ""}) is None
 
 
 def test_a_required_unconfirmed_demographic_holds_autopilot():
