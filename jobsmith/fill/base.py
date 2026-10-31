@@ -65,9 +65,10 @@ SCAN_JS = r"""
     // ...and one switched to plain text by "Show password" is still a password
     // (an id or name like user_password or newPassword has no word breaks; a label must say the word. "pwd" only as
     // the whole name or its last part: isPWD is a person with a disability)
-    if (/password/i.test(el.autocomplete || '') || /pass(word|wd)/i.test(`${el.name || ''} ${el.id || ''}`) ||
+    // Only a text box can be one: a checkbox named is_pwd asks about a disability
+    if (type === 'text' && (/password/i.test(el.autocomplete || '') || /pass(word|wd)/i.test(`${el.name || ''} ${el.id || ''}`) ||
         [el.name, el.id].some(n => /(^|[_-])pwd$/i.test(n || '')) ||
-        /\bpass(word|wd)\b/i.test(labelFor(el))) continue;
+        /\bpass(word|wd)\b/i.test(labelFor(el)))) continue;
     if (!vis(el) && type !== 'file') continue;
     const key = el.id ? byId(el.id) : (el.name ? `[name="${el.name}"]` : null);
     if (!key) continue;
