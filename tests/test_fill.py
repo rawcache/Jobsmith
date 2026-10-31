@@ -985,4 +985,5 @@ async def test_workday_from_the_saved_posting_to_sign_in_is_handed_to_you(page, 
                               wait_for_user=wait_for_user, allow_submit=lambda: False)
     assert res["status"] == "waiting_user" and asked == ["Sign in to continue the application"], res
     assert page.url.endswith("workday_nvidia_signin.html")
+    assert await page.evaluate("window.name") == ("autofillWithResume" if resume else "applyManually")
     assert await page.evaluate("window.__signInPresses") == 0

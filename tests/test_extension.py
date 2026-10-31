@@ -555,13 +555,30 @@ async def test_the_submit_watcher_sees_levers_submit_on_the_saved_palantir_form(
 
 
 @browser
-async def test_autofill_stays_off_workdays_create_account_page(page):
-    """Workday's saved create-account page (Email, two passwords, "I agree", a honeypot) isn't an application:
-    no panel, nothing read or sent. Making the account is yours."""
-    await _load(page, {"panelOpen": True}, fixture="workday_nvidia_create_account.html", wait=False)
-    await page.wait_for_timeout(1500)
-    assert not await page.evaluate("!!document.querySelector('#jobsmith-panel')?.shadowRoot?.querySelector('.wrap')")
+async def test_autofill_fills_nothing_on_workdays_create_account_page(page):
+    """Workday's saved create-account page, served at NVIDIA's own Workday address so the panel opens as it would
+    there. Pressing Fill does nothing: no email typed, "I agree" left unticked, nothing sent to the engine. Making
+    the account is yours (rule 5)."""
+    html = (FIXTURES / "workday_nvidia_create_account.html").read_text(encoding="utf-8")
+    url = "https://nvidia.wd5.myworkdayjobs.com/en-US/NVIDIAExternalCareerSite/job/x/apply/applyManually"
+
+    async def serve(route):
+        if route.request.url.split("?")[0] == url:
+            await route.fulfill(status=200, content_type="text/html", body=html)
+        else:
+            await route.abort()
+    await page.route("https://**/*", serve)
+    await page.add_init_script(_stub({"panelOpen": True}))
+    await page.goto(url)
+    await page.add_script_tag(path=str(EXT / "content.js"))
+    await page.wait_for_function("document.querySelector('#jobsmith-panel')?.shadowRoot?.querySelector('.wrap')")
+    await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
+    note = "document.querySelector('#jobsmith-panel').shadowRoot.querySelector('.note')"
+    await page.wait_for_function(f"{note}?.innerText.includes('yours to do')", timeout=10000)
     assert not await page.evaluate("__calls.some(c => c.type === 'answers')")
+    assert await page.eval_on_selector_all("input", "els => els.filter(e => e.value && e.type !== 'hidden' && "
+                                           "e.type !== 'checkbox').length") == 0
+    assert not await page.eval_on_selector_all('input[type="checkbox"]', "els => els.some(e => e.checked)")
 
 
 @browser

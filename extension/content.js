@@ -471,6 +471,10 @@
   async function fill() {
     if (busy) return;
     busy = true; state.open = true;
+    if ([...document.querySelectorAll('input[type="password"]')].some(visible)) {   // a sign-in or a new account
+      say("This page signs you in or makes an account, which is yours to do. Once you're past it, press Fill again.", "warn");
+      busy = false; return;
+    }
     const fields = scan();
     say(`Reading ${fields.length} fields and writing answers… Open questions take up to a minute.`);
     const r = await send({ type: "answers", body: { url: location.href, title: pageTitle(), site_name: site(), fields } });
