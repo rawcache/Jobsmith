@@ -55,6 +55,8 @@
     return el.dataset.jobsmithId;
   }
 
+  const HONEYPOT = /robots? only|if you('| a)re (a )?human|\bhoneypot\b|(do not|don't) (fill|enter|complete|type)[^.]{0,40}\b(humans?|robots?|bots?|spam)\b|\b(bots?|spam|robots?)\b[^.]{0,40}leave (this|it) (field )?(blank|empty)|leave (this|it) (field )?(blank|empty)[^.]{0,40}\b(bots?|spam|robots?|humans?)\b/i;   // as base.HONEYPOT
+
   function scan() {
     els.clear();
     const out = []; const groups = new Set();
@@ -62,6 +64,8 @@
       const type = (el.type || el.tagName).toLowerCase();
       if (["hidden", "submit", "button", "image", "reset", "search", "password"].includes(type)) continue;
       if (!visible(el) && type !== "file") continue;
+      // a honeypot sites hide from people to catch bots (Workday: "This input is for robots only"): never touched
+      if (HONEYPOT.test(labelFor(el))) continue;
       // A hidden copy that custom selects keep for the browser's "required" check (react-select's requiredInput):
       // not a question, and it borrows the label of whatever fieldset it sits in ("Phone").
       if (type !== "file" && el.getAttribute("aria-hidden") === "true" && el.tabIndex < 0) continue;

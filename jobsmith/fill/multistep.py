@@ -20,6 +20,8 @@ START_BUTTONS = ['[data-automation-id="adventureButton"]', 'a:has-text("Apply No
                  'a:has-text("Apply")', 'button:has-text("Apply")']
 AUTOFILL_BUTTONS = ['[data-automation-id="autofillWithResume"]', 'a:has-text("Autofill with Resume")',
                     'button:has-text("Autofill with Resume")', 'button:has-text("Upload Resume")']
+# Workday's "Start Your Application" box without a resume to autofill from: fill it in by hand
+MANUAL_BUTTONS = ['[data-automation-id="applyManually"]', 'a:has-text("Apply Manually")', 'button:has-text("Apply Manually")']
 NEXT_BUTTONS = ['[data-automation-id="bottom-navigation-next-button"]', '[data-automation-id="pageFooterNextButton"]',
                 'button:has-text("Save and Continue")', 'button:has-text("Continue")', 'button:has-text("Next")',
                 'input[type="submit"][value*="Next" i]']
@@ -43,9 +45,16 @@ async def _first_visible(page: Page, selectors: list[str]):
     return None
 
 
+# A sign-in that offers ways in before any password box shows (Workday: Google, LinkedIn, or email)
+SIGN_IN_CHOICES = ['[data-automation-id="SignInWithEmailButton"]', '[data-automation-id="GoogleSignInButton"]',
+                   'button:has-text("Sign in with email")', 'a:has-text("Sign in with email")']
+
+
 async def needs_sign_in(page: Page) -> bool:
     try:
         if await page.locator('input[type="password"]:visible').count():
+            return True
+        if await _first_visible(page, SIGN_IN_CHOICES):
             return True
         body = (await page.locator("body").inner_text(timeout=3000))[:3000].lower()
         return ("sign in" in body or "create account" in body) and "password" in body
@@ -97,6 +106,13 @@ async def run(page: Page, url: str, *, answer: Callable, files: dict, log: Calla
     if start and not await page.locator("form input:visible, form textarea:visible").count():
         await start.click()
         await page.wait_for_timeout(2500)
+        # Workday's "Start Your Application": from your resume when there is one, else by hand. Either way the
+        # next page (often a sign-in) is checked like any other
+        how = (files.get("resume") and await _first_visible(page, AUTOFILL_BUTTONS)) or \
+            await _first_visible(page, MANUAL_BUTTONS)
+        if how:
+            await how.click()
+            await page.wait_for_timeout(2500)
 
     for page_no in range(1, max_pages + 1):
         if wall := await bot_wall(page):        # never got past: the runner hands it to you
