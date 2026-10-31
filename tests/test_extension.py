@@ -604,6 +604,23 @@ async def test_autofill_never_reads_a_honeypot(page):
 
 
 @browser
+async def test_a_disability_box_named_pwd_is_a_question_not_a_password(page):
+    """"PWD" also means a person with a disability. A checkbox named is_pwd (or pwd) is a question the engine is
+    asked about, and it doesn't make the page look like a sign-in: Fill still fills."""
+    await page.add_init_script("""document.addEventListener('DOMContentLoaded', () => document.querySelector('form')
+      .insertAdjacentHTML('beforeend', '<label><input type=checkbox name=is_pwd id=is_pwd> I am a person with a ' +
+      'disability (PWD)</label><label><input type=checkbox name=pwd> PWD card holder</label>'));""")
+    await _load(page, {"panelOpen": True}, fixture="lever_palantir_form.html", answers={
+        "Full name": {"value": "Alex Rivera", "kind": "standard"}})
+    await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
+    await page.wait_for_function("__calls.some(c => c.type === 'answers')", timeout=30000)
+    labels = [f["label"] for f in await page.evaluate("__calls.find(c => c.type === 'answers').body.fields")]
+    assert "I am a person with a disability (PWD)" in labels and "PWD card holder" in labels, labels
+    assert not await page.is_checked("#is_pwd")
+    await _never_submitted(page)
+
+
+@browser
 async def test_autofill_picks_greenhouse_dropdowns_and_the_city_from_its_lookup(page):
     """#19: on Greenhouse's form the dropdowns open on key-up, not key-down, so autofill left Country, Location
     (City) and every Yes/No box under Needs you. Now it opens them with a whole key press, picks the option that
