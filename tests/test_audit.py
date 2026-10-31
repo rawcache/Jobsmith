@@ -200,17 +200,32 @@ def test_an_unconfirmed_demographic_answer_is_never_drafted():
     assert r["answer"] == "No" and not r["issues"]
 
 
-@pytest.mark.parametrize("label", ["PWD card holder", "Are you a PWD?", "I am a person with a disability (PWD)"])
-def test_a_pwd_question_is_the_disability_question_and_never_drafted(label, fake_llm):
-    """PWD (a person with a disability) is the disability question: only your confirmed answer goes in, never the AI."""
-    from jobsmith import classify
+PWD = [{"field": "a", "label": "Are you a PWD?", "qtype": "select", "options": ["Yes", "No"], "required": True},
+       {"field": "b", "label": "I am a person with a disability (PWD)", "qtype": "checkbox", "required": False},
+       {"field": "c", "label": "PWD card holder", "qtype": "select", "options": ["Yes", "No"], "required": True},
+       {"field": "d", "label": "PWD ID number", "qtype": "text", "required": False},
+       {"field": "e", "label": "Do you need a disability accommodation to interview?", "qtype": "select",
+        "options": ["Yes", "No"], "required": True}]
+
+
+@pytest.mark.parametrize("answer, confirmed", [(None, False), ("Yes", False), ("Yes", True)])
+async def test_a_pwd_question_is_never_the_ais_and_its_details_are_yours(fake_llm, answer, confirmed):
+    """PWD (a person with a disability) is the disability question: only your confirmed answer goes in. A PWD card,
+    its ID or an accommodation isn't answered by "do you have a disability", so it's left for you, even when that
+    answer is confirmed. None of them reach the AI."""
     asked = []
     fake_llm(lambda s, p: asked.append(p) or {"answers": []})
-    assert classify.canon_for(label) == "disability_status"
-    profile.set_answer("disability_status", "No", confirmed=False)
-    r = draft.deterministic({"field": "q", "label": label, "qtype": "checkbox", "options": [], "required": False},
-                            profile.answers(), {"id": "x", "company": "Acme", "description": ""})
-    assert r["answer"] == "" and "Confirm your demographic answers" in r["issues"][0] and not asked
+    if answer:
+        profile.set_answer("disability_status", answer, confirmed=confirmed)
+    jid = sources.add_job_url("https://job-boards.greenhouse.io/acme/jobs/13", "Acme", "Intern")
+    got, _ = await draft.answer_fields(db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,))),
+                                       [dict(f) for f in PWD])
+    assert not [p for p in asked if "PWD" in str(p) or "accommodation" in str(p)], asked
+    assert {k: got[k]["answer"] for k in "cde"} == {"c": "", "d": "", "e": ""}
+    assert all(got[k]["issues"] for k in "ce") and not got["d"]["issues"]
+    assert got["a"]["answer"] == ("Yes" if confirmed else "") and got["b"]["canon"] == "disability_status"
+    if not confirmed:
+        assert got["a"]["issues"]
 
 
 def test_a_required_unconfirmed_demographic_holds_autopilot():
