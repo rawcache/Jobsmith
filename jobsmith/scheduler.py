@@ -51,6 +51,7 @@ def pick_new_jobs(limit: int) -> list[str]:
                     AND j.updated_at < ? AND (j.error LIKE '%imeout%' OR j.error LIKE '%nodename%' OR j.error LIKE '%ERR_%'
                          OR j.error LIKE '%onnect%' OR j.error LIKE '%name or service%')
                     AND (SELECT COUNT(*) FROM runs r WHERE r.job_id=j.id AND r.status='error') < 3
+                    AND j.error NOT LIKE '%bot check%'      -- a site's bot check is the user's, never retried
                     AND j.id NOT IN (SELECT job_id FROM runs WHERE kind='submit')""",
                  (time.time() - 3600,))
     # The company cap is per week: what was sent in the last 7 days (sent_to_company counts submissions in flight)
