@@ -373,6 +373,11 @@ SIGNATURE = re.compile(r"signature|\bsign (here|below)|\be-?sign\b", re.I)
 # Lever's disability question: any answer, even "I do not want to answer", shows Name and Date below it and makes
 # them required, a signature. Jobsmith never signs for you, so it's left blank, which discloses nothing either way.
 SIGNED_ANSWER = re.compile(r"disabilitySelectElement|eeo\[disability\]")
+# About a disability but not whether you have one: a PWD card or ID, its number, an accommodation. Your profile's
+# disability answer doesn't say, so it's yours (rule 2: never guessed from the nearest fact, nor by the AI).
+DISABILITY_DETAIL = re.compile(r"\b(cards?|ids?|certificates?|registration|registered|udid|accommodat\w*|"
+                               r"percent(age)?|(type|kind|nature) of (your )?disabilit\w*|describe|details? (of|about))\b",
+                               re.I)
 
 
 def deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | None:
@@ -415,6 +420,11 @@ def deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | Non
                 "issues": ["Jobsmith doesn't know what file this wants; attach it yourself"]}
     if not canon or canon in ("resume", "cover_letter"):
         return None
+    if canon == "disability_status" and DISABILITY_DETAIL.search(field["label"]):
+        return {"kind": "answer_bank", "canon": None, "answer": "", "confidence": 0.0 if field["required"] else 1.0,
+                "issues": ["Asks about your disability beyond whether you have one; answer it yourself"]
+                if field["required"] else [],
+                "rationale": "About your disability beyond your profile's answer: left for you"}
     if canon == "high_school":
         # Your profile is about college and work; a high school's name or year would be a guess, AI's or ours
         return {"kind": "answer_bank", "canon": canon, "answer": "", "confidence": 0.0 if field["required"] else 1.0,
