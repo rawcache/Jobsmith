@@ -61,8 +61,8 @@ Commercial" on Lever (`jobs.lever.co/palantir/4d29249a-d7e8-4c39-880d-3b35d7b2f6
 2026-10-30 with `scripts/capture/capture.py` (GETs only; every POST, including Lever's hCaptcha and analytics, was
 blocked; see `jobsmith/readonly.py`). Lever puts its stylesheet in the page twice; `lever_fixture.py` keeps only the
 rules the page uses, replaces Lever's web fonts with local ones, drops everything that would load from the network,
-blanks Palantir's Lever account id, the Lever accounts that last edited each question, and the time zone the
-capture's browser filled in, and cuts Lever's hidden JSON copy of each question card to its first three options (the
+blanks Palantir's Lever account id, the Lever accounts that last edited each question, hCaptcha's public site key
+(key-shaped, so the secrets scan stops on it) and the time zone the capture's browser filled in, and cuts Lever's hidden JSON copy of each question card to its first three options (the
 visible university list keeps all 3,302). It refuses to write a page with an email address or phone number in it
 other than the posting's own accommodations address, or with an editor's account id left in.
 

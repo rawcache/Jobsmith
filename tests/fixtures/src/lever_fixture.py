@@ -6,7 +6,7 @@ The capture (scripts/capture/capture.py) is the rendered form with Lever's scrip
 stylesheet in the page, twice; this keeps only the rules whose classes and ids the page uses, drops fonts and
 everything else that would load from the network
 (local fonts stand in for Lever's), blanks what the capture's browser filled in (the time zone),
-the company's Lever account id and the Lever accounts that last edited each question, cuts the hidden copy of each question card down to its first few options (Lever
+the company's Lever account id, the Lever accounts that last edited each question and hCaptcha's site key, cuts the hidden copy of each question card down to its first few options (Lever
 posts it back; nothing here reads it), adds lever_form.js (our stand-in for Lever's scripts), and refuses to
 write a page with an email address or phone number in it other than the posting's own."""
 from __future__ import annotations
@@ -101,6 +101,8 @@ def build(captured: str, script: str) -> str:
     account = re.search(r'name="accountId" value="([^"]+)"', page).group(1)
     page = page.replace(account, NO_ACCOUNT)                     # the field, each card, the logo's address
     page = re.sub(r'(id="applicant-timezone" value=")[^"]*"', r'\1"', page)
+    # hCaptcha's site key for Lever: public (every visitor gets it), but key-shaped, and nothing here uses it
+    page = re.sub(r'(data-sitekey=")[^"]*"', rf'\g<1>{NO_ACCOUNT}"', page)
     page = re.sub(r'value="(\{&quot;createdAt&quot;[^"]*)"', _trim_card, page)
     page = page.replace("</body>", f"<script>{script}</script></body>", 1)
     left = re.findall(r"\s(?:src|srcset|href|poster|data|action)=\"(https?://[^\"]*)\"|url\(['\"]?(https?://[^)'\"]*)",
