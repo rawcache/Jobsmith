@@ -60,7 +60,8 @@ SCAN_JS = r"""
   const out = []; const seenGroups = new Set();
   for (const el of document.querySelectorAll('input, textarea, select')) {
     const type = (el.type || el.tagName).toLowerCase();
-    if (['hidden', 'submit', 'button', 'image', 'reset', 'search'].includes(type)) continue;
+    // a password is never Jobsmith's to type (sign-ins are handed to you), so it isn't a question at all
+    if (['hidden', 'submit', 'button', 'image', 'reset', 'search', 'password'].includes(type)) continue;
     if (!vis(el) && type !== 'file') continue;
     const key = el.id ? byId(el.id) : (el.name ? `[name="${el.name}"]` : null);
     if (!key) continue;
@@ -124,11 +125,16 @@ SCAN_JS = r"""
 """
 
 
+# A honeypot: a box sites hide from people to catch bots ("This input is for robots only, do not enter if you're
+# human", Workday). Filling it marks the application as a bot's, so it's never a question.
+HONEYPOT = re.compile(r"robots? only|if you('| a)re (a )?human|\bhoneypot\b|(do not|don't) (fill|enter|complete|type)[^.]{0,40}\b(humans?|robots?|bots?|spam)\b|\b(bots?|spam|robots?)\b[^.]{0,40}leave (this|it) (field )?(blank|empty)|leave (this|it) (field )?(blank|empty)[^.]{0,40}\b(bots?|spam|robots?|humans?)\b", re.I)   # always with a word about bots: "leave it blank if none" is a real field
+
+
 async def scan_form(page: Page) -> list[dict]:
     fields = await page.evaluate(SCAN_JS)
     seen, out = set(), []
     for f in fields:
-        if f["field"] in seen or not f["label"]:
+        if f["field"] in seen or not f["label"] or HONEYPOT.search(f["label"]):
             continue
         seen.add(f["field"])
         f.setdefault("section", "main")

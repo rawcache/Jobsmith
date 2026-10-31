@@ -234,6 +234,11 @@ then `ats.SUPPORTED` and the README.
 - [ ] d. Workday: page by page, stopping at review; the sign-in and account step is handed to the user. Public
       pages captured read-only; a short guide for the maintainer to save the signed-in steps, which are then
       sanitized.
+      Status (2026-10-31): public pages saved read-only from NVIDIA's internship posting up to sign-in
+      (`tests/fixtures/workday_nvidia_*.html`); Jobsmith now hands Workday's sign-in choice page to the user (it has no
+      password box), presses Apply Manually when there's no resume, never reads a password box and never fills
+      Workday's honeypot. Waiting on the signed-in pages
+      ([docs/guides/save-workday-pages.md](guides/save-workday-pages.md)).
 - [ ] e. iCIMS: page by page, including multi-step forms in frames.
 
 ## 8. Frames

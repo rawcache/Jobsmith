@@ -940,3 +940,49 @@ async def test_unconfirmed_demographic_answers_are_never_filled(fake_llm, tmp_pa
         await runner.browser.close()
     pending = j.loads(db.q1("SELECT fields FROM audit_pending WHERE job_id=?", (jid,))["fields"])
     assert "Hispanic/Latino" not in {f["label"] for f in pending}
+
+
+NVIDIA_WORKDAY = "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite/job/US-TX-Austin/AI-Systems-Software-Engineering-Intern---Summer-2027_JR2027170"
+
+
+def _workday(name: str) -> str:
+    return (FIXTURES / f"workday_nvidia_{name}.html").resolve().as_uri()
+
+
+async def test_workdays_saved_sign_in_pages_are_seen_as_sign_in_and_never_read_as_questions(page):
+    """NVIDIA's Workday pages, saved read-only up to sign-in. The sign-in choice (Google, LinkedIn or email) has no
+    password box yet but is still a sign-in, handed to you. On every page the password boxes and Workday's hidden
+    "This input is for robots only" box are never questions: Jobsmith types no password and never fills a honeypot."""
+    from jobsmith.fill import multistep
+    await page.goto(_workday("posting"))
+    assert not await multistep.needs_sign_in(page)
+    for name in ("signin", "signin_email", "create_account"):
+        await page.goto(_workday(name))
+        assert await multistep.needs_sign_in(page), name
+        labels = [f["label"] for f in await scan_form(page)]
+        assert not [l for l in labels if "robots" in l or "Password" in l], (name, labels)
+    assert labels == ["Email Address", "I agree"]                           # the create-account page
+
+
+@pytest.mark.parametrize("resume", [False, True])
+async def test_workday_from_the_saved_posting_to_sign_in_is_handed_to_you(page, tmp_path, resume):
+    """Apply, then Autofill with Resume when there's a resume (Apply Manually when there isn't), then the sign-in
+    choice: Jobsmith stops there and asks you to sign in or create the account. It presses no sign-in button."""
+    from jobsmith.fill import multistep
+    asked = []
+
+    async def wait_for_user(msg, check, negate=False):
+        asked.append(msg)
+        return False                                        # you haven't signed in (yet)
+
+    async def answer(fields):
+        raise AssertionError(f"nothing to answer before you sign in: {fields}")
+    files = {}
+    if resume:
+        files["resume"] = str(tmp_path / "resume.pdf")
+        (tmp_path / "resume.pdf").write_bytes(b"%PDF-1.4\n%%EOF\n")
+    res = await multistep.run(page, _workday("posting"), answer=answer, files=files, log=lambda m: None,
+                              wait_for_user=wait_for_user, allow_submit=lambda: False)
+    assert res["status"] == "waiting_user" and asked == ["Sign in to continue the application"], res
+    assert page.url.endswith("workday_nvidia_signin.html")
+    assert await page.evaluate("window.__signInPresses") == 0

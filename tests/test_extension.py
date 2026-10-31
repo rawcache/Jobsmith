@@ -555,6 +555,33 @@ async def test_the_submit_watcher_sees_levers_submit_on_the_saved_palantir_form(
 
 
 @browser
+async def test_autofill_stays_off_workdays_create_account_page(page):
+    """Workday's saved create-account page (Email, two passwords, "I agree", a honeypot) isn't an application:
+    no panel, nothing read or sent. Making the account is yours."""
+    await _load(page, {"panelOpen": True}, fixture="workday_nvidia_create_account.html", wait=False)
+    await page.wait_for_timeout(1500)
+    assert not await page.evaluate("!!document.querySelector('#jobsmith-panel')?.shadowRoot?.querySelector('.wrap')")
+    assert not await page.evaluate("__calls.some(c => c.type === 'answers')")
+
+
+@browser
+async def test_autofill_never_reads_a_honeypot(page):
+    """Workday's hidden box, word for word, added to the saved Lever form: the engine is never asked about it, and
+    it stays empty."""
+    await page.add_init_script("""document.addEventListener('DOMContentLoaded', () => document.querySelector('form')
+      .insertAdjacentHTML('beforeend', '<label for="hp">Enter website. This input is for robots only, do not enter if ' +
+      "you're human.</label><input id=hp name=website type=text>"));""")
+    await _load(page, {"panelOpen": True}, fixture="lever_palantir_form.html", answers={
+        "Full name": {"value": "Alex Rivera", "kind": "standard"}})
+    await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
+    await page.wait_for_function("__calls.some(c => c.type === 'answers')", timeout=30000)
+    labels = [f["label"] for f in await page.evaluate("__calls.find(c => c.type === 'answers').body.fields")]
+    assert "Full name" in labels and not [l for l in labels if "robots" in l], labels
+    assert await page.input_value("#hp") == ""
+    await _never_submitted(page)
+
+
+@browser
 async def test_autofill_picks_greenhouse_dropdowns_and_the_city_from_its_lookup(page):
     """#19: on Greenhouse's form the dropdowns open on key-up, not key-down, so autofill left Country, Location
     (City) and every Yes/No box under Needs you. Now it opens them with a whole key press, picks the option that

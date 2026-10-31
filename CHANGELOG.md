@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Added
+- Workday: Jobsmith hands you the sign-in choice page (Sign in with Google, LinkedIn or email), which has no password
+  box yet, instead of stopping with "No Next button"; it presses Apply Manually when you have no resume to autofill
+  from; and it never fills a honeypot (Workday's hidden "This input is for robots only" box) or reads a password box
+  as a question, in autopilot or the extension.
 - When a site shows a bot check instead of its form (SmartRecruiters' "Access is temporarily restricted", Cloudflare,
   DataDome, PerimeterX), autopilot stops before typing anything, holds the application under "Needs you" with the
   line the site showed, tells you, and doesn't try it again by itself. Jobsmith never tries to get past one.

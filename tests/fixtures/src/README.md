@@ -54,6 +54,31 @@ uv run python tests/fixtures/src/ashby_fixture.py /tmp/ashby/captured.html /tmp/
 
 Check the result has no real person's details in it (the builder only catches emails and phone numbers).
 
+## `workday_flow.js` + `workday_fixture.py` → `../workday_nvidia_*.html`
+
+NVIDIA's "AI Systems Software Engineering Intern – Summer 2027" on Workday
+(`nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite/job/US-TX-Austin/…_JR2027170`), walked on 2026-10-31 through
+`jobsmith/readonly.py` (GETs only; Google Analytics and LinkedIn's apply widget were blocked) from the posting to
+sign-in, pressing Apply, Apply Manually, Sign in with email and Create Account and typing nothing. Each page was saved
+with its scripts removed. `workday_fixture.py` drops what would load from the network (Workday's own stylesheet is one,
+so the pages look plainer than live; the parts the tests use keep their markup and data-automation-ids), starts the
+posting's "Start Your Application" box closed, adds `workday_flow.js`, and refuses a page with an email address, a
+phone number or a typed value in it.
+
+`workday_flow.js` is our stand-in for Workday's scripts, none of Workday's code: Apply opens the box, Apply Manually,
+Autofill with Resume and Use My Last Application go to the sign-in choice, Sign in with email and Create Account go to
+those pages, and the sign-in and create-account buttons send nothing (`window.__signInPresses` counts them). The
+pages keep Workday's honeypot, "This input is for robots only, do not enter if you're human."
+
+The pages behind sign-in come from the maintainer's own browser: [docs/guides/save-workday-pages.md](../../../docs/guides/save-workday-pages.md).
+
+To rebuild, walk the posting again with a read-only capture (save `2_start.html`, `3_after_manual.html`,
+`4_signin_email.html` and `5_create_account.html`), then:
+
+```bash
+uv run python tests/fixtures/src/workday_fixture.py /tmp/workday tests/fixtures
+```
+
 ## `lever_form.js` + `lever_fixture.py` → `../lever_palantir_form.html`
 
 `lever_palantir_form.html` is Palantir's application form for "Forward Deployed Software Engineer, Internship -
