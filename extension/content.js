@@ -205,8 +205,9 @@
   // leaving the box without picking one empties it, so the place has to be picked from the list.
   // the one listed place that is `want`: the same city and every state or country it names ("York, PA" is never
   // "East York, PA, USA"; plain "Boston" with two Bostons listed is no one's guess). Same rule as base.place_match.
+  const STATES = {"alabama":"al","alaska":"ak","arizona":"az","arkansas":"ar","california":"ca","colorado":"co","connecticut":"ct","delaware":"de","district of columbia":"dc","florida":"fl","georgia":"ga","hawaii":"hi","idaho":"id","illinois":"il","indiana":"in","iowa":"ia","kansas":"ks","kentucky":"ky","louisiana":"la","maine":"me","maryland":"md","massachusetts":"ma","michigan":"mi","minnesota":"mn","mississippi":"ms","missouri":"mo","montana":"mt","nebraska":"ne","nevada":"nv","new hampshire":"nh","new jersey":"nj","new mexico":"nm","new york":"ny","north carolina":"nc","north dakota":"nd","ohio":"oh","oklahoma":"ok","oregon":"or","pennsylvania":"pa","rhode island":"ri","south carolina":"sc","south dakota":"sd","tennessee":"tn","texas":"tx","utah":"ut","vermont":"vt","virginia":"va","washington":"wa","west virginia":"wv","wisconsin":"wi","wyoming":"wy"};   // as draft.US_STATES
   const parts = t => t.split(",").map(p => p.trim().toLowerCase()).filter(Boolean)
-    .map(p => /^(us|usa|united states( of america)?)$/.test(p) ? "usa" : p);
+    .map(p => /^(us|usa|united states( of america)?)$/.test(p) ? "usa" : STATES[p] || p);
   const placeIndex = (texts, want) => {
     const w = parts(want); if (!w.length) return -1;
     const hits = texts.map((t, i) => [parts(t), i]).filter(([g]) => g[0] === w[0] && w.slice(1).every(x => g.slice(1).includes(x)));

@@ -531,6 +531,18 @@ async def test_autofill_leaves_levers_place_for_you_when_its_not_exactly_one(pag
 
 
 @browser
+async def test_autofill_picks_levers_place_when_your_state_is_spelled_out(page):
+    """Your profile says "Boston, Massachusetts" and Lever lists "Boston, MA, USA": the same place, picked."""
+    await _load(page, {"panelOpen": True}, fixture="lever_palantir_form.html", answers={
+        LEVER_LOCATION: {"value": "Boston, Massachusetts", "kind": "standard"}})
+    await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
+    note = "document.querySelector('#jobsmith-panel').shadowRoot.querySelector('.note')"
+    await page.wait_for_function(f"{note}?.innerText.includes('Filled')", timeout=30000)
+    assert await page.input_value("#location-input") == "Boston, MA, USA"
+    await _never_submitted(page)
+
+
+@browser
 async def test_the_submit_watcher_sees_levers_submit_on_the_saved_palantir_form(page):
     """The other side of the watcher on Lever: Submit application (after Lever's captcha step) posts the form to
     its own address, and that is caught. Required fields are switched off here so the browser lets it through."""
