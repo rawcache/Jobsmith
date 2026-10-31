@@ -222,7 +222,13 @@ PWD = [{"field": "a", "label": "Are you a PWD?", "qtype": "select", "options": [
        {"field": "m", "label": "Do you have a disability, or have had one in the past?", "qtype": "select",
         "options": ["Yes", "No"], "required": True},
        {"field": "n", "label": "Do you have a disability that requires treatment?", "qtype": "select",
-        "options": ["Yes", "No"], "required": True}]
+        "options": ["Yes", "No"], "required": True},
+       {"field": "o", "label": "Do you need any special accommodations?", "qtype": "select", "options": ["Yes", "No"],
+        "required": True},
+       {"field": "p", "label": "What accommodations would you need to participate in the interview process?",
+        "qtype": "textarea", "required": True},
+       {"field": "q", "label": "Please specify your disability", "qtype": "text", "required": True},
+       {"field": "r", "label": "What is your disability?", "qtype": "text", "required": True}]
 
 
 @pytest.mark.parametrize("answer, confirmed", [(None, False), ("Yes", False), ("Yes", True)])
@@ -238,11 +244,15 @@ async def test_a_pwd_question_is_never_the_ais_and_its_details_are_yours(fake_ll
     got, _ = await draft.answer_fields(db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,))),
                                        [dict(f) for f in PWD])
     assert not [p for p in asked if re.search(r"PWD|disabilit|accommodat", str(p), re.I)], asked
-    assert {k: got[k]["answer"] for k in "cdefghin"} == dict.fromkeys("cdefghin", "")
-    assert all(got[k]["issues"] for k in "cefghin") and not got["d"]["issues"]     # required ones block autopilot
+    assert {k: got[k]["answer"] for k in "cdefghinopqr"} == dict.fromkeys("cdefghinopqr", "")
+    assert all(got[k]["issues"] for k in "cefghinopqr") and not got["d"]["issues"]  # required ones block autopilot
     for k in "ajklm":                                                                 # "do you have one": your answer
         assert got[k]["answer"] == ("Yes" if confirmed else ""), (k, got[k])
     assert got["b"]["canon"] == "disability_status"
+    fields = [dict(f) for f in PWD]
+    draft.save_results(jid, fields, got)
+    blockers = " ".join(draft.readiness(jid)["blockers"])
+    assert all(f["label"] in blockers for f in fields if f["field"] in "cefghinopqr"), blockers
     if not confirmed:
         assert got["a"]["issues"]
 
