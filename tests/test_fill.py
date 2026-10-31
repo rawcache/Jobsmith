@@ -965,8 +965,10 @@ async def test_workdays_saved_sign_in_pages_are_seen_as_sign_in_and_never_read_a
     await page.evaluate("document.querySelectorAll('input[type=password]').forEach(e => { e.type = 'text'; })")
     assert [f["label"] for f in await scan_form(page)] == ["Email Address", "I agree"]   # "Show password": still one
     await page.set_content('<form><label>Choose one <input name="user_password"></label><input id="newPassword" '
-                           'aria-label="Choose one"><label>Employment Pass number <input name="ep"></label></form>')
-    assert [f["label"] for f in await scan_form(page)] == ["Employment Pass number"]
+                           'aria-label="Choose one"><label>Employment Pass number <input name="ep"></label>'
+                           '<label>Are you a person with disability (PWD)? <input name="isPWD"></label></form>')
+    assert [f["label"] for f in await scan_form(page)] == ["Employment Pass number",
+                                                          "Are you a person with disability (PWD)?"]
 
 
 @pytest.mark.parametrize("resume", [False, True])
