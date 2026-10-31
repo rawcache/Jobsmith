@@ -62,6 +62,8 @@ SCAN_JS = r"""
     const type = (el.type || el.tagName).toLowerCase();
     // a password is never Jobsmith's to type (sign-ins are handed to you), so it isn't a question at all
     if (['hidden', 'submit', 'button', 'image', 'reset', 'search', 'password'].includes(type)) continue;
+    // ...and one switched to plain text by "Show password" is still a password
+    if (/password/i.test(el.autocomplete || '') || /\bpass(word|wd)\b|\bpwd\b/i.test(`${el.name || ''} ${el.id || ''} ${labelFor(el)}`)) continue;
     if (!vis(el) && type !== 'file') continue;
     const key = el.id ? byId(el.id) : (el.name ? `[name="${el.name}"]` : null);
     if (!key) continue;

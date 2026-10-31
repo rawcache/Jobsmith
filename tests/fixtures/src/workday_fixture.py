@@ -41,7 +41,7 @@ def build(captured: str, which: str, script: str) -> str:
     emails = set(re.findall(r"[\w.+-]+@[\w-]+\.[a-z]{2,}\b", page)) - {"alex.rivera@example.edu"}
     phones = re.findall(r"\(?\b\d{3}\)?[ .-]\d{3}[ .-]\d{4}\b", re.sub(r"<style\b.*?</style>", "", page, flags=re.S))
     typed = [v for v in re.findall(r'<input\b[^>]*\svalue="([^"]+)"', page) if v not in ("on", "true", "false")] + \
-        [t for t in re.findall(r"<textarea\b[^>]*>([^<]+)</textarea>", page) if t.strip()]
+        [t for t in re.findall(r"<textarea\b[^>]*>(.*?)</textarea>", page, flags=re.S) if t.strip()]
     if emails or phones or typed:
         raise SystemExit(f"personal details or typed values in the page: {sorted(emails)} {phones} {typed[:5]}")
     return page

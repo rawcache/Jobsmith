@@ -55,6 +55,9 @@
     return el.dataset.jobsmithId;
   }
 
+  // a password box, even one switched to plain text by "Show password": by type, autocomplete, name or label
+  const isPassword = el => el.type === "password" || /password/i.test(el.autocomplete || "") ||
+    /\bpass(word|wd)\b|\bpwd\b/i.test(`${el.name || ""} ${el.id || ""} ${labelFor(el)}`);
   const HONEYPOT = /robots? only|if you('| a)re (a )?human|\bhoneypot\b|(do not|don't) (fill|enter|complete|type)[^.]{0,40}\b(humans?|robots?|bots?|spam)\b|\b(bots?|spam|robots?)\b[^.]{0,40}leave (this|it) (field )?(blank|empty)|leave (this|it) (field )?(blank|empty)[^.]{0,40}\b(bots?|spam|robots?|humans?)\b/i;   // as base.HONEYPOT
 
   function scan() {
@@ -65,7 +68,7 @@
       if (["hidden", "submit", "button", "image", "reset", "search", "password"].includes(type)) continue;
       if (!visible(el) && type !== "file") continue;
       // a honeypot sites hide from people to catch bots (Workday: "This input is for robots only"): never touched
-      if (HONEYPOT.test(labelFor(el))) continue;
+      if (HONEYPOT.test(labelFor(el)) || isPassword(el)) continue;
       // A hidden copy that custom selects keep for the browser's "required" check (react-select's requiredInput):
       // not a question, and it borrows the label of whatever fieldset it sits in ("Phone").
       if (type !== "file" && el.getAttribute("aria-hidden") === "true" && el.tabIndex < 0) continue;
@@ -471,7 +474,7 @@
   async function fill() {
     if (busy) return;
     busy = true; state.open = true;
-    if ([...document.querySelectorAll('input[type="password"]')].some(visible)) {   // a sign-in or a new account
+    if ([...document.querySelectorAll("input")].some(e => visible(e) && isPassword(e))) {   // a sign-in or a new account
       say("This page signs you in or makes an account, which is yours to do. Once you're past it, press Fill again.", "warn");
       busy = false; return;
     }
