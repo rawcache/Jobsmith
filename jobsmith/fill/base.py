@@ -63,7 +63,9 @@ SCAN_JS = r"""
     // a password is never Jobsmith's to type (sign-ins are handed to you), so it isn't a question at all
     if (['hidden', 'submit', 'button', 'image', 'reset', 'search', 'password'].includes(type)) continue;
     // ...and one switched to plain text by "Show password" is still a password
-    if (/password/i.test(el.autocomplete || '') || /\bpass(word|wd)\b|\bpwd\b/i.test(`${el.name || ''} ${el.id || ''} ${labelFor(el)}`)) continue;
+    // (an id or name like user_password or newPassword has no word breaks; a label must say the word)
+    if (/password/i.test(el.autocomplete || '') || /pass(word|wd)|pwd/i.test(`${el.name || ''} ${el.id || ''}`) ||
+        /\bpass(word|wd)\b|\bpwd\b/i.test(labelFor(el))) continue;
     if (!vis(el) && type !== 'file') continue;
     const key = el.id ? byId(el.id) : (el.name ? `[name="${el.name}"]` : null);
     if (!key) continue;
