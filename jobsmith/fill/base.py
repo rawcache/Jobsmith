@@ -618,6 +618,44 @@ async def dismiss_banners(page: Page, log=None, rounds: int = 3) -> list[str]:
     return clicked
 
 
+# A page a site shows instead of the form when it takes the browser for a bot (Cloudflare, DataDome, PerimeterX,
+# Imperva, SmartRecruiters' "Access is temporarily restricted"). Jobsmith never tries to get past one: it's the
+# same line as a CAPTCHA, so it's handed to the user.
+BOT_WALL_RE = re.compile(r"access is temporarily restricted|detected unusual activity from your (device|network)|"
+                         r"verify(ing)? (that )?you are (a )?human|checking (if the site connection is secure|your "
+                         r"browser)|press (&|and) hold|are you a robot|attention required!? *\| *cloudflare|"
+                         r"request unsuccessful\. incapsula|access to this page has been denied", re.I)
+
+
+# the frame a bot check draws its page in: DataDome (SmartRecruiters' "Access is temporarily restricted"), PerimeterX
+BOT_WALL_FRAMES = re.compile(r"(^|\.)captcha-delivery\.com/|/px-captcha|perimeterx\.net/", re.I)
+
+
+class BotWall(Exception):
+    """The site showed a bot check instead of the form. The message is the line it showed."""
+
+
+async def bot_wall(page: Page) -> str:
+    """The bot check's own words if the page is one (else ''). Only a page without a form counts: an application
+    with a reCAPTCHA box ("I'm not a robot") under its fields is a form, and its CAPTCHA is handled at Submit."""
+    try:
+        if await page.locator("input:visible, textarea:visible, select:visible").count() >= 3:
+            return ""
+    except Exception:
+        return ""
+    for frame in page.frames:                        # DataDome draws its page in a frame of its own
+        try:
+            body = await frame.locator("body").inner_text(timeout=3000)
+        except Exception:
+            continue
+        if m := BOT_WALL_RE.search(body):
+            start = body.rfind("\n", 0, m.start()) + 1
+            end = body.find("\n", m.end())
+            return " ".join(body[start:end if end != -1 else None].split())[:160]   # the line only: it may show your IP
+    hit = next((f.url for f in page.frames if BOT_WALL_FRAMES.search(f.url)), "")
+    return f"a bot check from {hit.split('/')[2]}" if hit else ""
+
+
 async def captcha_visible(page: Page) -> bool:
     for fr in page.frames:
         if re.search(r"recaptcha/.*/bframe|hcaptcha.*challenge|challenges\.cloudflare", fr.url):

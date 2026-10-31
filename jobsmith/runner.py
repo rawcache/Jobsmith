@@ -635,9 +635,12 @@ def _set_status(job_id: str, status: str, error: str | None = None) -> None:
 async def do_scan(job: dict, run: Run) -> list[dict]:
     """Discover the form's fields by opening it in the browser (non-Greenhouse ATSes)."""
     from .fill import generic
+    from .fill.base import BotWall, bot_wall
     page = await browser.new_page()
     try:
         fields = await generic.scan(page, job["url"])
+        if not fields and (wall := await bot_wall(page)):
+            raise BotWall(wall)
         fields = [f for f in fields if f["qtype"] != "hidden"]
         db.x("UPDATE jobs SET questions=?, updated_at=? WHERE id=?", (db.enc(fields), db.now(), job["id"]))
         if not job.get("description"):
@@ -652,6 +655,7 @@ async def do_scan(job: dict, run: Run) -> list[dict]:
 
 async def prepare(job_id: str, research: bool | None = None) -> None:
     """fetch -> (scan) -> research -> draft"""
+    from .fill.base import BotWall
     run = Run(job_id, "draft")
     try:
         job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (job_id,)))
@@ -668,6 +672,9 @@ async def prepare(job_id: str, research: bool | None = None) -> None:
             async with _sem():
                 try:
                     await do_scan(job, run)
+                except BotWall as e:
+                    _held_by_bot_wall(job, run, str(e))
+                    return
                 except Exception as e:
                     run.log(f"Scan failed ({e}); drafting common questions instead")
         from . import llm
@@ -679,6 +686,19 @@ async def prepare(job_id: str, research: bool | None = None) -> None:
         run.log("ERROR " + "".join(traceback.format_exception_only(type(e), e)).strip())
         run.done("error")
         _set_status(job_id, "error", str(e)[:500])
+
+
+def _held_by_bot_wall(job: dict, run: "Run", wall: str) -> None:
+    """The site showed a bot check, not the form: stop, and hand it to the user. Never try to get past it."""
+    from .scheduler import notify
+    site = guardrails.site_name(guardrails.site_of(job))
+    why = (f"{site} showed a bot check instead of the form (\"{wall}\"). Jobsmith never tries to get past one: "
+           "open the posting yourself to apply, or take over in the Jobsmith window.")
+    run.log(why)
+    db.x("UPDATE jobs SET hold_reason=? WHERE id=?", (why[:500], job["id"]))
+    _set_status(job["id"], "error", why[:500])
+    run.done("waiting_user")
+    notify("Jobsmith needs you", f"{job['company']}: the site asked whether you're a person. Apply there yourself.")
 
 
 def _drafts_for_fill(job_id: str) -> list[dict]:
@@ -698,7 +718,7 @@ def _drafts_for_fill(job_id: str) -> list[dict]:
 async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None:
     """Fill the form in a visible browser tab. Submits only if `submit` and the job is ready."""
     from .fill import greenhouse, generic
-    from .fill.base import SUBMIT_SELECTORS, captcha_visible, page_confirms_submission
+    from .fill.base import SUBMIT_SELECTORS, bot_wall, captcha_visible, page_confirms_submission
     job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (job_id,)))
     run = Run(job_id, "fill")
     if not can_fill(job["ats"]):
@@ -750,6 +770,10 @@ async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None
             url = job.get("referral_url") or job["url"]
             run.log(f"Opening {url}" + (" (your referral link)" if job.get("referral_url") else ""))
             banners = await adapter.open_form(page, url) or []
+            if wall := await bot_wall(page):
+                live_set(job_id, phase="review", note="a bot check: take over to apply yourself")
+                _held_by_bot_wall(job, run, wall)
+                return
             live_set(job_id, phase="filling")
             if adapter is greenhouse:
                 ans = profile.answers()
@@ -1013,6 +1037,7 @@ async def fill_multistep(job_id: str, submit: bool = False) -> None:
     """Workday-style flows: answer each page as it appears, stop at review (or submit when trusted)."""
     from . import draft, learn
     from .fill import multistep
+    from .fill.base import BotWall
     from .scheduler import notify
     job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (job_id,)))
     run = Run(job_id, "fill")
@@ -1116,6 +1141,9 @@ async def fill_multistep(job_id: str, submit: bool = False) -> None:
             t = asyncio.create_task(watch_tab(job_id, page, run_dir, run))
             _tasks.add(t)
             t.add_done_callback(_tasks.discard)
+        except BotWall as e:
+            live_set(job_id, phase="review", note="a bot check: take over to apply yourself")
+            _held_by_bot_wall(job, run, str(e))
         except asyncio.CancelledError:
             _abandon(job_id, "stopped while submitting")
             raise
