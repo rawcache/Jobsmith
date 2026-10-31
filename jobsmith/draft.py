@@ -373,11 +373,23 @@ SIGNATURE = re.compile(r"signature|\bsign (here|below)|\be-?sign\b", re.I)
 # Lever's disability question: any answer, even "I do not want to answer", shows Name and Date below it and makes
 # them required, a signature. Jobsmith never signs for you, so it's left blank, which discloses nothing either way.
 SIGNED_ANSWER = re.compile(r"disabilitySelectElement|eeo\[disability\]")
-# About a disability but not whether you have one: a PWD card or ID, its number, an accommodation. Your profile's
-# disability answer doesn't say, so it's yours (rule 2: never guessed from the nearest fact, nor by the AI).
-DISABILITY_DETAIL = re.compile(r"\b(cards?|ids?|certificates?|registration|registered|udid|accommodat\w*|"
-                               r"percent(age)?|(type|kind|nature) of (your )?disabilit\w*|describe|details? (of|about))\b",
-                               re.I)
+# Your profile's disability answer says one thing: whether you have a disability. It fills only a question that asks
+# exactly that. Anything else about a disability or an accommodation (a PWD card or ID, its type, help you'd need) is
+# yours: never guessed from the nearest answer, and never the AI's (rule 2).
+DISABILITY_ANY = re.compile(r"disabilit|\bdisabled\b|\bpwds?\b|accommodat|handicap", re.I)
+DISABILITY_STATUS = re.compile(
+    r"^(disability( status)?|disabled|pwd|(voluntary )?self[- ]identification of disability( form)?)$|"
+    r"^(do|did) you (currently )?(have|had) (a |any )?disabilit(y|ies)\b|"
+    r"^(are you|i am) (a )?(pwd|disabled|(person|individual) with (a )?disabilit(y|ies))\b|"
+    r"^(do you )?(identify as|consider yourself)( to be| to have)? (a |having a )?(disabled|disabilit|person with)", re.I)
+DISABILITY_DETAIL = re.compile(r"\b(cards?|ids?|certificates?|number|no\.|registration|registered|udid|accommodat\w*|"
+                               r"assist\w*|support|percent(age)?|type|kind|nature|describe|details?|which|what)\b", re.I)
+
+
+def _disability_detail(label: str) -> bool:
+    """A question about a disability that isn't "do you have one" (see above)."""
+    l = " ".join((label or "").split()).lower().strip(" *?:")
+    return bool(DISABILITY_ANY.search(l)) and not (DISABILITY_STATUS.search(l) and not DISABILITY_DETAIL.search(l))
 
 
 def deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | None:
@@ -418,13 +430,13 @@ def deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | Non
             return None  # generated below
         return {"kind": "file", "canon": None, "answer": "", "confidence": 0.0,
                 "issues": ["Jobsmith doesn't know what file this wants; attach it yourself"]}
-    if not canon or canon in ("resume", "cover_letter"):
-        return None
-    if canon == "disability_status" and DISABILITY_DETAIL.search(field["label"]):
+    if field["qtype"] != "file" and canon in ("disability_status", None) and _disability_detail(field["label"]):
         return {"kind": "answer_bank", "canon": None, "answer": "", "confidence": 0.0 if field["required"] else 1.0,
                 "issues": ["Asks about your disability beyond whether you have one; answer it yourself"]
                 if field["required"] else [],
                 "rationale": "About your disability beyond your profile's answer: left for you"}
+    if not canon or canon in ("resume", "cover_letter"):
+        return None
     if canon == "high_school":
         # Your profile is about college and work; a high school's name or year would be a guess, AI's or ours
         return {"kind": "answer_bank", "canon": canon, "answer": "", "confidence": 0.0 if field["required"] else 1.0,
