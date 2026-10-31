@@ -56,10 +56,11 @@
   }
 
   // a password box, even one switched to plain text by "Show password": by type, autocomplete, name or label
-  // (an id or name like user_password or newPassword has no word breaks; a label must say the word. Not "pwd":
-  // on many forms that's a person with a disability)
+  // (an id or name like user_password or newPassword has no word breaks; a label must say the word. "pwd" only as
+  // the whole name or its last part: isPWD is a person with a disability)
   const isPassword = el => el.type === "password" || /password/i.test(el.autocomplete || "") ||
-    /pass(word|wd)/i.test(`${el.name || ""} ${el.id || ""}`) || /\bpass(word|wd)\b/i.test(labelFor(el));
+    /pass(word|wd)/i.test(`${el.name || ""} ${el.id || ""}`) || [el.name, el.id].some(n => /(^|[_-])pwd$/i.test(n || "")) ||
+    /\bpass(word|wd)\b/i.test(labelFor(el));
   const HONEYPOT = /robots? only|if you('| a)re (a )?human|\bhoneypot\b|(do not|don't) (fill|enter|complete|type)[^.]{0,40}\b(humans?|robots?|bots?|spam)\b|\b(bots?|spam|robots?)\b[^.]{0,40}leave (this|it) (field )?(blank|empty)|leave (this|it) (field )?(blank|empty)[^.]{0,40}\b(bots?|spam|robots?|humans?)\b/i;   // as base.HONEYPOT
 
   function scan() {
