@@ -1,4 +1,5 @@
 """The per-application audit trail: what each submission sent and where every answer came from."""
+import pytest
 from fastapi.testclient import TestClient
 
 from conftest import FIXTURES
@@ -197,6 +198,19 @@ def test_an_unconfirmed_demographic_answer_is_never_drafted():
     r = draft.deterministic({"field": "q", "label": "Are you Hispanic/Latino?", "qtype": "select",
                              "options": ["Yes", "No", "Decline to self-identify"], "required": True}, profile.answers(), job)
     assert r["answer"] == "No" and not r["issues"]
+
+
+@pytest.mark.parametrize("label", ["PWD card holder", "Are you a PWD?", "I am a person with a disability (PWD)"])
+def test_a_pwd_question_is_the_disability_question_and_never_drafted(label, fake_llm):
+    """PWD (a person with a disability) is the disability question: only your confirmed answer goes in, never the AI."""
+    from jobsmith import classify
+    asked = []
+    fake_llm(lambda s, p: asked.append(p) or {"answers": []})
+    assert classify.canon_for(label) == "disability_status"
+    profile.set_answer("disability_status", "No", confirmed=False)
+    r = draft.deterministic({"field": "q", "label": label, "qtype": "checkbox", "options": [], "required": False},
+                            profile.answers(), {"id": "x", "company": "Acme", "description": ""})
+    assert r["answer"] == "" and "Confirm your demographic answers" in r["issues"][0] and not asked
 
 
 def test_a_required_unconfirmed_demographic_holds_autopilot():

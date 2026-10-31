@@ -584,6 +584,11 @@ async def test_autofill_fills_nothing_on_workdays_create_account_page(page):
     await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")   # "Show password", then Fill
     await page.wait_for_timeout(500)
     assert not await page.evaluate("__calls.some(c => c.type === 'answers')")
+    await page.evaluate("document.querySelectorAll('input[name*=assword], input[id*=assword]').forEach(e => { "
+                        "e.type = 'tel'; e.autocomplete = 'new-password'; })")       # drawn as a number pad
+    await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
+    await page.wait_for_timeout(500)
+    assert not await page.evaluate("__calls.some(c => c.type === 'answers')")
 
 
 @browser

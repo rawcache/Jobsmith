@@ -968,7 +968,9 @@ async def test_workdays_saved_sign_in_pages_are_seen_as_sign_in_and_never_read_a
                            'aria-label="Choose one"><label>Employment Pass number <input name="ep"></label>'
                            '<label>Are you a person with disability (PWD)? <input name="isPWD"></label>'
                            '<label>Choose one <input name="pwd"></label><label>Again <input id="user-pwd"></label>'
-                           '<label><input type="checkbox" name="is_pwd"> I am a person with a disability (PWD)</label></form>')
+                           '<label><input type="checkbox" name="is_pwd"> I am a person with a disability (PWD)</label>'
+                           '<label>PIN <input type="tel" name="pin" autocomplete="current-password"></label>'
+                           '<label>Code <input type="number" id="account_pwd"></label></form>')
     assert [f["label"] for f in await scan_form(page)] == ["Employment Pass number",
                                                           "Are you a person with disability (PWD)?",
                                                           "I am a person with a disability (PWD)"]
