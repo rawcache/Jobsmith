@@ -484,6 +484,64 @@ async def test_the_submit_watcher_sees_ashbys_submit_on_the_saved_ramp_form(page
     page._jobsmith_sent.clear()                         # caught; don't fail the fixture for it
 
 
+LEVER_LOCATION = "Current location"
+
+
+@browser
+async def test_autofill_on_the_saved_lever_form_picks_the_place_and_never_signs(page):
+    """The saved Palantir form (Lever): each question is read by its own words (not its dropdown's options), the
+    place is picked from Lever's lookup (typing alone is emptied when the box is left), and the disability question
+    is left blank with its signature (Name, Date) never shown or filled. The engine is told each field's name on
+    the page, so it knows Lever's eeo[…] fields. Nothing is sent."""
+    await _load(page, {"panelOpen": True}, fixture="lever_palantir_form.html", answers={
+        "Full name": {"value": "Alex Rivera", "kind": "standard"},
+        LEVER_LOCATION: {"value": "Boston, MA", "pick": "Boston, Massachusetts, United States", "kind": "standard"},
+        "Veteran status": {"value": "I am not a protected veteran", "kind": "answer_bank"},
+        "Disability status": {"value": "", "kind": "answer_bank"}})
+    await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
+    note = "document.querySelector('#jobsmith-panel').shadowRoot.querySelector('.note')"
+    await page.wait_for_function(f"{note}?.innerText.includes('Filled')", timeout=30000)
+    sent = await page.evaluate("__calls.find(c => c.type === 'answers').body.fields")
+    by_label = {f["label"]: f for f in sent}
+    assert by_label["Disability status"]["name"] == "eeo[disability]"
+    assert by_label["Resume/CV"]["required"] and not any("Select ..." in f["label"] for f in sent)
+    assert await page.input_value('[name="name"]') == "Alex Rivera"
+    assert await page.input_value("#location-input") == "Boston, MA, USA"
+    assert '"Boston, MA, USA"' in await page.input_value("#selected-location")
+    assert await page.eval_on_selector('[name="eeo[veteran]"]', "e => e.selectedOptions[0].text") == \
+        "I am not a protected veteran"
+    assert await page.input_value("#disabilitySelectElement") == ""
+    assert not await page.is_visible('[name="eeo[disabilitySignature]"]')
+    assert await page.input_value('[name="eeo[disabilitySignature]"]') == ""
+    assert await page.evaluate("window.__submits") == 0
+    await _never_submitted(page)
+
+
+@browser
+async def test_autofill_leaves_levers_place_for_you_when_its_not_exactly_one(page):
+    """Plain "Boston" matches four of Lever's places: which one is yours isn't autofill's guess. The box is left
+    empty (Lever empties it anyway when the list closes) and nothing is sent."""
+    await _load(page, {"panelOpen": True}, fixture="lever_palantir_form.html", answers={
+        LEVER_LOCATION: {"value": "Boston", "kind": "standard"}})
+    await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
+    note = "document.querySelector('#jobsmith-panel').shadowRoot.querySelector('.note')"
+    await page.wait_for_function(f"{note}?.innerText.includes('Filled')", timeout=30000)
+    assert await page.input_value("#location-input") == "" and await page.input_value("#selected-location") == ""
+    await _never_submitted(page)
+
+
+@browser
+async def test_the_submit_watcher_sees_levers_submit_on_the_saved_palantir_form(page):
+    """The other side of the watcher on Lever: Submit application (after Lever's captcha step) posts the form to
+    its own address, and that is caught. Required fields are switched off here so the browser lets it through."""
+    await _load(page, {"panelOpen": False}, fixture="lever_palantir_form.html")
+    await page.eval_on_selector("#application-form", "f => { f.noValidate = true; }")
+    await page.click("#btn-submit")
+    await page.wait_for_timeout(500)
+    assert page._jobsmith_sent and page._jobsmith_sent[0].startswith("POST ")
+    page._jobsmith_sent.clear()                         # caught; don't fail the fixture for it
+
+
 @browser
 async def test_autofill_picks_greenhouse_dropdowns_and_the_city_from_its_lookup(page):
     """#19: on Greenhouse's form the dropdowns open on key-up, not key-down, so autofill left Country, Location

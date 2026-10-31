@@ -103,47 +103,270 @@ async def test_scan_generic_form(page):
     assert fields["Resume/CV"]["qtype"] == "file"
 
 
-async def test_lever_generic_fill_stops_before_submit(tmp_path, page):
-    await profile.ingest_document(FIXTURES / "sample_resume.tex")
-    answers = {k: v["value"] for k, v in profile.answers().items()}
-    values = {
-        '[name="name"]': f"{answers['first_name']} {answers['last_name']}",
-        '[name="email"]': answers["email"],
-        '[name="phone"]': answers["phone"],
-        "#location-input": answers["location"],
-        '[name="org"]': "Northwind Labs",
-        '[name="urls[LinkedIn]"]': answers["linkedin"],
-        '[name="urls[GitHub]"]': answers["github"],
-        '[name="urls[Other]"]': "https://example.com/alex-rivera",
-        '[name="cards[demo-question-1][field0]"]': "5000 USD net per month",
-        '[name="cards[demo-question-2][field0]"]': "C2: Proficiency / Native",
-        '[name="cards[demo-question-3][field0]"]': "I enjoy building useful software and solving engineering problems.",
-    }
-    url = (FIXTURES / "lever_form.html").resolve().as_uri()
-    fields = await generic.scan(page, url)
-    assert {f["field"] for f in fields} == set(values) | {"#resume-upload-input"}
-    assert {f["qtype"] for f in fields} == {"text", "textarea", "radio", "file"}
-    assert all(not f["value"] for f in fields)
-    drafts = [dict(f, value=values.get(f["field"], "")) for f in fields]
-    resume = tmp_path / "resume.pdf"
-    resume.write_bytes(b"%PDF-1.4\n%%EOF\n")
+PALANTIR_LEVER = "https://jobs.lever.co/palantir/4d29249a-d7e8-4c39-880d-3b35d7b2f6f6/apply"
+LEVER_FORM = (FIXTURES / "lever_palantir_form.html").resolve().as_uri()
 
-    result = await generic.fill(page, drafts, {"resume": str(resume)})
 
-    assert not result["failed"], result
-    assert len(result["filled"]) == len(fields) == len(result["sent"])
-    for selector, expected in values.items():
-        if "demo-question-2" in selector:
-            assert await page.locator(selector + ":checked").input_value() == expected
-        else:
-            assert await page.input_value(selector) == expected
-    assert await page.input_value('[name="name"]') == "Alex Rivera"
-    assert await page.input_value('[name="email"]') == "alex.rivera@example.edu"
-    assert await page.locator("#resume-upload-input").evaluate("el => [...el.files].map(f => f.name)") == ["resume.pdf"]
-    assert await page.locator("#btn-submit").is_visible()
-    assert await page.evaluate("[window.submitClicks, window.submitEvents]") == [0, 0]
-    assert page.url == url
+def _card(card: str, n: int = 0) -> str:
+    return f'[name="cards[{card}][field{n}]"]'
+
+
+LANGUAGES = _card("a69a985a-eae9-4c14-90fb-b5a4b891523e")
+WORK_AUTH_LEVER, SPONSORSHIP = _card("1c719ca9-5069-4afe-9e82-39ca420e0edb"), _card("1c719ca9-5069-4afe-9e82-39ca420e0edb", 1)
+HIGH_SCHOOL, HIGH_SCHOOL_YEAR = _card("d54adf7b-3148-4095-93bb-72bef32a61f8"), _card("d54adf7b-3148-4095-93bb-72bef32a61f8", 1)
+UNIVERSITY = _card("3da58b41-acf5-40a1-945e-c7f047ef8050")
+GRAD_YEAR, MAJOR = _card("026d7ce7-7ca4-44ed-9db6-1c7857707f0e"), _card("c2bf8591-ecbb-4de6-bf0b-e8ea17f8afa2")
+HEARD, SUMMER = _card("037683ac-0e2a-4adf-82d9-49bd682697cc"), _card("c9485a46-997f-459a-91d1-7649ceb70cb1")
+WHICH_ROLE = _card("2e761a6e-8f9e-42d3-85be-28acde951b29")
+CHANGED_MIND = _card("262ed6b7-e6fc-4130-81ab-749cc54c56d8")
+NOTETAKER = _card("73796cde-fc01-4758-9002-c85155f3503d")
+
+
+async def _checked(page, sel: str) -> list[str]:
+    return await page.eval_on_selector_all(sel + ":checked", "els => els.map(e => e.value)")
+
+
+async def test_scan_reads_the_saved_lever_form_as_lever_shows_it(page):
+    """Lever wraps each question in a <label> with its control: the question is the label's own words, not the
+    dropdown's options or "ATTACH RESUME/CV", and ✱ marks it required. The disability signature (Name, Date)
+    stays hidden until that question is answered, so it isn't a field to fill."""
+    from jobsmith import classify
+    await page.goto(LEVER_FORM)
+    fields = {f["label"]: f for f in await scan_form(page)}
+    assert fields["Resume/CV"]["qtype"] == "file" and fields["Resume/CV"]["required"]
+    assert fields["Full name"]["required"] and fields["Current location"]["required"] and not fields["Phone"]["required"]
+    assert fields["Veteran status"]["field"] == '[name="eeo[veteran]"]' and not fields["Veteran status"]["required"]
+    assert fields["Disability status"]["options"] == [
+        "Yes, I have a disability, or have had one in the past",
+        "No, I do not have a disability and have not had one in the past", "I do not want to answer"]
+    assert fields["Language Skill(s) (Check all that apply)"]["qtype"] == "multiselect"
+    assert len(fields["Language Skill(s) (Check all that apply)"]["options"]) == 33
+    assert not any("ATTACH" in label or "Select ..." in label or "✱" in label for label in fields)
+    assert "Name" not in fields and "Date" not in fields
+    assert classify.canon_for("Year of High School Graduation") == "high_school"     # not your college's year
+    assert classify.canon_for("High School Name") == "high_school"
+    for f in fields.values():
+        assert await page.locator(f["field"]).count(), f["field"]          # every key finds its field
+
+
+async def test_levers_location_is_picked_from_its_lookup(page):
+    """Lever's Current location empties itself when you leave it without picking a place from its list (as the live
+    form does), so typing alone loses it. Jobsmith types the city and picks the matching place; with no matching
+    place it leaves the box empty for you rather than picking a near one."""
+    await page.goto(LEVER_FORM)
+    await page.fill("#location-input", "Boston, MA")
+    await page.click('[name="email"]')
+    assert await page.input_value("#location-input") == ""                  # lost, as on Lever
+    assert await base.fill_field(page, "#location-input", "text", "Boston, MA")
+    assert await page.input_value("#location-input") == "Boston, MA, USA"
+    assert json.loads(await page.input_value("#selected-location"))["name"] == "Boston, MA, USA"
+    await page.click('[name="email"]')
+    assert await page.input_value("#location-input") == "Boston, MA, USA"   # picked, so it stays
+    assert not await base.fill_lookup(page, "#location-input", "Boston, TX", wait_ms=3000)
+    assert await page.input_value("#location-input") == "" and await page.input_value("#selected-location") == ""
+
+
+async def test_runner_finds_levers_submit_button_and_its_thank_you(page):
+    """Autopilot's side of a real submit on Lever, on the saved form: the first visible SUBMIT_SELECTORS match is
+    Lever's "Submit application" (its real submit button is hidden), the browser's required-field check runs first,
+    and Lever's "Application submitted!" counts as the confirmation. A CAPTCHA that asks for a person is seen."""
+    await page.goto(LEVER_FORM)
     assert not await page_confirms_submission(page)
+    btn = None
+    for sel in base.SUBMIT_SELECTORS:                                       # as runner.fill picks it
+        b = page.locator(sel).first
+        if await b.count() and await b.is_visible():
+            btn = b
+            break
+    assert btn and await btn.get_attribute("id") == "btn-submit"
+    await page.evaluate("window.__captchaChallenge = true")
+    await btn.click()
+    assert await base.captcha_visible(page) and await page.evaluate("window.__submits") == 0
+    await page.goto(LEVER_FORM)
+    await page.click("#btn-submit")                                         # nothing filled in: the browser stops it
+    assert await page.evaluate("window.__submits") == 0 and not await page_confirms_submission(page)
+    await page.eval_on_selector("#application-form", "f => { f.noValidate = true; }")
+    await page.click("#btn-submit")
+    assert await page.evaluate("window.__submits") == 1
+    assert await page_confirms_submission(page)
+
+
+async def _lever_job(tmp_path, location: str = "New York, NY") -> str:
+    """The saved Palantir form as a job, with Alex's resume attached and the US answers Alex confirmed."""
+    await profile.ingest_document(FIXTURES / "sample_resume.tex")
+    profile.set_answer("work_authorized_us", "Yes", confirmed=True)
+    profile.set_answer("needs_sponsorship", "No", confirmed=True)
+    profile.set_answer("veteran_status", "I am not a protected veteran", confirmed=True)
+    profile.set_answer("disability_status", "No, I do not have a disability and have not had one in the past",
+                       confirmed=True)
+    pdf = tmp_path / "resume.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    db.x("INSERT INTO documents(kind, filename, path, text, is_primary, created_at) VALUES('resume','resume.pdf',?,'',1,?)",
+         (str(pdf), db.now()))
+    jid = sources.add_job_url(PALANTIR_LEVER, "Palantir", "Forward Deployed Software Engineer, Internship - Commercial")
+    assert db.q1("SELECT ats FROM jobs WHERE id=?", (jid,))["ats"] == "lever"
+    db.x("UPDATE jobs SET url=?, locations=?, description='Forward deployed engineering at Palantir.' WHERE id=?",
+         (LEVER_FORM, json.dumps([location]), jid))
+    trust("lever")
+    db.set_settings({"browser_channel": "", "headless": True, "autonomy": "autonomous", "trust_threshold": 0})
+    return jid
+
+
+async def test_lever_saved_palantir_form_is_filled_and_held_before_submit(fake_llm, tmp_path, monkeypatch):
+    """The saved Palantir form (tests/fixtures/lever_palantir_form.html, captured read-only from jobs.lever.co)
+    through the whole autopilot path: scan, draft, fill, hold. Work authorization and sponsorship come from the
+    confirmed profile (the job is in New York); the place is picked from Lever's lookup; high school questions
+    and the AI notetaker consent wait for Alex; the disability question stays blank because any answer there needs
+    Alex's signature, which Jobsmith never gives. Submit is never pressed."""
+    async def no_watch(*a):
+        return None
+    monkeypatch.setattr(runner, "watch_tab", no_watch)
+    jid = await _lever_job(tmp_path)
+    jetson = [f["id"] for f in profile.facts() if "Jetson" in f["text"]]
+    asked = []
+
+    def responder(system, prompt):
+        asked.append(prompt.split("QUESTIONS TO ANSWER:")[1])
+        return {"answers": [{"field": CHANGED_MIND, "fact_ids": jetson, "confidence": 0.9,
+                             "answer": "I switched my fire detection model to NVIDIA Jetson Nano after testing it."}]}
+    fake_llm(responder)
+    await runner.prepare(jid, research=False)
+    try:
+        await runner.fill(jid, submit=True)
+        page = runner.LIVE[jid]["page"]
+        assert await page.input_value('[name="name"]') == "Alex Rivera"
+        assert await page.input_value('[name="email"]') == profile.answers()["email"]["value"]
+        assert await page.input_value("#location-input") == "Boston, MA, USA"           # picked from the lookup
+        assert await page.evaluate("document.querySelector('#resume-upload-input').files.length") == 1
+        assert await page.input_value('[name="urls[GitHub]"]') == profile.answers()["github"]["value"]
+        assert await _checked(page, WORK_AUTH_LEVER) == ["Yes"] and await _checked(page, SPONSORSHIP) == ["No"]
+        assert "Jetson" in await page.input_value(CHANGED_MIND)
+        assert await page.input_value(HIGH_SCHOOL) == "" and await page.input_value(HIGH_SCHOOL_YEAR) == ""
+        assert await _checked(page, NOTETAKER) == []
+        assert await page.eval_on_selector('[name="eeo[veteran]"]', "e => e.selectedOptions[0].text") == \
+            "I am not a protected veteran"
+        assert await page.input_value("#disabilitySelectElement") == ""
+        assert not await page.is_visible('[name="eeo[disabilitySignature]"]')
+        assert await page.input_value('[name="eeo[disabilitySignature]"]') == ""
+        assert await page.evaluate("window.__submits") == 0
+        assert not await page_confirms_submission(page)
+    finally:
+        await runner.browser.close()
+    drafts = {d["label"]: d for d in draft.drafts_for(jid)}
+    auth = drafts["Are you legally authorized to work in the country for which you are applying?"]
+    assert auth["answer"] == "Yes" and auth["rationale"].endswith("(you confirmed it)")
+    assert drafts["Disability status"]["answer"] == "" and "never signs" in drafts["Disability status"]["rationale"]
+    never_ai = ("authorized to work", "sponsorship", "High School", "Disability", "Veteran", "notetakers",
+                "Which university")
+    assert not [q for q in never_ai for a in asked if q in a], asked        # rule 2, and nothing to guess
+    job = db.q1("SELECT status, hold_reason FROM jobs WHERE id=?", (jid,))
+    assert job["status"] == "filled" and job["hold_reason"]
+    needs_you = draft.readiness(jid)["blockers"]
+    for label in ("High School Name", "Year of High School Graduation", "As part of our interview process",
+                  "Which university are you currently attending"):
+        assert any(b.startswith(label) for b in needs_you), (label, needs_you)
+    assert not [b for b in needs_you if b.startswith(("Disability", "Veteran", "Are you legally authorized"))], needs_you
+    assert "Current location" not in job["hold_reason"], job["hold_reason"]       # the place was picked
+    assert "High School Name: needs your answer" in job["hold_reason"]            # empty on purpose, not a failure
+    assert not db.q("SELECT 1 FROM runs WHERE job_id=? AND kind='submit'", (jid,))
+
+
+async def test_lever_asks_about_the_jobs_own_country_so_a_london_job_waits_for_you(fake_llm, tmp_path, monkeypatch):
+    """"Authorized to work in the country for which you are applying?" names no country: it's the job's. Your
+    confirmed answers are for the US, so for a job in London it's left for you, never answered from them."""
+    jid = await _lever_job(tmp_path, location="London, United Kingdom")
+    fake_llm(lambda s, p: {"answers": []})
+    fields = [{"field": WORK_AUTH_LEVER, "label": "Are you legally authorized to work in the country for which you "
+               "are applying?", "qtype": "radio", "required": True, "options": ["Yes", "No"], "description": ""}]
+    job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,)))
+    got = draft.deterministic(fields[0], profile.answers(), job)
+    assert got["answer"] == "" and "country of this job" in got["issues"][0]
+    job["locations"] = ["New York, NY", "Palo Alto, CA"]
+    assert draft.deterministic(fields[0], profile.answers(), job)["answer"] == "Yes"
+    job["locations"] = []                                                    # no place listed: can't tell
+    assert draft.deterministic(fields[0], profile.answers(), job)["answer"] == ""
+    for remote in (["Remote"], ["Remote - Worldwide"], ["New York, NY", "Remote (Canada)"],  # no country, or not
+                   ["Remote - US / EMEA"], ["United States / Argentina"], ["New York, NY or London"],  # only the US
+                   ["United States / Remote"]):
+        job["locations"] = remote
+        assert draft.deterministic(fields[0], profile.answers(), job)["answer"] == "", remote
+    for us in (["Remote - US"], ["Hybrid - Boston, MA"], ["Remote, United States"]):
+        job["locations"] = us
+        assert draft.deterministic(fields[0], profile.answers(), job)["answer"] == "Yes", us
+
+
+def test_a_place_is_picked_only_when_it_is_exactly_yours():
+    """From a place lookup's list, the place with your city and every state or country you gave: never a city that
+    merely contains yours, and never a guess between two places with your city's name."""
+    assert base.place_match(["East York, PA, USA", "York, PA, USA"], "York, PA") == 1
+    assert base.place_match(["East York, PA, USA", "York, ON, CAN"], "York, PA") is None
+    assert base.place_match(["Boston, MA, USA", "Boston, NY, USA"], "Boston") is None          # which Boston?
+    assert base.place_match(["Boston, MA, USA", "Boston, NY, USA"], "Boston, Massachusetts") == 0
+    assert base.place_match(["Boston, MA, USA", "Boston, Lincolnshire, England, GBR"],
+                            "Boston, Massachusetts, United States") == 0
+    assert base.place_match(["Boston, MA, USA"], "Boston, TX") is None
+
+
+async def test_a_label_wrapping_its_control_deeper_still_names_it(page):
+    """<label><span>Email <input></span></label>: the words beside the control are the question, even when the part
+    of the label that holds the control holds them too. Lever's shape (words, then a box holding the control and its
+    own button text) still reads only the words."""
+    await page.set_content("""<form><label><span>Email ✱ <input type="email" name="email"></span></label>
+        <label><span><input type="text" name="city" required>City</span></label>
+        <label><div>Resume/CV</div><div><a>ATTACH RESUME/CV</a><input type="file" name="resume"></div></label></form>""")
+    fields = {f["field"]: f for f in await scan_form(page)}
+    assert fields['[name="email"]']["label"] == "Email" and fields['[name="email"]']["required"]
+    assert fields['[name="city"]']["label"] == "City"
+    assert fields['[name="resume"]']["label"] == "Resume/CV"
+
+
+async def test_a_signature_is_never_filled_even_when_it_shows():
+    """If you pick a disability answer yourself, Lever shows Name and Date for your signature. Those are yours:
+    held, never filled with your name, from the engine or the extension (which sends the page's field name)."""
+    ans = profile.answers()
+    for f in ({"field": '[name="eeo[disabilitySignature]"]', "label": "Name"},
+              {"field": "js41", "name": "eeo[disabilitySignatureDate]", "label": "Date"}):
+        got = draft.deterministic(dict(f, qtype="text", required=True, options=[], description=""), ans)
+        assert got["answer"] == "" and "never signs" in got["issues"][0]
+    lever = {"field": "js40", "name": "eeo[disability]", "label": "Disability status", "qtype": "select",
+             "required": False, "options": ["I do not want to answer"], "description": ""}
+    assert draft.deterministic(lever, ans)["answer"] == ""
+
+
+async def test_autopilot_sends_the_saved_lever_form_once_everything_is_answered(fake_llm, tmp_path):
+    """The whole path on Lever, through runner.fill: every required answer resolved (the ones only Alex could give,
+    given by Alex), autopilot presses "Submit application", the browser's required-field check passes, Lever's
+    captcha step passes (the stand-in's invisible one), and "Application submitted!" is recorded as proof."""
+    from jobsmith import audit
+    jid = await _lever_job(tmp_path)
+    profile.set_answer("ai_tools_consent", "Yes", confirmed=True)
+    jetson = [f["id"] for f in profile.facts() if "Jetson" in f["text"]]
+    said = {LANGUAGES: "English (ENG)", HEARD: "LinkedIn", SUMMER: "New York City or somewhere nearby",
+            WHICH_ROLE: "Yes, I am interested in the Forward Deployed Software Engineer internship.",
+            CHANGED_MIND: "I switched my fire detection model to NVIDIA Jetson Nano after testing it."}
+    fake_llm(lambda s, p: {"answers": [{"field": k, "answer": v, "fact_ids": jetson, "confidence": 0.9}
+                                       for k, v in said.items() if json.dumps(k)[1:-1] in p]})
+    await runner.prepare(jid, research=False)
+    yours = {HIGH_SCHOOL: "Example High School", HIGH_SCHOOL_YEAR: "2023", UNIVERSITY: "Other - School Not Listed",
+             GRAD_YEAR: "2027", MAJOR: "Computer Science"}
+    for d in draft.drafts_for(jid):                       # you answered what only you could, and approved the rest
+        db.x("UPDATE drafts SET verdict='green', final_answer=COALESCE(?, final_answer) WHERE id=?",
+             (yours.get(d["field"]), d["id"]))
+    assert draft.readiness(jid)["ready"], draft.readiness(jid)["blockers"]
+    try:
+        await runner.fill(jid, submit=True)
+    finally:
+        await runner.browser.close()
+    runs = db.q("SELECT kind, status, log FROM runs WHERE job_id=? ORDER BY id", (jid,))
+    assert db.q1("SELECT status FROM jobs WHERE id=?", (jid,))["status"] == "submitted", runs
+    assert [r["status"] for r in runs if r["kind"] == "submit"] == ["done"]
+    [sub] = audit.for_job(jid)
+    assert sub["sent_by"] == "autopilot" and sub["fields"]
+    [proof] = sub["confirmations"]
+    assert "Application submitted!" in proof["text"]
+    sent = {f["label"]: f for f in sub["fields"]}
+    assert sent["Current location"]["answer"].startswith("Boston")
+    assert not sent.get("Disability status", {}).get("answer")
 
 
 async def test_runner_fill_and_detect_submission(fake_llm, tmp_path):

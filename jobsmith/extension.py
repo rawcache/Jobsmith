@@ -52,7 +52,7 @@ def _field(f: dict, i: int) -> dict:
              "multiselect": "multiselect", "file": "file", "combobox": "select"}.get(f.get("type", ""), "text")
     return {"field": str(f.get("id") or f"f{i}"), "label": (f.get("label") or "").strip()[:300], "qtype": qtype,
             "required": bool(f.get("required")), "options": [str(o)[:200] for o in (f.get("options") or [])][:200],
-            "description": (f.get("description") or "")[:500], "section": "main"}
+            "description": (f.get("description") or "")[:500], "section": "main", "name": str(f.get("name") or "")[:200]}
 
 
 async def answers(url: str, fields: list[dict], title: str = "", company: str = "", site_name: str = "") -> dict:

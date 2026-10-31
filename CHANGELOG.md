@@ -3,6 +3,19 @@
 ## Unreleased
 
 ### Added
+- Lever forms are filled end to end, proven on a saved copy of Palantir's real application form. Each question is
+  read by its own words (not its dropdown's options or "ATTACH RESUME/CV"), and Lever's ✱ marks it required;
+  Current location is picked from Lever's own list of places (typing alone is emptied when you leave the box); a
+  question about "the country for which you are applying" gets your US answer only when every location the job
+  lists is in the US; high school questions are left for you; and Lever's disability question stays blank, because
+  any answer there asks for your signature (your name and the date), which Jobsmith never gives.
+- Cookie and consent banners are closed the way a careful person would: a real click on the most private choice
+  the banner offers (Reject all, then "essential only", then a plain close unless the banner says closing agrees).
+  Jobsmith never presses Accept, Allow, OK or Got it; a banner that offers only those is left, and anything it
+  covers waits for you. This runs on every site autopilot fills, on each page of a multi-page form, and again just
+  before filling for a banner that loads late. Lever's banner was covering its Languages checkboxes.
+- An application held for you says "needs your answer" for a question left for you on purpose, and "couldn't fill
+  it" only when Jobsmith tried and failed.
 - Ashby forms are filled end to end, proven on a saved copy of Ramp's real application form. Ashby's Yes/No
   questions (two buttons, not a checkbox you can see) are now found and answered, by autopilot and by the
   extension; autopilot recognizes Ashby's "Your application was successfully submitted" page. Along the way:

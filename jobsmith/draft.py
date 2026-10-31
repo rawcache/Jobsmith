@@ -241,8 +241,32 @@ PLACE = re.compile(r"\b(?:in|within)\s+(?:the\s+)?([A-Z][\w.'’-]*(?:\s+(?:of\s
 ANY_OF = re.compile(r"\bor\b|and/or|one of|any of|either", re.I)
 
 
-def _place_scope(label: str) -> str:
-    """'us' (no other place named), 'any' (the US or somewhere else will do) or 'other'."""
+# "Authorized to work in the country for which you are applying?" names no country: it means the job's
+JOBS_COUNTRY = re.compile(r"\b(the|this) country (for which|in which|where|to which)|country (you('re| are)|you have) "
+                          r"appl|country (of|for) (this|the) (job|role|position|opening)", re.I)
+
+
+_NOT_A_PLACE = re.compile(r"\b(remote|hybrid|on-?site|in-office|flexible)\b", re.I)
+_ANYWHERE = re.compile(r"\b(worldwide|global(ly)?|anywhere|international)\b", re.I)
+
+
+def _names_us(loc: str) -> bool:
+    """Whether a job location names only places in the US. Stricter than match._in_us, which takes plain "Remote"
+    as a match: "Remote" and "Remote - Worldwide" name no country, and "Remote - US / EMEA" names more than one, so
+    none of them can say which country a question means."""
+    from .match import _in_us
+    if _ANYWHERE.search(loc):
+        return False
+    parts = [_NOT_A_PLACE.sub(" ", p).strip(" -–—,:() ") for p in re.split(r"[/|;&]|\bor\b|\band\b", loc, flags=re.I)]
+    return all(p and _in_us(p) for p in parts)          # "United States / Remote": the Remote part names no country
+
+
+def _place_scope(label: str, job: dict | None = None) -> str:
+    """'us' (no other place named), 'any' (the US or somewhere else will do) or 'other'. A question about the job's
+    own country is 'us' only when every location the posting lists is in the US."""
+    if JOBS_COUNTRY.search(label):
+        locs = [l for l in (job or {}).get("locations") or [] if l.strip()]
+        return "us" if locs and all(_names_us(l) for l in locs) else "other"
     us = lambda p: NAMES_US.fullmatch(p) or NAMES_US.fullmatch(p.rstrip(".,")) or p in US_STATES.values()
     if not ELSEWHERE.search(label) and all(us(p) for p in PLACE.findall(label)):
         return "us"
@@ -330,7 +354,23 @@ def _edu_date(field: dict) -> tuple[str, int] | None:
 MESSAGING = re.compile(r"\b(sms|text messages?|texts? (from|about)|whatsapp)\b", re.I)
 
 
+# A signature (Lever's "Name" and "Date" under the disability question are eeo[disabilitySignature…]): never ours.
+SIGNATURE = re.compile(r"signature|\bsign (here|below)|\be-?sign\b", re.I)
+# Lever's disability question: any answer, even "I do not want to answer", shows Name and Date below it and makes
+# them required, a signature. Jobsmith never signs for you, so it's left blank, which discloses nothing either way.
+SIGNED_ANSWER = re.compile(r"disabilitySelectElement|eeo\[disability\]")
+
+
 def deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | None:
+    where = f"{field['field']} {field.get('name') or ''}"       # the extension's ids are its own; name is the page's
+    if SIGNATURE.search(f"{where} {field['label']}"):
+        return {"kind": "answer_bank", "canon": None, "answer": "", "confidence": 0.0 if field["required"] else 1.0,
+                "issues": ["Asks for your signature; Jobsmith never signs for you, so sign it yourself"]
+                if field["required"] else [], "rationale": "A signature: left for you"}
+    if SIGNED_ANSWER.search(where):
+        return {"kind": "answer_bank", "canon": "disability_status", "answer": "", "confidence": 1.0, "issues": [],
+                "rationale": "Left blank: Lever asks you to sign any answer here (your name and the date), and Jobsmith "
+                             "never signs for you. To answer it, pick yours on the form and sign it yourself"}
     if field["qtype"] in ("radio", "checkbox", "select", "multiselect") and \
             MESSAGING.search(" ".join([field["label"], *(field.get("options") or [])])):
         return {"kind": "answer_bank", "canon": None, "answer": "", "confidence": 0.0 if field["required"] else 1.0,
@@ -361,17 +401,25 @@ def deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | Non
                 "issues": ["Jobsmith doesn't know what file this wants; attach it yourself"]}
     if not canon or canon in ("resume", "cover_letter"):
         return None
+    if canon == "high_school":
+        # Your profile is about college and work; a high school's name or year would be a guess, AI's or ours
+        return {"kind": "answer_bank", "canon": canon, "answer": "", "confidence": 0.0 if field["required"] else 1.0,
+                "issues": ["Asks about your high school, which your profile doesn't cover; answer it yourself"]
+                if field["required"] else [],
+                "rationale": "About your high school: left for you"}
     if canon == "previously_employed":
         value, confirmed = _worked_here(job or {}, ans, field["label"])[0], True
     else:
         value, confirmed = _derived(canon, ans, job)
     if canon in ("work_authorized_us", "needs_sponsorship"):
-        scope = _place_scope(field["label"])
+        scope = _place_scope(field["label"], job)
         # "Authorized in the US, Canada or LATAM?": your US "Yes" answers it; a US "No" or a US sponsorship need doesn't
         if scope == "other" or (scope == "any" and not (canon == "work_authorized_us" and value.lower() == "yes")):
+            why = ("Asks about the country of this job, which isn't (or isn't only) the US; your profile answers for "
+                   "the US, so answer it yourself") if JOBS_COUNTRY.search(field["label"]) else \
+                  "Asks about working somewhere other than the US; your profile answers for the US, so answer it yourself"
             return {"kind": "answer_bank", "canon": canon, "answer": "", "confidence": 0.0,
-                    "issues": ["Asks about working somewhere other than the US; your profile answers for the US, so "
-                               "answer it yourself"] if field["required"] else []}
+                    "issues": [why] if field["required"] else []}
     sensitive = canon in profile.SENSITIVE_KEYS
     if canon in profile.EEO_KEYS and value and not confirmed:
         # Demographics are never on a resume, so an unconfirmed one has nothing behind it: never filled (rule 2).

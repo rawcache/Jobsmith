@@ -1,0 +1,21 @@
+<!doctype html>
+<!-- Written for tests/test_banners.py from a notice-style cookie banner's published banner markup (ids, classes, button words), not
+     captured from a site. A form with a checkbox under a banner fixed to the bottom of the window: a real click on
+     the checkbox lands on the banner until it's closed. Pressing a banner button hides it and records the choice in
+     window.__choice. -->
+<html><head><meta charset="utf-8"><title>accept_only</title>
+<style>body{margin:0;font:16px sans-serif;height:100vh} form{padding:20px}
+#agree-row{position:absolute;bottom:40px;left:20px} .bar{position:fixed;left:0;right:0;bottom:0;min-height:140px;background:#222;color:#fff;padding:16px;z-index:10}
+.bar button{margin:4px}</style></head><body>
+<form id="application"><h1>Apply: Hardware Intern</h1>
+<label for="first_name">First name</label> <input id="first_name" name="first_name" type="text">
+<div id="agree-row"><label><input id="agree" type="checkbox" name="agree"> I have read the job description</label></div>
+<button type="submit" id="submit">Submit application</button></form>
+<div class="cookie-banner bar">
+<p>This site uses cookies. By using it you accept our use of cookies.</p>
+<button data-choice="accept">Accept</button> <button data-choice="ok">Got it</button></div>
+<script>window.__choice = null;
+document.querySelectorAll('[data-choice]').forEach(b => b.addEventListener('click', e => { e.preventDefault();
+  window.__choice = b.dataset.choice; document.querySelector('.bar').style.display = 'none'; }));
+document.getElementById('application').addEventListener('submit', e => e.preventDefault());</script>
+</body></html>

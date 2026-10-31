@@ -1,0 +1,12 @@
+<!doctype html>
+<!-- Written for tests/test_banners.py: the application's own consent question, inside the form, with a Decline
+     button. Jobsmith must not press it: it's a question for the user, not a cookie banner. -->
+<html><head><meta charset="utf-8"><title>consent question</title>
+<style>body{margin:0;font:16px sans-serif} .sticky{position:sticky;bottom:0;background:#eee;padding:12px}</style></head><body>
+<form id="application"><h1>Apply: Hardware Intern</h1>
+<div class="sticky" role="region" aria-label="Consent to cookies and data processing">
+<label for="why">Why this role?</label> <textarea id="why" name="why"></textarea>
+<p>Do you consent to us storing cookies and your data for future openings?</p>
+<button type="button" id="decline" onclick="window.__choice='decline'">Decline</button>
+<button type="button" onclick="window.__choice='accept'">I consent</button></div></form>
+<script>window.__choice = null;</script></body></html>

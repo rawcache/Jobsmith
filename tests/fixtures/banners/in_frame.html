@@ -1,0 +1,10 @@
+<!doctype html>
+<!-- Written for tests/test_banners.py, after the way Sourcepoint and TrustArc draw their banner: an iframe fixed over
+     the bottom of the page. Its Reject all button removes the frame and records the choice in window.__choice. -->
+<html><head><meta charset="utf-8"><title>in frame</title>
+<style>body{margin:0;font:16px sans-serif;height:100vh} #agree-row{position:absolute;bottom:40px;left:20px}
+iframe{position:fixed;left:0;bottom:0;width:100%;height:150px;border:0;z-index:10}</style></head><body>
+<form id="application"><label for="first_name">First name</label> <input id="first_name" type="text">
+<div id="agree-row"><label><input id="agree" type="checkbox"> I have read the job description</label></div></form>
+<iframe id="sp_message_iframe_1" title="SP Consent Message" srcdoc="<!doctype html><body style='margin:0;background:#222;color:#fff;font:16px sans-serif;height:150px'><div class='message-container' role='dialog' aria-label='Privacy and cookies'><p>We and our partners use cookies to measure and personalise.</p><button onclick=&quot;parent.__choice='accept';parent.document.getElementById('sp_message_iframe_1').remove()&quot;>Accept all</button><button onclick=&quot;parent.__choice='reject';parent.document.getElementById('sp_message_iframe_1').remove()&quot;>Reject all</button></div></body>"></iframe>
+<script>window.__choice = null;</script></body></html>

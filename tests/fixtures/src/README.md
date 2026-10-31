@@ -53,3 +53,42 @@ uv run python tests/fixtures/src/ashby_fixture.py /tmp/ashby/captured.html /tmp/
 ```
 
 Check the result has no real person's details in it (the builder only catches emails and phone numbers).
+
+## `lever_form.js` + `lever_fixture.py` → `../lever_palantir_form.html`
+
+`lever_palantir_form.html` is Palantir's application form for "Forward Deployed Software Engineer, Internship -
+Commercial" on Lever (`jobs.lever.co/palantir/4d29249a-d7e8-4c39-880d-3b35d7b2f6f6/apply`), saved blank on
+2026-10-30 with `scripts/capture/capture.py` (GETs only; every POST, including Lever's hCaptcha and analytics, was
+blocked; see `jobsmith/readonly.py`). Lever puts its stylesheet in the page twice; `lever_fixture.py` keeps only the
+rules the page uses, replaces Lever's web fonts with local ones, drops everything that would load from the network,
+blanks Palantir's Lever account id, the Lever accounts that last edited each question, and the time zone the
+capture's browser filled in, and cuts Lever's hidden JSON copy of each question card to its first three options (the
+visible university list keeps all 3,302). It refuses to write a page with an email address or phone number in it
+other than the posting's own accommodations address, or with an editor's account id left in.
+
+`lever_form.js` is our stand-in for Lever's scripts, none of Lever's code. It does what Lever's `application.js`,
+`requiredCheckboxGroups.js` and `retrieveLocations.js` were read to do, and the live form was seen doing:
+
+- choosing a resume shows its file name;
+- a required group of checkboxes (Languages) stays required until one is ticked;
+- Current location is a lookup: a key press searches after a pause, picking a place fills the box and the hidden
+  `selectedLocation`, and leaving the box with the list open (without picking) empties both. The answers are the
+  ones Lever's lookup gave for "Boston" (read through the same guard, typing in the live box, nothing sent);
+- any answer to Disability status, even "I do not want to answer", shows Name and Date and makes them required;
+- the cookie banner (saved with the page: the cookieconsent widget, fixed along the bottom of the window, over
+  whatever is scrolled there) closes on Deny or Accept and stores the choice in `cookieconsent_status`, as that
+  widget does; `window.__cookieChoice` records which (`tests/test_banners.py`);
+- Submit application runs the captcha step (passes at once; `window.__captchaChallenge = true` shows a challenge
+  frame instead), clicks Lever's hidden submit button so the browser checks required fields, then posts the form to
+  its own address with `fetch` and shows Lever's "Application submitted!" (the words from Lever's thank-you page,
+  read with a GET; the live Submit was never pressed).
+
+To rebuild:
+
+```bash
+uv run python scripts/capture/capture.py \
+  https://jobs.lever.co/palantir/4d29249a-d7e8-4c39-880d-3b35d7b2f6f6/apply /tmp/lever/captured.html
+uv run python tests/fixtures/src/lever_fixture.py /tmp/lever/captured.html tests/fixtures/lever_palantir_form.html
+```
+
+Check the result has no real person's details in it (the builder only catches emails and phone numbers).

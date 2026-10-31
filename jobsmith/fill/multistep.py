@@ -14,7 +14,7 @@ from typing import Callable
 
 from playwright.async_api import Page
 
-from .base import CONFIRM_RE, css_for, fill_field, scan_form
+from .base import CONFIRM_RE, css_for, dismiss_banners, fill_field, scan_form
 
 START_BUTTONS = ['[data-automation-id="adventureButton"]', 'a:has-text("Apply Now")', 'button:has-text("Apply Now")',
                  'a:has-text("Apply")', 'button:has-text("Apply")']
@@ -91,6 +91,7 @@ async def run(page: Page, url: str, *, answer: Callable, files: dict, log: Calla
     await page.wait_for_timeout(2500)
     filled_total, issues = 0, []
 
+    await dismiss_banners(page, log)
     start = await _first_visible(page, START_BUTTONS)
     if start and not await page.locator("form input:visible, form textarea:visible").count():
         await start.click()
@@ -105,6 +106,7 @@ async def run(page: Page, url: str, *, answer: Callable, files: dict, log: Calla
                 return {"status": "waiting_user", "filled": filled_total, "issues": ["Sign-in not completed"]}
             await page.wait_for_timeout(2000)
 
+        await dismiss_banners(page, log)           # each page can bring its own
         auto = await _first_visible(page, AUTOFILL_BUTTONS)
         if auto and files.get("resume"):
             await auto.click()

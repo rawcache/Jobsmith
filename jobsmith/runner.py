@@ -749,7 +749,7 @@ async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None
             adapter = greenhouse if job["ats"] == "greenhouse" else generic
             url = job.get("referral_url") or job["url"]
             run.log(f"Opening {url}" + (" (your referral link)" if job.get("referral_url") else ""))
-            await adapter.open_form(page, url)
+            banners = await adapter.open_form(page, url) or []
             live_set(job_id, phase="filling")
             if adapter is greenhouse:
                 ans = profile.answers()
@@ -775,6 +775,8 @@ async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None
                 result["failed"] = [x for x in result["failed"] if x[0] not in done] + more["failed"]
             else:
                 result = await adapter.fill(page, drafts_, files)
+            for text in banners + (result.get("banners") or []):
+                run.log(f"Closed a cookie banner with \"{text}\" (the most private choice it offered).")
             for label, why in result["failed"]:
                 run.log(f"  ✗ {label}: {why}")
             run.log(f"Filled {len(result['filled'])} fields, {len(result['failed'])} need you")
@@ -808,7 +810,8 @@ async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None
                 live_set(job_id, phase="review", note="approve autopilot's first submission here")
             elif submit and not auto:
                 why = ([capped] if capped else []) + (ready["blockers"] or [])[:3] + \
-                    [f"{f[0]}: couldn't fill it" for f in result["failed"]][:3]
+                    [f"{f[0]}: " + ("needs your answer" if f[1] == "no answer" else "couldn't fill it")
+                     for f in result["failed"]][:3]
                 run.log("Held for your review: " + "; ".join(why))
                 db.x("UPDATE jobs SET hold_reason=? WHERE id=?", ("; ".join(why)[:500], job_id))
             if auto:
