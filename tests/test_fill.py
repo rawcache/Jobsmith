@@ -962,6 +962,8 @@ async def test_workdays_saved_sign_in_pages_are_seen_as_sign_in_and_never_read_a
         labels = [f["label"] for f in await scan_form(page)]
         assert not [l for l in labels if "robots" in l or "Password" in l], (name, labels)
     assert labels == ["Email Address", "I agree"]                           # the create-account page
+    await page.evaluate("document.querySelectorAll('input[type=password]').forEach(e => { e.type = 'text'; })")
+    assert [f["label"] for f in await scan_form(page)] == ["Email Address", "I agree"]   # "Show password": still one
 
 
 @pytest.mark.parametrize("resume", [False, True])

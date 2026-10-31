@@ -579,6 +579,11 @@ async def test_autofill_fills_nothing_on_workdays_create_account_page(page):
     assert await page.eval_on_selector_all("input", "els => els.filter(e => e.value && e.type !== 'hidden' && "
                                            "e.type !== 'checkbox').length") == 0
     assert not await page.eval_on_selector_all('input[type="checkbox"]', "els => els.some(e => e.checked)")
+    assert await page.evaluate("window.__signInPresses") == 0
+    await page.evaluate("document.querySelectorAll('input[type=password]').forEach(e => { e.type = 'text'; })")
+    await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")   # "Show password", then Fill
+    await page.wait_for_timeout(500)
+    assert not await page.evaluate("__calls.some(c => c.type === 'answers')")
 
 
 @browser
