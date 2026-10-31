@@ -718,7 +718,7 @@ def _drafts_for_fill(job_id: str) -> list[dict]:
 async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None:
     """Fill the form in a visible browser tab. Submits only if `submit` and the job is ready."""
     from .fill import greenhouse, generic
-    from .fill.base import SUBMIT_SELECTORS, bot_wall, captcha_visible, page_confirms_submission
+    from .fill.base import SUBMIT_SELECTORS, BotWall, bot_wall, captcha_visible, page_confirms_submission
     job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (job_id,)))
     run = Run(job_id, "fill")
     if not can_fill(job["ats"]):
@@ -771,9 +771,7 @@ async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None
             run.log(f"Opening {url}" + (" (your referral link)" if job.get("referral_url") else ""))
             banners = await adapter.open_form(page, url) or []
             if wall := await bot_wall(page):
-                live_set(job_id, phase="review", note="a bot check: take over to apply yourself")
-                _held_by_bot_wall(job, run, wall)
-                return
+                raise BotWall(wall)
             live_set(job_id, phase="filling")
             if adapter is greenhouse:
                 ans = profile.answers()
@@ -879,6 +877,10 @@ async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None
             _set_status(job_id, "filled")
             run.done("waiting_user")
             watch = True
+        except BotWall as e:
+            live_set(job_id, phase="review", note="a bot check: take over to apply yourself")
+            _held_by_bot_wall(job, run, str(e))
+            watch = True        # if you finish it in the Jobsmith window, its confirmation is still recorded
         except asyncio.CancelledError:
             _abandon(job_id, "stopped while submitting")
             raise
@@ -1144,6 +1146,9 @@ async def fill_multistep(job_id: str, submit: bool = False) -> None:
         except BotWall as e:
             live_set(job_id, phase="review", note="a bot check: take over to apply yourself")
             _held_by_bot_wall(job, run, str(e))
+            t = asyncio.create_task(watch_tab(job_id, page, run_dir, run))   # records it if you finish it yourself
+            _tasks.add(t)
+            t.add_done_callback(_tasks.discard)
         except asyncio.CancelledError:
             _abandon(job_id, "stopped while submitting")
             raise

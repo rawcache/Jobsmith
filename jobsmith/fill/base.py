@@ -636,10 +636,13 @@ class BotWall(Exception):
 
 
 async def bot_wall(page: Page) -> str:
-    """The bot check's own words if the page is one (else ''). Only a page without a form counts: an application
-    with a reCAPTCHA box ("I'm not a robot") under its fields is a form, and its CAPTCHA is handled at Submit."""
+    """The bot check's own words if the page is one (else ''). Only a page with nothing to fill counts: an
+    application with a reCAPTCHA box ("I'm not a robot") under even one field is a form, and its CAPTCHA is handled
+    at Submit. (Cloudflare's and DataDome's checks draw their widget in a frame; the page itself has no fields.)"""
+    fillable = ('input:visible:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="submit"])'
+                ':not([type="button"]), textarea:visible, select:visible')
     try:
-        if await page.locator("input:visible, textarea:visible, select:visible").count() >= 3:
+        if await page.locator(fillable).count():
             return ""
     except Exception:
         return ""

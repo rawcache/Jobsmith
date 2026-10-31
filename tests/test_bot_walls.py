@@ -56,9 +56,12 @@ async def test_an_application_form_is_never_a_bot_check(page, form):
     assert await base.bot_wall(page) == ""
 
 
-async def test_a_form_that_mentions_robots_is_still_a_form(page):
-    await page.set_content("""<form><label>Name <input name=n></label><label>Email <input name=e></label>
-        <label>Why? <textarea name=w></textarea></label><p>Please verify you are human below.</p></form>""")
+@pytest.mark.parametrize("fields", [
+    "<label>Email <input type=email name=e></label>",                                # one field is enough
+    "<label>Name <input name=n></label><label>Why? <textarea name=w></textarea></label>",
+])
+async def test_a_form_that_mentions_robots_is_still_a_form(page, fields):
+    await page.set_content(f"<form>{fields}<p>Please verify you are human below.</p></form>")
     assert await base.bot_wall(page) == ""
 
 
@@ -88,9 +91,27 @@ async def test_autopilot_hands_a_bot_check_to_you_and_never_retries_it(fake_llm)
     assert jid not in scheduler.pick_new_jobs(50)
 
 
-async def test_a_bot_check_when_filling_stops_before_anything_is_typed(fake_llm, tmp_path):
+async def test_a_held_bot_check_is_never_retried_even_when_its_words_look_like_a_network_hiccup():
+    """Cloudflare's "Checking if the site connection is secure" has "connect" in it, which the scheduler's retry for
+    network errors looks for. A bot check is never retried, an hour later or ever."""
+    jid = sources.add_job_url(BOSCH, "Bosch", "Quality Engineering Intern / Co-op - Spring 2027")
+    db.x("UPDATE jobs SET fit_score=90 WHERE id=?", (jid,))
+    runner._held_by_bot_wall(db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,))), runner.Run(jid, "fill"),
+                             "Checking if the site connection is secure")
+    db.x("UPDATE jobs SET updated_at=? WHERE id=?", (db.now() - 7200, jid))
+    assert "onnect" in db.q1("SELECT error FROM jobs WHERE id=?", (jid,))["error"]
+    assert jid not in scheduler.pick_new_jobs(50)
+
+
+async def test_a_bot_check_when_filling_stops_before_anything_is_typed(fake_llm, tmp_path, monkeypatch):
     """The form was read earlier (or by the extension), but this time the site shows its bot check: autopilot
-    stops at once, presses nothing, and hands it over."""
+    stops at once, presses nothing, and hands it over. The tab is still watched, so if you finish the application
+    in the Jobsmith window its confirmation is recorded."""
+    watched = []
+
+    async def watch(job_id, *a):
+        watched.append(job_id)
+    monkeypatch.setattr(runner, "watch_tab", watch)
     pdf = tmp_path / "resume.pdf"
     pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
     db.x("INSERT INTO documents(kind, filename, path, text, is_primary, created_at) VALUES('resume','resume.pdf',?,'',1,?)",
@@ -105,6 +126,7 @@ async def test_a_bot_check_when_filling_stops_before_anything_is_typed(fake_llm,
     job = db.q1("SELECT status, hold_reason FROM jobs WHERE id=?", (jid,))
     assert job["status"] == "error" and "bot check" in job["hold_reason"], db.q("SELECT kind, status, log FROM runs WHERE job_id=?", (jid,))
     assert not db.q("SELECT 1 FROM runs WHERE job_id=? AND kind='submit'", (jid,))
+    assert watched == [jid]
 
 
 async def test_a_multi_page_form_that_turns_into_a_bot_check_is_handed_to_you(page):
@@ -121,3 +143,41 @@ async def test_a_multi_page_form_that_turns_into_a_bot_check_is_handed_to_you(pa
         await multistep.run(page, (WALLS / "smartrecruiters_datadome.html").resolve().as_uri(), answer=answer,
                             files={}, log=lambda m: None, wait_for_user=None, allow_submit=lambda: False)
     assert asked == []
+
+
+async def test_a_bot_check_in_a_multi_page_application_is_held_through_the_runner(page, tmp_path, monkeypatch):
+    """The runner's side for Workday and iCIMS: held with the site's line, nothing submitted, the tab still watched.
+    The runner gets this test's page (DataDome served locally, everything else refused), never a window of its own."""
+    watched = []
+
+    async def watch(job_id, *a):
+        watched.append(job_id)
+
+    class Given:
+        async def new_page(self):
+            return page
+
+        def want_headless(self):
+            return True
+    monkeypatch.setattr(runner, "watch_tab", watch)
+    monkeypatch.setattr(runner, "browser", Given())
+    monkeypatch.setattr(runner, "takeover", Given())
+    await _serve_datadome(page)
+    pdf = tmp_path / "resume.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    db.x("INSERT INTO documents(kind, filename, path, text, is_primary, created_at) VALUES('resume','resume.pdf',?,'',1,?)",
+         (str(pdf), db.now()))
+    jid = sources.add_job_url("https://acme.wd1.myworkdayjobs.com/x/job/1", "Acme", "Hardware Intern")
+    db.x("UPDATE jobs SET url=?, ats='workday' WHERE id=?", ((WALLS / "smartrecruiters_datadome.html").resolve().as_uri(), jid))
+    db.set_settings({"autonomy": "autonomous", "trust_threshold": 0})
+    try:
+        await runner.fill_multistep(jid, submit=True)
+        import asyncio
+        await asyncio.sleep(0.1)                         # the watcher is started as a task
+    finally:
+        runner.live_drop(jid)
+    job = db.q1("SELECT status, hold_reason FROM jobs WHERE id=?", (jid,))
+    assert job["status"] == "error" and "Access is temporarily restricted" in job["hold_reason"], \
+        db.q("SELECT log FROM runs WHERE job_id=?", (jid,))
+    assert not db.q("SELECT 1 FROM runs WHERE job_id=? AND kind='submit'", (jid,))
+    assert watched == [jid]
