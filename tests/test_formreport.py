@@ -60,3 +60,11 @@ def test_the_engine_builds_the_link_for_the_panel_and_for_a_saved_application():
     _, title, body = _issue(c.get(f"/api/jobs/{jid}/form-report").json()["url"])
     assert title == "Form report: job-boards.greenhouse.io" and "LinkedIn Profile" in body and "(1 field;" in body
     assert c.get("/api/jobs/nope/form-report").status_code == 404
+
+
+def test_contact_details_written_into_the_pages_path_are_masked_even_encoded():
+    _, _, body = _issue(formreport.issue_url("https://jobs.northwind.test/apply/alex.rivera%40example.com/"
+                                            "%2B1%20617%20555%200142/7781234", FIELDS))
+    assert "alex.rivera" not in body and "555" not in body and "7781234" not in body
+    assert "`/apply/[email]/[number]/[number]`" in body
+

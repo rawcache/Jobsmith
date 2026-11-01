@@ -380,7 +380,7 @@ export default function JobPage({ id, embedded = false }: { id: string; embedded
           </section>
 
           <CoverLetter id={id} d={cover} busy={!!r.busy} onChange={load} />
-          {(job.questions?.length ?? 0) > 0 && <FormReport id={id} />}
+          <FormReport id={id} />
           </>}
         </div>
 

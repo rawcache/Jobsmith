@@ -439,8 +439,9 @@
     };
     root.querySelector(".report").addEventListener("click", async e => {
       e.preventDefault();
-      // the questions as the page words them, their kinds and choices: never what's typed in them
-      const fields = scan().map(f => ({ label: f.label, qtype: f.type, required: !!f.required, options: f.options || [] }));
+      // the questions as the page words them, their kinds and choices: never what's typed in them; a form in a frame
+      // (a job site's, inside the company's page) says its own
+      const fields = [...structure(scan()), ...await framedQuestions()];
       const r = await send({ type: "form-report", body: { url: location.href, site_name: site(), fields } });
       say(r.ok ? "Opened a GitHub issue in a new tab. Read it, add what went wrong, and post it if you want to."
                : esc(r.error), r.ok ? "" : "warn");
@@ -593,8 +594,12 @@
   }
 
   addEventListener("message", e => {                 // the page above (or the top page, past a wrapper frame) asking
-    if (e.data && e.data.jobsmith === "who" && (e.source === window.parent || e.source === window.top))
-      e.source.postMessage({ jobsmith: "here", application: holdsForm(scan()) }, "*");
+    if (e.data && e.data.jobsmith === "who" && (e.source === window.parent || e.source === window.top)) {
+      const fields = scan(), application = holdsForm(fields);
+      // "Report this form" on the top page: a frame holding the form says what it asks, never what's typed in it
+      e.source.postMessage({ jobsmith: "here", application,
+                             ...(e.data.report && application ? { report: structure(fields) } : {}) }, "*");
+    }
   });
 
   chrome.runtime.onMessage.addListener((msg, _s, reply) => {
@@ -642,6 +647,30 @@
   // Frames inside a frame, two more levels down (page -> wrapper -> job site's form is the usual case). A window
   // from another site still shows its frames, so this works across sites; nothing inside them is read.
   const UNSEEN = Object.freeze({});                  // frames past the limit: never asked, so never "answered"
+  const structure = fields => fields.map(f => ({ label: String(f.label || "").slice(0, 300), qtype: f.type,
+                                                 required: !!f.required, options: (f.options || []).slice(0, 60) }));
+  // The questions of every form in this page's frames (to depth 3), from Jobsmith's script in each; only frames this
+  // page asked are heard, and no frame is waited on past a second.
+  function framedQuestions() {
+    const asked = [...document.querySelectorAll("iframe")].flatMap(f => f.contentWindow ? [f.contentWindow, ...framesInside(f.contentWindow)] : [])
+      .filter(w => w !== UNSEEN);
+    if (!asked.length) return Promise.resolve([]);
+    const heard = new Map();
+    const listen = e => { if (e.data && e.data.jobsmith === "here" && asked.includes(e.source)) heard.set(e.source, e.data.report || []); };
+    addEventListener("message", listen);
+    for (const w of asked) try { w.postMessage({ jobsmith: "who", report: true }, "*"); } catch (_) { /* gone */ }
+    const started = Date.now();
+    return new Promise(res => {
+      const done = () => {
+        if (asked.some(w => !heard.has(w)) && Date.now() - started < 1000) return setTimeout(done, 50);
+        removeEventListener("message", listen);
+        res([...heard.values()].flat().filter(f => f && typeof f.label === "string").map(f => ({
+          label: f.label.slice(0, 300), qtype: String(f.qtype || "").slice(0, 20), required: !!f.required,
+          options: Array.isArray(f.options) ? f.options.slice(0, 60).map(o => String(o).slice(0, 100)) : [] })));
+      };
+      setTimeout(done, 50);
+    });
+  }
   function framesInside(win, depth = 2) {
     const out = [];
     let n = 0;
