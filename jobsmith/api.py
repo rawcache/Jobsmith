@@ -1423,6 +1423,28 @@ def ext_submitted(b: ExtSubmitted):
     return extension.submitted(b.url, b.title, b.site_name, b.confirmation)
 
 
+class ExtFormReport(BaseModel):
+    url: str
+    site_name: str = ""
+    fields: list[dict] = []
+
+
+@app.post("/api/ext/form-report")
+def ext_form_report(b: ExtFormReport):
+    """'Report this form' from the panel: the address of a pre-filled GitHub issue (questions and kinds, never a
+    value) for the user to read and post. Nothing is sent from here; the user's browser opens the link."""
+    from . import formreport
+    return {"url": formreport.issue_url(b.url, b.fields, b.site_name)}
+
+
+@app.get("/api/jobs/{job_id}/form-report")
+def job_form_report(job_id: str):
+    """The same, for an application's saved form (the questions Jobsmith read from it)."""
+    from . import formreport
+    j = job_or_404(job_id)
+    return {"url": formreport.issue_url(j["url"], formreport.from_questions(j.get("questions") or []), j.get("ats") or "")}
+
+
 # --------------------------------------------------------------------------- dashboard
 if WEB_DIST.exists():
     app.mount("/assets", StaticFiles(directory=WEB_DIST / "assets"), name="assets")

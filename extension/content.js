@@ -417,6 +417,8 @@
         <span class="small muted">${c && c.cover_letter ? "Attached when a field asks." : "From your resume, for this role."}</span></div></div>
       <div class="sec row"><button class="btn save">${c && c.known ? "Open in Jobsmith" : "Save to Jobsmith"}</button>
         ${c && c.known && c.status !== "submitted" ? `<button class="btn auto">Let autopilot apply</button>` : ""}</div>
+      <div class="sec small muted"><a href="#" class="report">Report this form</a> if Jobsmith read it wrong. It opens
+        a GitHub issue with the questions only, for you to check and post.</div>
     </div></div>`;
     place();
     root.querySelector(".fold").onclick = () => { state.open = false; chrome.storage.local.set({ panelOpen: false }); render(); };
@@ -435,6 +437,14 @@
       const r = await send({ type: "save", body: { url: location.href, title: pageTitle(), site_name: site() } });
       say(r.ok ? `Saved: ${esc(r.data.company)}, ${esc(r.data.title)}.` : esc(r.error), r.ok ? "" : "warn"); await load();
     };
+    root.querySelector(".report").addEventListener("click", async e => {
+      e.preventDefault();
+      // the questions as the page words them, their kinds and choices: never what's typed in them
+      const fields = scan().map(f => ({ label: f.label, qtype: f.type, required: !!f.required, options: f.options || [] }));
+      const r = await send({ type: "form-report", body: { url: location.href, site_name: site(), fields } });
+      say(r.ok ? "Opened a GitHub issue in a new tab. Read it, add what went wrong, and post it if you want to."
+               : esc(r.error), r.ok ? "" : "warn");
+    });
     root.querySelector(".auto")?.addEventListener("click", async () => {
       const r = await send({ type: "save", body: { url: location.href, title: pageTitle(), site_name: site(), apply: true } });
       say(r.ok && r.data.started ? "Autopilot is applying. Watch it in Jobsmith." : esc(r.error || "Couldn't start it."), r.ok ? "" : "warn");

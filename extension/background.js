@@ -41,6 +41,8 @@ async function file(kind, jobId) {
   }
 }
 
+const REPORT_TO = "https://github.com/rawcache/Jobsmith/issues/new?";
+
 chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   (async () => {
     if (msg.type === "ping") return reply(await call("/api/ext/ping"));
@@ -51,6 +53,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     if (msg.type === "generate") return reply(await call("/api/ext/generate", { method: "POST", body: JSON.stringify(msg.body) }));
     if (msg.type === "submitted") return reply(await call("/api/ext/submitted", { method: "POST", body: JSON.stringify(msg.body) }));
     if (msg.type === "cover") return reply(await call(`/api/jobs/${encodeURIComponent(msg.job_id)}/cover-letter`, { method: "POST" }));
+    if (msg.type === "form-report") {      // a pre-filled issue the user reads and posts; nothing is sent from here
+      const r = await call("/api/ext/form-report", { method: "POST", body: JSON.stringify(msg.body) });
+      if (r.ok && !String(r.data?.url || "").startsWith(REPORT_TO)) return reply({ ok: false, error: "That isn't a Jobsmith issue link." });
+      if (r.ok) chrome.tabs.create({ url: r.data.url });
+      return reply(r);
+    }
     if (msg.type === "open") { chrome.tabs.create({ url: (await engine()) + (msg.path || "/") }); return reply({ ok: true }); }
     reply({ ok: false, error: "unknown message" });
   })();
