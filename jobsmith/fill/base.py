@@ -459,6 +459,9 @@ async def fill_lookup(page: Page, selector: str, value: str, wait_ms: int = 6000
 
 
 async def fill_field(page: Page, selector: str, qtype: str, value: str, file_path: str | None = None) -> bool:
+    if qtype not in ("file", "radio", "multiselect", "checkbox") and value.strip() and \
+            not EXTENSION_DIGITS.fullmatch(value.strip()) and await is_extension_box(page.locator(selector).first):
+        return False                                        # never "+1" or a phone number in an extension box
     if qtype == "listbox":
         return await fill_listbox(page, selector, value)
     if qtype == "file":
@@ -482,8 +485,6 @@ async def fill_field(page: Page, selector: str, qtype: str, value: str, file_pat
     if qtype == "select":
         return await fill_select(page, selector, value)
     loc = page.locator(selector).first
-    if value.strip() and not EXTENSION_DIGITS.fullmatch(value.strip()) and await is_extension_box(loc):
-        return False                                        # never "+1" or a phone number in an extension box
     role = await loc.get_attribute("role")
     if role == "combobox":
         return await fill_combobox(page, selector, value)
