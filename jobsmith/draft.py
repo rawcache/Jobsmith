@@ -308,6 +308,17 @@ def dialling_country(ans: dict) -> str:
     return NANP.get(country, "") if north_american else ""
 
 
+def dialling_option(country: str, options: list[str]) -> str:
+    """The choice that is +1 for `country` (dialling_country only gives +1 countries): a bare "+1", else the one
+    +1 choice naming that country. Never a choice with another code, however alike the names ("United Kingdom")."""
+    plus1 = [o for o in options if re.search(r"\+\s*1(?!\d)", o)]
+    bare = [o for o in plus1 if re.fullmatch(r"\W*\+\s*1\W*", o.strip())]
+    if bare:
+        return bare[0]
+    named = [o for o in plus1 if re.search(rf"\b{re.escape(country)}\b", o, re.I)]
+    return named[0] if len(named) == 1 else ""
+
+
 def _derived(canon: str, ans: dict, job: dict | None = None) -> tuple[str, bool]:
     job = job or {}
     if canon == "referral_name":
@@ -478,11 +489,12 @@ def deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | Non
                 "rationale": "A phone extension: your profile has none, so it's left blank"}
     if canon == "phone_country_code" and field["qtype"] in ("select", "listbox", "radio"):
         country = dialling_country(ans)
-        need = ["Pick the country code of your phone number"] if field["required"] and not country else []
-        out = (classify.pick_option(country, field["options"]) or "") if country and field["options"] else country
+        out = dialling_option(country, field["options"]) if country and field["options"] else country
+        why = ("Your phone number doesn't say its country code" if not country else
+               "None of the choices is your phone number's code (+1)")
         return {"kind": "answer_bank", "canon": canon, "answer": out, "confidence": 1.0 if out else 0.0,
-                "issues": need, "rationale": "From your phone number's country code" if out else
-                "Your phone number doesn't say its country code, so it's left for you"}
+                "issues": [f"{why}; pick it yourself"] if field["required"] and not out else [],
+                "rationale": "From your phone number's country code" if out else f"{why}, so it's left for you"}
     if canon == "phone_country_code":
         # A typed dialling code box: left as the site set it. A list of countries is answered from your country.
         return {"kind": "answer_bank", "canon": canon, "answer": "", "confidence": 1.0, "issues": [],
