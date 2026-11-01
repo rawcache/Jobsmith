@@ -142,6 +142,7 @@ async def run(page: Page, url: str, *, answer: Callable, files: dict, log: Calla
         if auto and files.get("resume"):
             await auto.click()
             await page.wait_for_timeout(1500)
+            view = form_view(page)                 # the click can bring a new page, or a new frame
 
         fields = [f for f in await scan_form(view) if f["qtype"] != "hidden"]
         todo = [f for f in fields if not f.get("value")]

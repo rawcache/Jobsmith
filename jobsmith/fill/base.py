@@ -657,9 +657,9 @@ async def bot_wall(page: Page) -> str:
     so any control on the page itself, a radio button too, is the application's."""
     fillable = ('input:visible:not([type="hidden"]):not([type="submit"]):not([type="button"]), textarea:visible, '
                 'select:visible')
-    for frame in page.frames:                        # the form may be in a frame of its own (iCIMS)
-        if BOT_WALL_FRAMES.search(frame.url) or CHALLENGE_FRAMES.search(frame.url):
-            continue
+    # the page, or the frame that holds the application (iCIMS); a chat widget's box in another frame isn't a form
+    forms = [page.main_frame] + [f for name in FORM_FRAMES if (f := page.frame(name=name))]
+    for frame in forms:
         try:
             if await frame.locator(fillable).count():
                 return ""
@@ -677,9 +677,6 @@ async def bot_wall(page: Page) -> str:
             return " ".join(body[start:end if end != -1 else None].split())[:160]   # the line only: it may show your IP
     hit = next((f.url for f in page.frames if BOT_WALL_FRAMES.search(f.url)), "")
     return f"a bot check from {hit.split('/')[2]}" if hit else ""
-
-
-CHALLENGE_FRAMES = re.compile(r"recaptcha/.*/(bframe|anchor)|hcaptcha\.com/captcha|challenges\.cloudflare", re.I)
 
 
 async def captcha_visible(page: Page) -> bool:

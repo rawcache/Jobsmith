@@ -1081,3 +1081,25 @@ async def test_a_multi_page_form_in_a_frame_is_filled_page_by_page_and_stops_bef
     assert res["status"] == "review" and not res["issues"], res
     assert await page.evaluate("window.__sent") is None                          # Submit never pressed
     assert await form_view(page).input_value("#w") == "Biometrics I can test on real devices."
+
+
+AUTOFILL_IN_FRAME = ('<!doctype html><html><body><iframe name="icims_content_iframe" srcdoc="' + __import__("html").escape(
+    '<button type="button" onclick="parent.document.body.innerHTML = '
+    "'<form><label for=n>Preferred name</label><input id=n name=n><button type=button>Submit</button></form>'\">"
+    'Autofill with Resume</button>') + '"></iframe></body></html>')
+
+
+async def test_after_autofill_the_form_is_read_where_it_now_is(page, tmp_path):
+    """Autofill can bring a new page or move the form out of the frame: the next scan looks again."""
+    from jobsmith.fill import multistep
+    seen = []
+
+    async def answer(fields):
+        seen.append([f["label"] for f in fields])
+        return {}
+    (tmp_path / "resume.pdf").write_bytes(b"%PDF-1.4\n%%EOF\n")
+    await page.route("**/autofill.html", lambda r: r.fulfill(content_type="text/html", body=AUTOFILL_IN_FRAME))
+    res = await multistep.run(page, "https://careers.example.com/autofill.html", answer=answer,
+                              files={"resume": str(tmp_path / "resume.pdf")}, log=lambda m: None, wait_for_user=None,
+                              allow_submit=lambda: False)
+    assert seen == [["Preferred name"]] and res["status"] == "review", (seen, res)
