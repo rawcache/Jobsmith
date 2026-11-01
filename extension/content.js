@@ -608,9 +608,11 @@
       for (const w of big.flatMap(f => [f.win, ...f.inner])) try { w.postMessage({ jobsmith: "who" }, "*"); } catch (_) { /* gone */ }
       setTimeout(() => {
         removeEventListener("message", listen);
-        // A frame is reached when its own script answered, or (a wrapper around a job site's form) a frame inside
-        // it holds an application and answered
-        const bare = big.filter(f => !heard.has(f.win) && !f.inner.some(w => heard.get(w)));
+        // A frame is reached when it or a frame inside it holds an application and answered (a wrapper around a job
+        // site's form), or when it and every frame inside it answered (a video, say: nothing left unseen)
+        const reached = f => heard.get(f.win) || f.inner.some(w => heard.get(w)) ||
+          (heard.has(f.win) && f.inner.every(w => heard.has(w)));
+        const bare = big.filter(f => !reached(f));
         reply({ application: looksLikeApplication(fields), fields: fields.length, title: pageTitle(),
                 frames: big.map(f => f.host), nested: big.reduce((n, f) => n + f.inner.length, 0),
                 bare: bare.map(f => f.host), bareApps: bare.filter(f => f.app).map(f => f.host),
@@ -636,9 +638,10 @@
   }
   // Whether a frame Jobsmith can't look into is an application rather than a video or a map, from what the page
   // says about it: its address or title (/apply, "Job application"), or its size (an application is long).
-  const MEDIA = /(^|\.)(youtube(-nocookie)?\.com|vimeo\.com|wistia\.(com|net)|vidyard\.com|loom\.com|google\.com|spotify\.com|twitter\.com|x\.com|facebook\.com|instagram\.com|linkedin\.com)$/i;
+  const MEDIA = /(^|\.)(youtube(-nocookie)?\.com|vimeo\.com|wistia\.(com|net)|vidyard\.com|loom\.com|maps\.google\.com|spotify\.com|twitter\.com|x\.com|facebook\.com|instagram\.com|linkedin\.com)$/i;
   function framedApplication(url, el) {
-    if (MEDIA.test(url.hostname)) return false;
+    // a video or a map (Google Maps, but not Google Forms, which can be an application)
+    if (MEDIA.test(url.hostname) || (/(^|\.)google\.com$/i.test(url.hostname) && /^\/maps\b/.test(url.pathname))) return false;
     const says = `${url.pathname} ${url.search} ${el.title || ""} ${el.name || ""} ${el.id || ""}`;
     return /appl(y|ication)|candidate|career|recruit|hiring|\bjobs?\b|job[-_]?app/i.test(says) ||
       el.getBoundingClientRect().height > 900;

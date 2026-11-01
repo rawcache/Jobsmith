@@ -1393,3 +1393,55 @@ async def test_write_with_jobsmith_works_beside_a_question_in_a_job_sites_frame(
         note = await press()
         assert note == "Edit freely." and await frame.input_value("#question_12497120004") == ESSAY
         await _never_submitted(x.tab)
+
+
+def _framed(src: str, h: int = 700, title: str = "") -> bytes:
+    return f'<iframe src="{src}" title="{title}" style="width:900px;height:{h}px"></iframe>'.encode()
+
+
+APPLY_FORM = (b"<form><label for=fn>First Name</label><input id=fn><label for=ln>Last Name</label><input id=ln>"
+              b"<label for=em>Email</label><input id=em><label for=ph>Phone</label><input id=ph></form>")
+
+
+@browser
+@pytest.mark.parametrize("pages, scripted, bare, apps", [
+    # a wrapper whose own script answers (it holds no form) around another site's application it can't reach
+    ({"https://careers.acme.test/": _framed("https://embed.acme.test/wrap"),
+      "https://embed.acme.test/wrap": _framed("https://apply.unlisted-ats.test/apply")},
+     ["/wrap"], ["embed.acme.test"], []),
+    # the same wrapper around a form whose script answered: reached
+    ({"https://careers.acme.test/": _framed("https://embed.acme.test/wrap"),
+      "https://embed.acme.test/wrap": _framed("https://apply.unlisted-ats.test/apply")},
+     ["/wrap", "/apply"], [], []),
+    # three deep is reached; four deep is past the limit, so the wrapper stays unreached
+    ({"https://careers.acme.test/": _framed("https://embed.acme.test/w1"),
+      "https://embed.acme.test/w1": _framed("https://embed.acme.test/w2"),
+      "https://embed.acme.test/w2": _framed("https://apply.unlisted-ats.test/apply")},
+     ["/apply"], [], []),
+    ({"https://careers.acme.test/": _framed("https://embed.acme.test/w1"),
+      "https://embed.acme.test/w1": _framed("https://embed.acme.test/w2"),
+      "https://embed.acme.test/w2": _framed("https://embed.acme.test/w3"),
+      "https://embed.acme.test/w3": _framed("https://apply.unlisted-ats.test/apply")},
+     ["/apply"], ["embed.acme.test"], []),
+    # Google Forms titled as an application is one; a YouTube video and Google Maps aren't
+    ({"https://careers.acme.test/": _framed("https://docs.google.com/forms/d/e/x/viewform", title="Job application") +
+      _framed("https://www.youtube.com/embed/x", 360) + _framed("https://www.google.com/maps/embed?pb=x", 360)},
+     [], ["docs.google.com", "www.youtube.com", "www.google.com"], ["docs.google.com"]),
+])
+async def test_the_page_tells_the_popup_which_frames_it_couldnt_reach(page, pages, scripted, bare, apps):
+    """What the top page reports about its frames (#15, #17): frames are asked three deep; a frame counts as reached
+    when it or a frame inside it holds an application and answered, or when it and everything inside it answered.
+    Of the ones not reached, those that look like an application (address, title or size) are named apart."""
+    pages = {**pages, "https://apply.unlisted-ats.test/apply": APPLY_FORM,
+             "https://docs.google.com/forms/d/e/x/viewform": APPLY_FORM}
+    await page.route("**/*", lambda r: r.fulfill(status=200, content_type="text/html",
+                                                 body=pages.get(r.request.url, b"<p>media</p>")))
+    await page.add_init_script(_stub({"panelOpen": False}))
+    await page.goto("https://careers.acme.test/")
+    await page.wait_for_load_state("load")
+    for f in page.frames:
+        if f != page.main_frame and any(f.url.endswith(p) for p in scripted):
+            await f.add_script_tag(path=str(EXT / "content.js"))
+    await page.add_script_tag(path=str(EXT / "content.js"))
+    info = await page.evaluate("new Promise(res => __listeners.forEach(f => f({type: 'info'}, {}, res)))")
+    assert (sorted(info["bare"]), sorted(info["bareApps"])) == (sorted(bare), sorted(apps)), info
