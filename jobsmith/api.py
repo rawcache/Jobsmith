@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -1438,11 +1438,13 @@ def ext_form_report(b: ExtFormReport):
 
 
 @app.get("/api/jobs/{job_id}/form-report")
-def job_form_report(job_id: str):
-    """The same, for an application's saved form (the questions Jobsmith read from it)."""
+def job_form_report(job_id: str, go: bool = False):
+    """The same, for an application's saved form (the questions Jobsmith read from it). `go`: straight to the issue
+    page, built from the questions as they are when you click (the dashboard's link)."""
     from . import formreport
     j = job_or_404(job_id)
-    return {"url": formreport.issue_url(j["url"], formreport.from_questions(j.get("questions") or []), j.get("ats") or "")}
+    url = formreport.issue_url(j["url"], formreport.from_questions(j.get("questions") or []), j.get("ats") or "")
+    return RedirectResponse(url, status_code=303) if go else {"url": url}
 
 
 # --------------------------------------------------------------------------- dashboard
