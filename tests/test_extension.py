@@ -1423,6 +1423,16 @@ APPLY_FORM = (b"<form><label for=fn>First Name</label><input id=fn><label for=ln
       "https://embed.acme.test/w2": _framed("https://embed.acme.test/w3"),
       "https://embed.acme.test/w3": _framed("https://apply.unlisted-ats.test/apply")},
      ["/apply"], ["embed.acme.test"], []),
+    # every wrapper three deep answers "no form", but the application is a fourth level down: not reached
+    ({"https://careers.acme.test/": _framed("https://embed.acme.test/w1"),
+      "https://embed.acme.test/w1": _framed("https://embed.acme.test/w2"),
+      "https://embed.acme.test/w2": _framed("https://embed.acme.test/w3"),
+      "https://embed.acme.test/w3": _framed("https://apply.unlisted-ats.test/apply")},
+     ["/w1", "/w2", "/w3"], ["embed.acme.test"], []),
+    # a wrapper and the video inside it both answer, and neither holds a form: nothing left unseen
+    ({"https://careers.acme.test/": _framed("https://embed.acme.test/wrap"),
+      "https://embed.acme.test/wrap": _framed("https://embed.acme.test/video", 360)},
+     ["/wrap", "/video"], [], []),
     # Google Forms titled as an application is one; a YouTube video and Google Maps aren't
     ({"https://careers.acme.test/": _framed("https://docs.google.com/forms/d/e/x/viewform", title="Job application") +
       _framed("https://www.youtube.com/embed/x", 360) + _framed("https://www.google.com/maps/embed?pb=x", 360)},
