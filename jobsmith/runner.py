@@ -32,6 +32,12 @@ def is_multistep(ats_name: str) -> bool:
     return ats_name in MULTI_STEP
 
 
+def adapter_for(ats_name: str):
+    """The module that opens, reads and fills a single-page form on this site (generic for most)."""
+    from .fill import generic, greenhouse, smartrecruiters
+    return {"greenhouse": greenhouse, "smartrecruiters": smartrecruiters}.get(ats_name, generic)
+
+
 # --------------------------------------------------------------------------- run log
 class Run:
     def __init__(self, job_id: str, kind: str):
@@ -634,11 +640,11 @@ def _set_status(job_id: str, status: str, error: str | None = None) -> None:
 # --------------------------------------------------------------------------- steps
 async def do_scan(job: dict, run: Run) -> list[dict]:
     """Discover the form's fields by opening it in the browser (non-Greenhouse ATSes)."""
-    from .fill import generic
     from .fill.base import BotWall, bot_wall
     page = await browser.new_page()
     try:
-        fields = await generic.scan(page, job["url"])
+        from .fill import generic
+        fields = await getattr(adapter_for(job["ats"]), "scan", generic.scan)(page, job["url"])   # Greenhouse: none
         if not fields and (wall := await bot_wall(page)):
             raise BotWall(wall)
         fields = [f for f in fields if f["qtype"] != "hidden"]
@@ -717,7 +723,7 @@ def _drafts_for_fill(job_id: str) -> list[dict]:
 
 async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None:
     """Fill the form in a visible browser tab. Submits only if `submit` and the job is ready."""
-    from .fill import greenhouse, generic
+    from .fill import greenhouse
     from .fill.base import SUBMIT_SELECTORS, BotWall, bot_wall, captcha_visible, page_confirms_submission
     job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (job_id,)))
     run = Run(job_id, "fill")
@@ -766,7 +772,7 @@ async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None
         page = await (takeover if visible else browser).new_page()
         live_set(job_id, page, phase="opening", note="", needs_code=False, run_dir=str(run_dir))
         try:
-            adapter = greenhouse if job["ats"] == "greenhouse" else generic
+            adapter = adapter_for(job["ats"])
             url = job.get("referral_url") or job["url"]
             run.log(f"Opening {url}" + (" (your referral link)" if job.get("referral_url") else ""))
             banners = await adapter.open_form(page, url) or []
@@ -823,7 +829,7 @@ async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None
                 except Exception:
                     nodes = []
                 capped = traps.trap_reason(job, nodes, page_text) or guardrails.policy_reason(job, page_text) \
-                    or guardrails.cap_reason(job)
+                    or guardrails.cap_reason(job) or result.get("hold")     # a site Jobsmith fills only partly
             auto = submit and ready["ready"] and not result["failed"] and not capped
             first = _first_run_hold(job, run, uploaded) if auto else None
             if first:        # everything checks out, but autopilot hasn't sent one here before: you approve it

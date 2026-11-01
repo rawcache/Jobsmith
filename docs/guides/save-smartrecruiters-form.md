@@ -12,7 +12,8 @@ form is saved from your own Chrome, where an ordinary visit is let in. Phase 1 i
 - Chrome (any recent version) on your own computer. You don't need to be signed in to anything.
 - The posting Jobsmith uses for its tests: Bosch's "Quality Engineering Intern / Co-op - Spring 2027"
   (`https://jobs.smartrecruiters.com/BoschGroup/744000158818709-quality-engineering-intern-co-op-spring-2027`).
-  If it's been taken down, any US internship on SmartRecruiters will do. Note which one.
+  If it's been taken down, any US internship on SmartRecruiters will do. Note which one. (It closed; the saved
+  fixture is Bosch's "Application Engineer", 2026-10-31.)
 
 ## Steps
 

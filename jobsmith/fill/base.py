@@ -21,6 +21,13 @@ def browser_args(platform: str | None = None) -> list[str]:
 # Runs in the page. Returns every visible, fillable control with its human label.
 SCAN_JS = r"""
 () => {
+  // every open shadow root on the page (web-component forms such as SmartRecruiters' keep their boxes inside them),
+  // the page first; a box's label and the ids it points at are looked up in its own root
+  const roots = [document];
+  for (let i = 0; i < roots.length; i++) for (const e of roots[i].querySelectorAll('*')) if (e.shadowRoot) roots.push(e.shadowRoot);
+  const all = sel => roots.flatMap(r => [...r.querySelectorAll(sel)]);
+  const rootOf = el => el.getRootNode();
+  const byIdIn = (el, i) => (rootOf(el).getElementById ? rootOf(el).getElementById(i) : null) || document.getElementById(i);
   const vis = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el);
     return (r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none') || el.type === 'file'; };
   const clean = t => (t || '').replace(/\s+/g, ' ').replace(/[*✱]\s*$/, '').trim();   // ✱: Lever's required mark
@@ -36,9 +43,9 @@ SCAN_JS = r"""
     return out; };
   // The words a page gives a box: its label, ARIA name, legend or a label nearby ('' when it has none)
   const ownLabel = el => {
-    if (el.id) { const l = document.querySelector(`label[for="${CSS.escape(el.id)}"]`); if (l) return clean(l.innerText); }
+    if (el.id) { const l = rootOf(el).querySelector(`label[for="${CSS.escape(el.id)}"]`); if (l) return clean(l.innerText); }
     if (el.getAttribute('aria-labelledby')) {
-      const t = el.getAttribute('aria-labelledby').split(/\s+/).map(i => document.getElementById(i)).filter(Boolean)
+      const t = el.getAttribute('aria-labelledby').split(/\s+/).map(i => byIdIn(el, i)).filter(Boolean)
         .map(n => n.innerText).join(' '); if (clean(t)) return clean(t); }
     if (el.getAttribute('aria-label')) return clean(el.getAttribute('aria-label'));
     const wrap = el.closest('label'); if (wrap) return clean(own(wrap, el));
@@ -54,13 +61,15 @@ SCAN_JS = r"""
   const labelFor = el => ownLabel(el) || fieldLabel(el) || clean(el.placeholder || el.name || el.id);
   const unworded = el => !ownLabel(el) && !fieldLabel(el) && !clean(el.placeholder || '');
   // the section each field sits in ("Employment", "Education"), from the nearest heading above it
-  const heads = [...document.querySelectorAll('h1, h2, h3, h4, legend, [role="heading"]')].filter(h => clean(h.innerText));
+  const heads = [...all('h1, h2, h3, h4, legend, [role="heading"]')].filter(h => clean(h.innerText));
   const groupFor = el => { let g = ''; for (const h of heads) { if (h.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) g = clean(h.innerText); else break; } return g.slice(0, 60); };
-  const starred = el => { const l = el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+  const starred = el => { const l = el.id && rootOf(el).querySelector(`label[for="${CSS.escape(el.id)}"]`);
     const wrap = !l && el.closest('label');
     return /[*✱]\s*$/.test((l ? l.innerText : wrap ? own(wrap, el) : '').trim()); };
   // "#name" when the id is a plain CSS name; Ashby's ids can start with a digit, so those are [id="…"]
-  const byId = id => /^[A-Za-z_][\w-]*$/.test(id) ? `#${id}` : `[id="${id}"]`;
+  // inside a shadow root its host often has the same id (SmartRecruiters' <spl-input id=…>): name the tag too
+  const byId = (id, el) => el && rootOf(el) !== document ? `${el.tagName.toLowerCase()}[id="${id}"]`
+    : /^[A-Za-z_][\w-]*$/.test(id) ? `#${id}` : `[id="${id}"]`;
   // Workday: a dropdown keeps its choice in a box beside its button (not a question); a search box with picked
   // items as pills (multiSelectContainer); a date's year box, named "Year", whose question is the field's label
   const besideDropdown = el => !!el.previousElementSibling && el.previousElementSibling.matches('button[aria-haspopup="listbox"]');
@@ -71,9 +80,9 @@ SCAN_JS = r"""
   // a dropdown's question: its label, else the question beside it in the same field (Workday's application
   // questions), else its ARIA name without what it shows and "Select One" / "Required"
   const dropdownLabel = el => {
-    const l = el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+    const l = el.id && rootOf(el).querySelector(`label[for="${CSS.escape(el.id)}"]`);
     if (l && clean(l.innerText)) return clean(l.innerText);
-    const by = (el.getAttribute('aria-labelledby') || '').split(/\s+/).map(i => i && document.getElementById(i))
+    const by = (el.getAttribute('aria-labelledby') || '').split(/\s+/).map(i => i && byIdIn(el, i))
       .filter(Boolean).map(n => n.innerText).join(' ');
     if (clean(by)) return clean(by);
     if (fieldLabel(el)) return fieldLabel(el);
@@ -81,7 +90,7 @@ SCAN_JS = r"""
   };
   const CHOICE_TYPES = ['checkbox', 'radio', 'select-one', 'select-multiple', 'file', 'range', 'color'];
   const out = []; const seenGroups = new Set();
-  for (const el of document.querySelectorAll('input, textarea, select')) {
+  for (const el of all('input, textarea, select')) {
     const type = (el.type || el.tagName).toLowerCase();
     // a password is never Jobsmith's to type (sign-ins are handed to you), so it isn't a question at all
     if (['hidden', 'submit', 'button', 'image', 'reset', 'search', 'password'].includes(type)) continue;
@@ -96,11 +105,11 @@ SCAN_JS = r"""
     if (!vis(el) && type !== 'file') continue;
     if (besideDropdown(el)) continue;
     const auto = el.getAttribute('data-automation-id');
-    const key = el.id ? byId(el.id) : (el.name ? `[name="${el.name}"]` : (auto ? `[data-automation-id="${auto}"]` : null));
+    const key = el.id ? byId(el.id, el) : (el.name ? `[name="${el.name}"]` : (auto ? `[data-automation-id="${auto}"]` : null));
     if (!key) continue;
     if (type === 'radio' || type === 'checkbox') {
       const g = el.name || el.id; if (seenGroups.has(g)) continue;
-      const group = el.name ? [...document.querySelectorAll(`input[name="${CSS.escape(el.name)}"]`)] : [el];
+      const group = el.name ? [...rootOf(el).querySelectorAll(`input[name="${CSS.escape(el.name)}"]`)] : [el];
       seenGroups.add(g);
       const fs = el.closest('fieldset'); const legend = fs && fs.querySelector('legend');
       let label = legend ? clean(legend.innerText) : '';
@@ -138,11 +147,11 @@ SCAN_JS = r"""
   }
   // Yes/No buttons (Ashby): two buttons that toggle aria-pressed, and often a hidden checkbox holding the answer.
   // Reported as a radio question with the options Yes and No, keyed by the hidden input (or the box's id).
-  for (const box of new Set([...document.querySelectorAll('button[aria-pressed]')].map(b => b.parentElement))) {
+  for (const box of new Set([...all('button[aria-pressed]')].map(b => b.parentElement))) {
     const bs = [...box.children].filter(b => b.tagName === 'BUTTON' && b.hasAttribute('aria-pressed'));
     if (bs.length !== 2 || !bs.every(b => /^(yes|no)$/i.test(clean(b.innerText))) || !vis(bs[0])) continue;
     const named = box.querySelector('input[name]');
-    const key = named ? `[name="${named.name}"]` : (box.id ? byId(box.id) : null);
+    const key = named ? `[name="${named.name}"]` : (box.id ? byId(box.id, box) : null);
     if (!key) continue;
     let head = null;
     for (let p = box.parentElement, i = 0; p && i < 3 && !head; p = p.parentElement, i++) head = p.querySelector('label, legend');
@@ -153,10 +162,10 @@ SCAN_JS = r"""
                description: '', group: groupFor(box) });
   }
   // custom dropdowns (Workday and others): <button aria-haspopup="listbox">Select One</button>
-  for (const el of document.querySelectorAll('button[aria-haspopup="listbox"], [role="button"][aria-haspopup="listbox"]')) {
+  for (const el of all('button[aria-haspopup="listbox"], [role="button"][aria-haspopup="listbox"]')) {
     if (!vis(el) || el.closest('header, nav, [data-automation-id="header"]')) continue;   // the site's own menus
     const auto = el.getAttribute('data-automation-id');
-    const key = el.id ? byId(el.id) : (auto ? `[data-automation-id="${auto}"]` : null);
+    const key = el.id ? byId(el.id, el) : (auto ? `[data-automation-id="${auto}"]` : null);
     if (!key) continue;
     const txt = clean(el.innerText);
     out.push({ field: key, label: dropdownLabel(el), ...(dropdownLabel(el) ? {} : { unworded: true }), qtype: 'listbox',
@@ -187,6 +196,8 @@ async def scan_form(page: Page) -> list[dict]:
 
 
 def css_for(field: str) -> str:
+    if re.match(r"[a-z][\w-]*\[", field):          # "input[id=…]": a box inside a shadow root, by tag and id
+        return field
     if field.startswith(("#", "[")):
         if field.startswith("#"):
             return f'[id="{field[1:]}"]'
@@ -251,7 +262,19 @@ _OPTIONS_JS = r"""
   const vis = n => { const r = n.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
   const ids = [e.getAttribute('aria-controls'), e.getAttribute('aria-owns'), e.id && `react-select-${e.id}-listbox`];
   let box = null;
-  for (const id of ids) { if (id) { const n = document.getElementById(id); if (n && vis(n)) { box = n; break; } } }
+  // the list can sit in another shadow root than its box (SmartRecruiters' web components): its own root first
+  const byId = id => {
+    const own = e.getRootNode().getElementById ? e.getRootNode().getElementById(id) : null;
+    if (own || document.getElementById(id)) return own || document.getElementById(id);
+    const roots = [document];
+    for (let i = 0; i < roots.length; i++) for (const x of roots[i].querySelectorAll('*')) {
+      if (!x.shadowRoot) continue;
+      const n = x.shadowRoot.getElementById(id); if (n) return n;
+      roots.push(x.shadowRoot);
+    }
+    return null;
+  };
+  for (const id of ids) { if (id) { const n = byId(id); if (n && vis(n)) { box = n; break; } } }
   if (!box) {
     const ctl = e.closest('[class*="control"]');
     const root = ctl ? ctl.parentElement : e.parentElement;
@@ -355,6 +378,11 @@ async def fill_combobox(page: Page, selector: str, value: str, query: str | None
             return True
         if texts[idx].lower() in now.lower():
             return True
+        try:        # a plain box with its own list (SmartRecruiters' City) holds the choice as its value
+            if (await loc.input_value(timeout=1000)).strip().lower() == texts[idx].strip().lower():
+                return True
+        except Exception:
+            pass
     await _clear_typed(page, loc)
     await page.keyboard.press("Escape")
     return False

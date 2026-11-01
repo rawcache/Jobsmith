@@ -182,3 +182,32 @@ uv run python tests/fixtures/src/lever_fixture.py /tmp/lever/captured.html tests
 ```
 
 Check the result has no real person's details in it (the builder only catches emails and phone numbers).
+
+## `smartrecruiters_flow.js` + `smartrecruiters_fixture.py` → `../smartrecruiters_bosch_form.html`
+
+`smartrecruiters_bosch_form.html` is Bosch's "Application Engineer" form on SmartRecruiters (its "Easy apply" page),
+saved blank on 2026-10-31 from the maintainer's own Chrome with the console snippet in
+[docs/guides/save-smartrecruiters-form.md](../../../docs/guides/save-smartrecruiters-form.md) (the guide's internship
+posting had closed). SmartRecruiters shows a bot check to a headless browser, so this one wasn't captured by
+`scripts/capture/`; no posting URL is kept. The form is drawn by web components whose insides are shadow roots, saved
+as declarative templates (`<template shadowrootmode="open">`) that the browser turns back into shadow roots.
+
+```bash
+uv run python tests/fixtures/src/smartrecruiters_fixture.py ~/Desktop/jobsmith-pages/smartrecruiters.html tests/fixtures
+```
+
+The saved page stays outside the repo. `smartrecruiters_fixture.py` removes another browser extension's panel, fonts
+and styles (Simplify's), everything that would load from the network (SmartRecruiters' stylesheets, flag images,
+OneTrust's cookie script, links, and any attribute holding a URL), SmartRecruiters' company, publication and
+channel ids, and gives each icon a size of ours (without SmartRecruiters' stylesheets they fill the page). It
+refuses to write a page with an email address, a phone number, a typed value or anything left that loads from the
+network.
+
+`smartrecruiters_flow.js` is our stand-in for SmartRecruiters' scripts, none of its code:
+
+- the phone's Country code button opens and closes its list (245 countries, United States picked, as saved), and
+  picking one marks it and shows its code on the button;
+- City suggests places from a short list of ours as you type (its list was empty when saved, so these are made
+  up: what SmartRecruiters' own suggestions look like is still to be checked);
+- the footer's Next sends nothing: `window.__nextPresses` counts it. The pages after Next weren't saved, so
+  Jobsmith fills this page and stops on it.
