@@ -56,6 +56,7 @@ async def test_the_canary_passes_on_the_saved_copy_of_each_sites_form(site, brow
 @pytest.mark.parametrize("fields, problem", [
     ([{"field": "#a", "label": "Email", "qtype": "text"}], "found 1 fields"),
     ([{"field": f"#f{i}", "label": "", "qtype": "text"} for i in range(6)], "has no label"),
+    ([{"field": f'[name="q_{i}"]', "label": f"q_{i}", "qtype": "text"} for i in range(6)], "has no label"),
     ([{"field": "#n", "label": "Full name", "qtype": "text"}, {"field": "#e", "label": "Email", "qtype": "text"},
       {"field": "#r", "label": "Resume", "qtype": "file"}, {"field": "#w", "label": "Why us?", "qtype": "textarea"},
       {"field": "#x", "label": "Start date", "qtype": "datepicker"}], "of a kind Jobsmith doesn't know"),
@@ -63,6 +64,40 @@ async def test_the_canary_passes_on_the_saved_copy_of_each_sites_form(site, brow
 ])
 def test_the_canary_says_what_broke(fields, problem):
     assert any(problem in p for p in canary.check_fields(fields)), canary.check_fields(fields)
+
+
+async def test_a_field_without_a_label_fails_the_canary(browser, monkeypatch, tmp_path):
+    """The saved Lever form plus one box with no words of its own: every other field is fine, and it still fails.
+    (Jobsmith reads such a box by its name, "mystery", which is no label; one with no name either is dropped.)"""
+    page = (FIXTURES / SAVED["lever"]).read_text(encoding="utf-8")
+    broken = tmp_path / "lever_no_label.html"
+    broken.write_text(page.replace("</form>", '<div><div><div><div><div><input type="text" name="mystery"></div></div></div></div></div></form>', 1),
+                      encoding="utf-8")
+    monkeypatch.setattr(canary, "find_posting", lambda s: broken.resolve().as_uri())
+    res = await canary.run_site("lever", browser)
+    assert any("has no label" in p and "mystery" in p for p in res.problems), res
+
+
+def test_greenhouses_saved_job_api_passes_and_a_new_question_kind_fails():
+    import copy
+    import json
+    data = json.loads((FIXTURES / "greenhouse_job.json").read_text(encoding="utf-8"))
+    assert canary.check_greenhouse_api(data) == []
+    changed = copy.deepcopy(data)
+    changed["questions"][0]["fields"][0]["type"] = "input_rich_text"
+    assert any("new kind: input_rich_text" in p for p in canary.check_greenhouse_api(changed))
+    assert canary.check_greenhouse_api({"title": "x"}) == ["Greenhouse's job API gave no questions list"]
+
+
+def test_the_canary_catches_broken_classification(monkeypatch):
+    fields = [{"field": "#n", "label": "Full name", "qtype": "text"}, {"field": "#e", "label": "Email", "qtype": "text"},
+              {"field": "#r", "label": "Resume", "qtype": "file"}, {"field": "#w", "label": "Why us?", "qtype": "textarea"},
+              {"field": "#p", "label": "Phone", "qtype": "text"}]
+    assert canary.check_fields(fields) == []
+    monkeypatch.setattr(canary.classify, "question_kind", lambda label, qtype, options=None: "essay")
+    problems = canary.check_fields(fields)
+    assert any("asks for your email but reads as essay" in p for p in problems)
+    assert any("is an upload but reads as essay" in p for p in problems)
 
 
 def test_the_canary_only_reads():

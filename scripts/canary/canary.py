@@ -15,11 +15,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 import sys
 import urllib.request
 from dataclasses import asdict, dataclass, field
 
-from jobsmith import ats, classify
+from jobsmith import ats, classify, jobdetail
 from jobsmith.fill import base, generic, greenhouse
 from jobsmith.readonly import guard
 
@@ -31,6 +32,7 @@ BOARDS = {
 }
 QTYPES = {"text", "textarea", "select", "multiselect", "radio", "checkbox", "file", "listbox"}   # what scan_form gives
 STANDARD = {"name": ("first_name", "full_name"), "email": ("email",), "resume": ("resume",)}
+KINDS = {"choice", "file", "location", "yes_no", "essay", "open", "short"}      # classify.question_kind
 MIN_FIELDS = 5
 
 
@@ -67,23 +69,59 @@ def find_posting(site: str) -> str:
 
 
 def check_fields(fields: list[dict]) -> list[str]:
-    """What's wrong with what was read from a form: too few fields, a field with no label or an unknown kind, or a
-    standard field (name, email, resume) not found."""
+    """What's wrong with what was read from a form: too few fields, a field with no label or of an unknown kind, a
+    question Jobsmith can't say what answer it wants, or a standard field (name, email, resume) not found or not
+    classified as it should be (email a short answer, resume a file)."""
     problems = []
     shown = [f for f in fields if f.get("qtype") != "hidden"]
     if len(shown) < MIN_FIELDS:
         problems.append(f"found {len(shown)} fields, expected at least {MIN_FIELDS}")
     for f in shown:
-        if not (f.get("label") or "").strip():
+        label = (f.get("label") or "").strip()
+        # with no words of its own, a box is read by its name or id ("q_123"): as good as no label
+        own = set(re.findall(r'name="([^"]+)"|#([\w-]+)', f.get("field") or "")[0]) - {""} \
+            if re.search(r'name="[^"]+"|#[\w-]+', f.get("field") or "") else set()
+        if not label or label in own:
             problems.append(f"a {f.get('qtype')} field ({f.get('field', '')[:60]}) has no label")
         if f.get("qtype") not in QTYPES:
             problems.append(f"\"{f.get('label', '')[:60]}\" is of a kind Jobsmith doesn't know: {f.get('qtype')}")
+    for f in shown:
+        kind = classify.question_kind(f.get("label") or "", f.get("qtype") or "", f.get("options"))
+        if kind not in KINDS:
+            problems.append(f"\"{f.get('label', '')[:60]}\": no answer kind ({kind})")
+        canon = classify.canon_for(f.get("label") or "")
+        if canon == "email" and kind != "short":
+            problems.append(f"\"{f.get('label', '')[:60]}\" asks for your email but reads as {kind}")
+        if f.get("qtype") == "file" and kind != "file":
+            problems.append(f"\"{f.get('label', '')[:60]}\" is an upload but reads as {kind}")
     canons = {classify.canon_for(f.get("label") or "") for f in shown} | \
         {"resume" for f in shown if f.get("qtype") == "file" and "resume" in (f.get("label", "") + f.get("field", "")).lower()}
     for what, keys in STANDARD.items():
         if not canons & set(keys):
             problems.append(f"no {what} field found")
     return problems
+
+
+def check_greenhouse_api(data: dict) -> list[str]:
+    """Greenhouse's job API, where autopilot reads a Greenhouse form's questions: every question's kind is one
+    Jobsmith knows (an unknown one would be read as a text box), and the questions it gives pass check_fields."""
+    problems = []
+    if not isinstance(data, dict) or not isinstance(data.get("questions"), list):
+        return ["Greenhouse's job API gave no questions list"]
+    for q in data["questions"]:
+        for f in (q.get("fields") or []) if isinstance(q, dict) else []:
+            if f.get("type") not in jobdetail.GH_TYPES:
+                problems.append(f"Greenhouse question \"{str(q.get('label'))[:60]}\" is of a new kind: {f.get('type')}")
+    return problems + [f"in Greenhouse's job API: {p}" for p in check_fields(jobdetail.normalize_greenhouse(data))]
+
+
+def greenhouse_api(posting: str) -> dict:
+    board, job_id, region = ats.greenhouse_ids(posting)
+    host = "boards-api.eu.greenhouse.io" if region == "eu" else "boards-api.greenhouse.io"
+    req = urllib.request.Request(f"https://{host}/v1/boards/{board}/jobs/{job_id}?questions=true",
+                                 headers={"Accept": "application/json", "User-Agent": "jobsmith-canary"})
+    with urllib.request.urlopen(req, timeout=30) as r:          # a GET
+        return json.loads(r.read())
 
 
 async def run_site(site: str, browser) -> Result:
@@ -103,9 +141,16 @@ async def run_site(site: str, browser) -> Result:
         if wall := await base.bot_wall(page):
             res.problems.append(f"the site showed a bot check: {wall}")
             return res
-        fields = await base.scan_form(page)
+        # what the page holds before any field without a label is dropped (scan_form drops them; here they count)
+        seen, fields = set(), []
+        for f in await page.evaluate(base.SCAN_JS):
+            if f["field"] not in seen and not base.HONEYPOT.search(f["label"] or ""):
+                seen.add(f["field"])
+                fields.append(f)
         res.fields = len(fields)
         res.problems += check_fields(fields)
+        if site == "greenhouse" and res.posting.startswith("http"):
+            res.problems += check_greenhouse_api(greenhouse_api(res.posting))
     except Exception as e:
         res.problems.append(f"{e.__class__.__name__}: {str(e)[:300]}")
     finally:
