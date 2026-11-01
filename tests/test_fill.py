@@ -1115,13 +1115,19 @@ async def test_nothing_but_digits_ever_goes_into_a_phone_extension_box(page):
       <label for="phoneNumber--extension">Phone Extension</label><input id="phoneNumber--extension">
       <input name="phone_ext" aria-label="Ext."><input autocomplete="tel-extension" name="x1">
       <label for="p2">Phone number (ext. if any)</label><input id="p2">
-      <label for="next">Next steps</label><input id="next"></form>""")
-    for sel in ('[id="phoneNumber--extension"]', '[name="phone_ext"]', '[name="x1"]'):
+      <label for="next">Next steps</label><input id="next">
+      <label for="cx">Ext</label><input id="cx" role="combobox"></form>""")
+    for sel in ('[id="phoneNumber--extension"]', '[name="phone_ext"]', '[name="x1"]', '#cx'):
+        for qtype in ("select", "listbox"):                 # however the box was read, nothing gets through
+            if sel == "#cx":
+                assert not await fill_field(page, sel, qtype, "+1")
+                assert await page.input_value(sel) == ""
         for bad in ("+1", "617-555-0123", "x23", "none"):
             assert not await fill_field(page, sel, "text", bad), (sel, bad)
             assert await page.input_value(sel) == "", (sel, bad)
-        assert await fill_field(page, sel, "text", "23")
-        assert await page.input_value(sel) == "23"
+        if sel != "#cx":                                    # a plain box takes the digits
+            assert await fill_field(page, sel, "text", "23")
+            assert await page.input_value(sel) == "23"
     for sel in ('[id="phoneNumber--phoneNumber"]', '[id="p2"]'):
         assert await fill_field(page, sel, "text", "617-555-0123")
     assert await fill_field(page, '[id="next"]', "text", "+1 ready")

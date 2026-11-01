@@ -1484,9 +1484,19 @@ def test_an_extension_is_left_blank_and_a_required_one_waits_for_you():
     assert draft.deterministic(code, ans)["answer"] == ""                      # the site's own "+1" stays
 
 
-def test_a_dialling_code_list_is_answered_from_your_country():
-    ans = {"country": {"value": "United States", "confirmed": 1, "label": "Country"}}
-    field = {"field": "countryPhoneCode", "label": "Country Phone Code", "qtype": "listbox",
-             "options": ["Canada (+1)", "United Kingdom (+44)", "United States of America (+1)"], "required": True}
+@pytest.mark.parametrize("phone, country, picked", [
+    ("617-555-0123", "United States", "United States of America (+1)"),
+    ("+1 (617) 555-0123", "United States", "United States of America (+1)"),
+    ("(416) 555-0123", "Canada", "Canada (+1)"),
+    ("+44 20 7946 0123", "United States", ""),         # a UK number, living in the US: the code is yours to pick
+    ("020 7946 0123", "United Kingdom", ""),            # no code written, not North American: yours
+    ("617-555-0123", "", ""),                          # no country confirmed
+])
+def test_a_dialling_code_comes_from_your_phone_number_never_where_you_live(phone, country, picked):
+    ans = {"phone": {"value": phone, "confirmed": 1, "label": "Phone"},
+           "country": {"value": country, "confirmed": 1, "label": "Country"}}
+    field = {"field": "countryPhoneCode", "label": "Country Phone Code", "qtype": "select", "required": True,
+             "options": ["Canada (+1)", "United Kingdom (+44)", "United States of America (+1)"]}
     r = draft.deterministic(field, ans)
-    assert r["answer"] == "United States of America (+1)", r                  # the option, never a typed "+1"
+    assert r["answer"] == picked, r
+    assert bool(r["issues"]) is (not picked) and r["confidence"] == (1.0 if picked else 0.0)

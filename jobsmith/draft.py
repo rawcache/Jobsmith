@@ -287,6 +287,27 @@ def _place_scope(label: str, job: dict | None = None) -> str:
     return "any" if NAMES_US.search(label) and ANY_OF.search(label) else "other"
 
 
+NANP = {"us": "United States", "usa": "United States", "united states": "United States",
+        "united states of america": "United States", "canada": "Canada", "ca": "Canada"}
+
+
+def dialling_country(ans: dict) -> str:
+    """The country whose dialling code your phone number has, read from the number itself, never from where you
+    live: "+1 617…", or a ten-digit North American number when your confirmed country is the US or Canada (both +1).
+    Any other number (another code, or no code and another country) gives "": the code is yours to pick."""
+    phone = ((ans.get("phone") or {}).get("value") or "").strip()
+    country = ((ans.get("country") or {}).get("value") or "").strip().lower()
+    if not phone or not (ans.get("phone") or {}).get("confirmed") or not (ans.get("country") or {}).get("confirmed"):
+        return ""
+    digits = re.sub(r"\D", "", phone)
+    if phone.startswith("+"):
+        north_american = digits.startswith("1") and len(digits) == 11
+    else:
+        north_american = len(digits) == 10 and digits[0] in "23456789" or \
+            (len(digits) == 11 and digits.startswith("1") and digits[1] in "23456789")
+    return NANP.get(country, "") if north_american else ""
+
+
 def _derived(canon: str, ans: dict, job: dict | None = None) -> tuple[str, bool]:
     job = job or {}
     if canon == "referral_name":
@@ -295,8 +316,6 @@ def _derived(canon: str, ans: dict, job: dict | None = None) -> tuple[str, bool]
         return "Employee Referral", True
     v = lambda k: ((ans.get(k) or {}).get("value") or "").strip()
     c = lambda k: bool((ans.get(k) or {}).get("confirmed"))
-    if canon == "phone_country_code":            # a list of countries with their codes: the country you live in
-        return _derived("country", ans, job)
     if canon == "state":
         st = v("state_province")
         if st:
@@ -457,7 +476,14 @@ def deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | Non
         need = ["Asks for a phone extension, and your profile has none; fill it in yourself"] if field["required"] else []
         return {"kind": "answer_bank", "canon": canon, "answer": "", "confidence": 0.0 if need else 1.0, "issues": need,
                 "rationale": "A phone extension: your profile has none, so it's left blank"}
-    if canon == "phone_country_code" and field["qtype"] not in ("select", "listbox", "radio"):
+    if canon == "phone_country_code" and field["qtype"] in ("select", "listbox", "radio"):
+        country = dialling_country(ans)
+        need = ["Pick the country code of your phone number"] if field["required"] and not country else []
+        out = (classify.pick_option(country, field["options"]) or "") if country and field["options"] else country
+        return {"kind": "answer_bank", "canon": canon, "answer": out, "confidence": 1.0 if out else 0.0,
+                "issues": need, "rationale": "From your phone number's country code" if out else
+                "Your phone number doesn't say its country code, so it's left for you"}
+    if canon == "phone_country_code":
         # A typed dialling code box: left as the site set it. A list of countries is answered from your country.
         return {"kind": "answer_bank", "canon": canon, "answer": "", "confidence": 1.0, "issues": [],
                 "rationale": "A dialling code box: left as the site set it"}
