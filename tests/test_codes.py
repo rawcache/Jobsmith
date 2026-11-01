@@ -31,6 +31,11 @@ def test_the_code_greenhouse_sends_for_this_application_is_used():
     role = _mail(now, **{"from": "Careers <jobs@mail.acme-robotics.com>"}, subject="Your security code",
                  body="Your code for the Software Engineering Intern application: 4829135")
     assert outcomes.application_code([role], own, now)[0] == "4829135"            # the role, from the employer itself
+    sales = dict(JOB, title="Account Executive Intern")
+    ae = _mail(now, subject="Security code for your Account Executive Intern application to Acme Robotics")
+    assert outcomes.application_code([ae], sales, now)[0] == "kD8sQw2Z"           # "Account" in a role is fine
+    click = 1_800_000_000.7                                                          # mid-second
+    assert outcomes.application_code([_mail(click, when=1_800_000_000)], JOB, click)[0] == "kD8sQw2Z"
 
 
 @pytest.mark.parametrize("change, why", [

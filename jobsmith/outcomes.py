@@ -245,7 +245,9 @@ SENDERS = {"greenhouse": ("greenhouse.io", "greenhouse-mail.io"), "lever": ("lev
 NOT_APPLICATION = re.compile(
     r"\b(sign(ing)?[ -]?(in|on)|log(ging)?[ -]?(in|on)|login|two[ -]?(factor|step)|2fa|mfa|multi[ -]?factor|"
     r"password|reset|create (an |a new |your )?account|new account|account (creation|activation|registration|setup)|"
-    r"activate your account|verify your (email|account)|confirm your (email|account)|accounts?|access (code|your))\b",
+    r"activate your account|verify your (email|account)|confirm your (email|account)|"
+    r"(your|candidate|user|new|an|the) account|account (verification|access|code|login|security|password)|"
+    r"access (code|your))\b",
     re.I)
 APPLICATION = re.compile(r"\b(appl(y|ying|ied|ication|ications)|submission)\b", re.I)
 _SECOND_LEVEL = {"co", "com", "ac", "org", "net", "gov", "edu"}
@@ -274,10 +276,12 @@ def code_refusal(msg: dict, job: dict, clicked: float) -> str | None:
     sender, allowed = _from_domain(msg.get("from", "")), job_site_domains(job)
     if not any(sender == d or sender.endswith("." + d) for d in allowed):
         return f"from {sender or 'an unknown sender'}, not {job.get('company') or 'the'} job site"
-    if not clicked <= msg.get("when", 0) <= clicked + CODE_WINDOW:      # sent after the click, not an earlier try's
+    # sent after the click, not an earlier try's (an email's Date is to the second, so the click's second counts)
+    if not int(clicked) <= msg.get("when", 0) <= clicked + CODE_WINDOW:
         return "not within 15 minutes after Submit"
     text = f"{msg.get('subject', '')}\n{msg.get('body', '')[:3000]}"
-    if NOT_APPLICATION.search(text):
+    title = (job.get("title") or "").strip()                  # "your Account Executive application" isn't an account
+    if NOT_APPLICATION.search(re.sub(re.escape(title), " ", text, flags=re.I) if len(title) >= 3 else text):
         return "reads as a sign-in or account code"
     if not APPLICATION.search(text):
         return "doesn't say it's for an application"
