@@ -448,7 +448,8 @@ async def test_report_this_form_includes_a_form_in_a_frame_two_deep(page):
         await f.add_script_tag(path=str(EXT / "content.js"))
     panel = "document.querySelector('#jobsmith-panel').shadowRoot"
     await page.wait_for_function("document.querySelector('#jobsmith-panel')?.shadowRoot?.querySelector('.report')")
-    await page.evaluate(f"{panel}.querySelector('.report').click()")
+    # the popup's own "who's there?" at the same moment: its answers carry no questions and mustn't wipe the report's
+    await page.evaluate(f"{panel}.querySelector('.report').click(); __listeners.forEach(f => f({{type: 'info'}}, {{}}, () => {{}}))")
     await page.wait_for_function(f"{panel}.querySelector('.note')?.innerText.includes('Opened a GitHub issue')")
     [sent] = await page.evaluate("__calls.filter(c => c.type === 'form-report')")
     assert [f["label"] for f in sent["body"]["fields"]] == ["First Name", "Last Name", "Email", "Phone"], sent

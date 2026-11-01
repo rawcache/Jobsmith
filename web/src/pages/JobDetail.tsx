@@ -172,9 +172,10 @@ function FirstRun({ id, company, a, hold, onDone }: { id: string; company: strin
 
 /** The cover letter, as employers will get it: read it, edit it, open the PDF that gets attached. */
 /** "Report this form": a pre-filled GitHub issue with the form's questions (never your answers) to read and post. */
-function FormReport({ id }: { id: string }) {
+function FormReport({ id, questions }: { id: string; questions: number }) {
   const [url, setUrl] = useState("");
-  useEffect(() => { api.get<{ url: string }>(`/api/jobs/${id}/form-report`).then(r => setUrl(r.url)).catch(() => {}); }, [id]);
+  // again when the form's questions are read (autopilot reads them after this page opens)
+  useEffect(() => { api.get<{ url: string }>(`/api/jobs/${id}/form-report`).then(r => setUrl(r.url)).catch(() => {}); }, [id, questions]);
   if (!url) return null;
   return (
     <p className="small muted">Jobsmith read this form wrong? <a href={url} target="_blank" rel="noreferrer">Report this form</a>.
@@ -380,7 +381,7 @@ export default function JobPage({ id, embedded = false }: { id: string; embedded
           </section>
 
           <CoverLetter id={id} d={cover} busy={!!r.busy} onChange={load} />
-          <FormReport id={id} />
+          <FormReport id={id} questions={job.questions?.length ?? 0} />
           </>}
         </div>
 
