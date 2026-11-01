@@ -16,7 +16,11 @@ issue), and commit the tick with the work.
 ## Rules for all of Phase 1
 
 - Sign-ins, account creation, CAPTCHAs and emailed codes are always handed to the user. Never type a password or
-  create an account.
+  create an account. One exception, decided 2026-10-31: the code a job site emails to verify an application right
+  after Jobsmith pressed its Submit may be typed by Jobsmith, and only when all of these hold: it's in an inbox the
+  user connected; the sender's domain is that application's job site; it arrived within 15 minutes of that Submit;
+  it names that company or role. Never a sign-in, two-step, password-reset or account-creation code. Anything that
+  doesn't match goes to "Needs you" (`outcomes.application_code`, `tests/test_codes.py`).
 - When developing, capturing fixtures, testing or running canaries, touching a live job site is read-only: headless,
   every non-GET request blocked. Never submit to a real posting in tests or CI. (Only the user's own autopilot
   submits for real.) One exception, approved 2026-10-29: Ashby loads its form through two GraphQL reads sent as

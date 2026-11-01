@@ -311,9 +311,19 @@ def company_limit_reason(job: dict) -> str | None:
     return None
 
 
+_clicked_at: dict[str, float] = {}
+
+
 def claim(job_id: str) -> None:
     """Autopilot is about to click Submit: count it now, before the confirmation page shows."""
     _submitting.add(job_id)
+    _clicked_at[job_id] = time.time()
+
+
+def submitted_at(job_id: str) -> float | None:
+    """When Jobsmith itself last pressed Submit on this application (this run), or None: the clock an emailed
+    application code is checked against. A Submit you pressed yourself isn't known here, so its code is yours."""
+    return _clicked_at.get(job_id)
 
 
 def release(job_id: str) -> bool:
