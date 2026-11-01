@@ -999,3 +999,85 @@ async def test_workday_from_the_saved_posting_to_sign_in_is_handed_to_you(page, 
     assert page.url.endswith("workday_nvidia_signin.html")
     assert await page.evaluate("window.name") == ("autofillWithResume" if resume else "applyManually")
     assert await page.evaluate("window.__signInPresses") == 0
+
+
+def _icims(name: str) -> str:
+    return (FIXTURES / f"icims_idemia_{name}.html").resolve().as_uri()
+
+
+async def test_icims_saved_pages_draw_the_application_in_a_frame_and_its_sign_in_is_yours(page):
+    """IDEMIA's iCIMS pages, saved read-only up to sign-in. iCIMS draws the posting in its page's
+    "icims_content_iframe" frame, so Jobsmith reads that frame. Apply shows "Enter Your Information" (Email, then
+    Next, which finds your account or starts one) and "Log back in!" opens iCIMS's login: both are sign-ins, yours."""
+    from jobsmith.fill import multistep
+    from jobsmith.fill.base import InFrame, bot_wall, form_view
+    await page.goto(_icims("posting"))
+    view = form_view(page)
+    assert isinstance(view, InFrame) and view.url.endswith("icims_idemia_posting_frame.html")
+    assert not await multistep.needs_sign_in(page) and await bot_wall(page) == ""
+    await view.locator("a.iCIMS_ApplyOnlineButton").click()
+    await page.frame(name="icims_content_iframe").wait_for_url("**/icims_idemia_email_frame.html")
+    assert await multistep.needs_sign_in(page)
+    assert [f["label"] for f in await scan_form(form_view(page))] == ["Email"]
+    await page.goto(_icims("login"))
+    assert await multistep.needs_sign_in(page) and await bot_wall(page) == ""
+
+
+async def test_icims_from_the_saved_posting_to_sign_in_is_handed_to_you(page):
+    """Apply for this job online (never "Log back in!"), inside iCIMS's frame; then its email step, which Jobsmith
+    hands to you: no email typed, Next never pressed."""
+    from jobsmith.fill import multistep
+    from jobsmith.fill.base import form_view
+    asked = []
+
+    async def wait_for_user(msg, check, negate=False):
+        asked.append(msg)
+        return False
+
+    async def answer(fields):
+        raise AssertionError(f"nothing to answer before you sign in: {fields}")
+    res = await multistep.run(page, _icims("posting"), answer=answer, files={}, log=lambda m: None,
+                              wait_for_user=wait_for_user, allow_submit=lambda: False)
+    assert res["status"] == "waiting_user" and asked == ["Sign in to continue the application"], res
+    view = form_view(page)
+    assert view.url.endswith("icims_idemia_email_frame.html")                  # the frame moved, not the page
+    assert await view.input_value("#email") == "" and await view.evaluate("window.__signInPresses") == 0
+
+
+FRAMED_INNER = """<form><label for="fn">First Name</label><input id="fn" name="fn" required>
+<label for="st">State</label><select id="st" name="st"><option value="">Select</option><option>Massachusetts</option>
+<option>New York</option></select>
+<fieldset><legend>Are you at least 18 years old?</legend><label><input type="radio" name="age" value="Y"> Yes</label>
+<label><input type="radio" name="age" value="N"> No</label></fieldset>
+<button type="button" id="next">Next</button></form>
+<script>
+document.getElementById("next").onclick = () => {
+  parent.__page1 = [fn.value, st.value, (document.querySelector("[name=age]:checked") || {}).value];
+  document.body.innerHTML = '<form><label for="w">Why IDEMIA?</label><textarea id="w" name="w"></textarea>' +
+    '<button type="button" onclick="parent.__sent = 1">Submit</button></form>';
+};
+</script>"""
+FRAMED_FORM = ('<!doctype html><html><body><h1>Careers</h1><iframe name="icims_content_iframe" '
+               f'style="width:100%;height:600px" srcdoc="{__import__("html").escape(FRAMED_INNER)}"></iframe></body></html>')
+
+
+async def test_a_multi_page_form_in_a_frame_is_filled_page_by_page_and_stops_before_submit(page):
+    """How iCIMS's application pages behind sign-in work (each page in the frame, Next to move on): the fields are
+    read and filled in the frame, the keyboard follows the focus into it, and the review page stops before Submit.
+    Written by hand: iCIMS's signed-in pages wait on the maintainer (docs/guides/save-icims-pages.md)."""
+    from jobsmith.fill import multistep
+    from jobsmith.fill.base import form_view
+    seen = []
+
+    async def answer(fields):
+        seen.append([f["label"] for f in fields])
+        return {f["field"]: {"First Name": "Alex", "State": "Massachusetts", "Are you at least 18 years old?": "Yes",
+                             "Why IDEMIA?": "Biometrics I can test on real devices."}[f["label"]] for f in fields}
+    await page.route("**/framed.html", lambda r: r.fulfill(content_type="text/html", body=FRAMED_FORM))
+    res = await multistep.run(page, "https://careers.example.com/framed.html", answer=answer, files={},
+                              log=lambda m: None, wait_for_user=None, allow_submit=lambda: False)
+    assert seen == [["First Name", "State", "Are you at least 18 years old?"], ["Why IDEMIA?"]], (seen, res)
+    assert await page.evaluate("window.__page1") == ["Alex", "Massachusetts", "Y"]
+    assert res["status"] == "review" and not res["issues"], res
+    assert await page.evaluate("window.__sent") is None                          # Submit never pressed
+    assert await form_view(page).input_value("#w") == "Biometrics I can test on real devices."

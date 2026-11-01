@@ -240,6 +240,12 @@ then `ats.SUPPORTED` and the README.
       Workday's honeypot. Waiting on the signed-in pages
       ([docs/guides/save-workday-pages.md](guides/save-workday-pages.md)).
 - [ ] e. iCIMS: page by page, including multi-step forms in frames.
+      Status (2026-10-31): public pages saved read-only from IDEMIA's internship posting up to sign-in
+      (`tests/fixtures/icims_idemia_*.html`). iCIMS draws the application in its page's `icims_content_iframe`
+      frame; the page-by-page filler now reads, fills and clicks inside that frame (`base.InFrame`), shown on a
+      written two-page framed form. Jobsmith presses "Apply for this job online" (never "Log back in!") and hands
+      iCIMS's email step and its login to the user, in autopilot and the extension. Waiting on the signed-in pages
+      ([docs/guides/save-icims-pages.md](guides/save-icims-pages.md)).
 
 ## 8. Frames
 
