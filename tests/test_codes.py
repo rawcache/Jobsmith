@@ -47,6 +47,11 @@ def test_the_code_greenhouse_sends_for_this_application_is_used():
     ({"subject": "Acme Robotics candidate account verification code",
       "body": "Use this code to access your candidate account: 482913"}, "sign-in or account code"),
     ({"subject": "Your Acme Robotics code", "body": "Your code is 482913."}, "doesn't say it's for an application"),
+    ({"subject": "Acme Robotics code",
+      "body": "Use this code to verify an Acme Robotics account and continue your application: 482913"},
+     "sign-in or account code"),
+    ({"subject": "Your code for your application to Acme Robotics",
+      "body": "Your application code links your accounts: 482913"}, "sign-in or account code"),
     ({"subject": "Security code for your application",
       "body": "Northwind Labs: copy this code into your Software Engineering Intern application: Zq81mKp3"},
      "doesn't name Acme Robotics"),                     # same job site, same title, another employer
@@ -133,3 +138,15 @@ def test_a_submit_that_failed_or_finished_leaves_no_click_behind():
 async def test_the_runner_never_reads_email_for_a_submit_it_didnt_press(page, monkeypatch):
     typed, read, _ = await _watch(page, monkeypatch, [_mail(time.time())], click=False)
     assert typed == [] and read == []
+
+
+@pytest.mark.parametrize("prompt, title, ok", [
+    ("A verification code was sent to your email. Enter the 8-character code to confirm you're a human.",
+     "Software Engineering Intern", True),
+    ("Enter the security code we sent for your Account Executive Intern application.", "Account Executive Intern", True),
+    ("Enter the verification code we sent to sign in.", "Software Engineering Intern", False),
+    ("Enter the security code to verify your Acme Robotics account.", "Account Executive Intern", False),
+])
+def test_the_page_asking_for_the_code_is_checked_the_same_way(prompt, title, ok):
+    assert outcomes.sign_in_wording(prompt, title) is not ok
+

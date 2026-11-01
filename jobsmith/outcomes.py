@@ -245,12 +245,18 @@ SENDERS = {"greenhouse": ("greenhouse.io", "greenhouse-mail.io"), "lever": ("lev
 NOT_APPLICATION = re.compile(
     r"\b(sign(ing)?[ -]?(in|on)|log(ging)?[ -]?(in|on)|login|two[ -]?(factor|step)|2fa|mfa|multi[ -]?factor|"
     r"password|reset|create (an |a new |your )?account|new account|account (creation|activation|registration|setup)|"
-    r"activate your account|verify your (email|account)|confirm your (email|account)|"
-    r"(your|candidate|user|new|an|the) account|account (verification|access|code|login|security|password)|"
+    r"activate your account|verify your (email|account)|confirm your (email|account)|accounts?|"
     r"access (code|your))\b",
     re.I)
 APPLICATION = re.compile(r"\b(appl(y|ying|ied|ication|ications)|submission)\b", re.I)
 _SECOND_LEVEL = {"co", "com", "ac", "org", "net", "gov", "edu"}
+
+
+def sign_in_wording(text: str, title: str = "") -> bool:
+    """Whether an email or a page asks for a code to sign in, for two steps, to reset a password or for an account
+    (any mention of one). The job's own title is set aside first: an "Account Executive" role isn't an account."""
+    title = (title or "").strip()
+    return bool(NOT_APPLICATION.search(re.sub(re.escape(title), " ", text, flags=re.I) if len(title) >= 3 else text))
 
 
 def _site_of(host: str) -> str:
@@ -280,8 +286,7 @@ def code_refusal(msg: dict, job: dict, clicked: float) -> str | None:
     if not int(clicked) <= msg.get("when", 0) <= clicked + CODE_WINDOW:
         return "not within 15 minutes after Submit"
     text = f"{msg.get('subject', '')}\n{msg.get('body', '')[:3000]}"
-    title = (job.get("title") or "").strip()                  # "your Account Executive application" isn't an account
-    if NOT_APPLICATION.search(re.sub(re.escape(title), " ", text, flags=re.I) if len(title) >= 3 else text):
+    if sign_in_wording(text, job.get("title") or ""):
         return "reads as a sign-in or account code"
     if not APPLICATION.search(text):
         return "doesn't say it's for an application"

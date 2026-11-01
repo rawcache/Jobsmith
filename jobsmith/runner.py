@@ -939,7 +939,7 @@ async def _watch(job_id: str, page, run_dir: Path, run: Run, job: dict, deadline
                 clicked = guardrails.submitted_at(job_id)
                 # Jobsmith types an emailed code only to verify an application it just submitted itself (see
                 # outcomes.application_code); a page asking for a sign-in or account code is always yours
-                auto = outcomes.email_ready() and clicked is not None and not outcomes.NOT_APPLICATION.search(prompt)
+                auto = outcomes.email_ready() and clicked is not None and not outcomes.sign_in_wording(prompt, job.get("title") or "")
                 live_set(job_id, phase="code", needs_code=True, note=prompt)
                 if auto:
                     run.log(f"Verification step: {prompt}. Looking in your email for the code {job.get('company', '')} "
