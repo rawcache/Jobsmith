@@ -291,11 +291,22 @@ then `ats.SUPPORTED` and the README.
       new-issue link on this repo (`test_report_this_form_sends_the_questions_and_never_what_you_typed`); the
       dashboard's Application tab links it from the saved questions (`/api/jobs/{id}/form-report`).
       `tests/test_formreport.py`.
-- [ ] A page on the site, "How Jobsmith behaves on job sites": caps, AI-policy respect, posting traps ignored, never
+- [x] A page on the site, "How Jobsmith behaves on job sites": caps, AI-policy respect, posting traps ignored, never
       submitting without verified answers, sign-ins handed to you, read-only canaries, what data leaves your
       computer.
-- [ ] A CI test proving the practice copy's autopilot runs end to end with every AI provider blocked.
-- [ ] A "What works without AI" table in the README.
+      Evidence: [e14e3f0](https://github.com/rawcache/Jobsmith/commit/e14e3f0), [9e9cf95](https://github.com/rawcache/Jobsmith/commit/9e9cf95). `site/behaviour.html`, linked from the home page's footer, also says
+      the emailed-code rule word for word. `test_the_behaviour_page_fits_every_width_and_is_linked_from_home`
+      (320 to 1440 px, a wide font, no scripts or requests). [Live](https://rawcache.github.io/Jobsmith/behaviour.html),
+      deployed by the [site run](https://github.com/rawcache/Jobsmith/actions/runs/41273551444).
+- [x] A CI test proving the practice copy's autopilot runs end to end with every AI provider blocked.
+      Evidence: [2d19d9a](https://github.com/rawcache/Jobsmith/commit/2d19d9a), [d8a60d2](https://github.com/rawcache/Jobsmith/commit/d8a60d2). `tests/test_no_ai.py`: with no AI connected, and with each of
+      Anthropic, OpenAI and Gemini unreachable (their hosts refused, the claude and ollama programs refused), the
+      practice copy's autopilot submits a plain form with every answer traced to the profile, resume or a file,
+      holds an optional cover letter box and a written question for you, and never reaches an AI host. An unreachable
+      AI is now an AI error, so the profile's answers still go in. [CI run](https://github.com/rawcache/Jobsmith/actions/runs/41273551352) (Linux, macOS, Windows).
+- [x] A "What works without AI" table in the README.
+      Evidence: [2d19d9a](https://github.com/rawcache/Jobsmith/commit/2d19d9a). [README.md](../README.md#what-works-without-ai): each part of Jobsmith, what it does
+      with no AI, and what waits for you.
 
 Moved out of Phase 1: the full fit breakdown ([#6](https://github.com/rawcache/Jobsmith/issues/6)) and any
 OpenAI-compatible AI ([#7](https://github.com/rawcache/Jobsmith/issues/7)), both Phase 2. The whole plan is in
