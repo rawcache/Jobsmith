@@ -67,4 +67,3 @@ def test_contact_details_written_into_the_pages_path_are_masked_even_encoded():
                                             "%2B1%20617%20555%200142/7781234", FIELDS))
     assert "alex.rivera" not in body and "555" not in body and "7781234" not in body
     assert "`/apply/[email]/[number]/[number]`" in body
-

@@ -598,7 +598,7 @@
       const fields = scan(), application = holdsForm(fields);
       // "Report this form" on the top page: a frame holding the form says what it asks, never what's typed in it
       e.source.postMessage({ jobsmith: "here", application,
-                             ...(e.data.report && application ? { report: structure(fields) } : {}) }, "*");
+                             ...(e.data.report ? { report: application ? structure(fields) : [] } : {}) }, "*");
     }
   });
 
@@ -656,7 +656,9 @@
       .filter(w => w !== UNSEEN);
     if (!asked.length) return Promise.resolve([]);
     const heard = new Map();
-    const listen = e => { if (e.data && e.data.jobsmith === "here" && asked.includes(e.source)) heard.set(e.source, e.data.report || []); };
+    // only answers to this question (the popup's "who's there?" gets ones without a report, at the same time)
+    const listen = e => { if (e.data && e.data.jobsmith === "here" && Array.isArray(e.data.report) && asked.includes(e.source))
+                            heard.set(e.source, e.data.report); };
     addEventListener("message", listen);
     for (const w of asked) try { w.postMessage({ jobsmith: "who", report: true }, "*"); } catch (_) { /* gone */ }
     const started = Date.now();
