@@ -246,9 +246,12 @@ class AnthropicAPI(Backend):
                 "messages": [{"role": "user", "content": _schema_hint(prompt, schema)}]}
         if web:
             body["tools"] = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 4}]
-        async with httpx.AsyncClient(timeout=timeout) as c:
-            r = await c.post("https://api.anthropic.com/v1/messages", json=body, headers={
-                "x-api-key": self.key, "anthropic-version": "2023-06-01", "content-type": "application/json"})
+        try:          # offline or refused: an AI error like any other, so the profile's answers still go in
+            async with httpx.AsyncClient(timeout=timeout) as c:
+                r = await c.post("https://api.anthropic.com/v1/messages", json=body, headers={
+                    "x-api-key": self.key, "anthropic-version": "2023-06-01", "content-type": "application/json"})
+        except httpx.HTTPError as e:
+            raise LLMError(f"Couldn't reach Anthropic's API: {e.__class__.__name__}") from e
         if r.status_code != 200:
             raise LLMError(f"Anthropic API {r.status_code}: {r.text[:200]}")
         u = r.json().get("usage") or {}
@@ -283,9 +286,12 @@ class OpenAIAPI(Backend):
         body = {"model": self.model, "instructions": system, "input": _schema_hint(prompt, schema)}
         if web:
             body["tools"] = [{"type": "web_search"}]
-        async with httpx.AsyncClient(timeout=timeout) as c:
-            r = await c.post("https://api.openai.com/v1/responses", json=body,
-                             headers={"Authorization": f"Bearer {self.key}"})
+        try:          # offline or refused: an AI error like any other, so the profile's answers still go in
+            async with httpx.AsyncClient(timeout=timeout) as c:
+                r = await c.post("https://api.openai.com/v1/responses", json=body,
+                                 headers={"Authorization": f"Bearer {self.key}"})
+        except httpx.HTTPError as e:
+            raise LLMError(f"Couldn't reach OpenAI's API: {e.__class__.__name__}") from e
         if r.status_code != 200:
             raise LLMError(f"OpenAI API {r.status_code}: {r.text[:200]}")
         data = r.json()

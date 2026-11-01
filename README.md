@@ -90,7 +90,7 @@ the browser, and tracks every application. Each skill is a folder in [`jobsmith/
 | **[Apply](jobsmith/skills/apply/SKILL.md)** | Applies to roles you qualify for while you're away: fills every form from your resume, submits what it's sure about, holds the rest. The Chrome extension adds a panel on any posting you open yourself: autofill, resume match, who you know, cover letter, and "Write with Jobsmith" on open questions. | `jobsmith` · `/apply` |
 | **[Your voice](jobsmith/skills/voice/SKILL.md)** | Learns how you write from your essays, cover letters and approved answers, on your computer. Answers in your own words with no AI at all, steers any AI toward your style, and tells you which stories you're missing. | `jobsmith voice` |
 | **[Outreach drafts](jobsmith/skills/outreach/SKILL.md)** | Referral asks and recruiter notes for people you know at each company, from your LinkedIn connections. You send them. | dashboard · agent |
-| **[Inbox and follow-ups](jobsmith/skills/followups/SKILL.md)** | Reads replies (Gmail, Outlook / Microsoft 365, IMAP; read-only), enters emailed codes, drafts a follow-up when a company goes quiet. | dashboard · agent |
+| **[Inbox and follow-ups](jobsmith/skills/followups/SKILL.md)** | Reads replies (Gmail, Outlook / Microsoft 365, IMAP; read-only), types the code a job site emails to verify an application Jobsmith just submitted (never a sign-in or account code), drafts a follow-up when a company goes quiet. | dashboard · agent |
 | [Interview notes](jobsmith/skills/interview-notes/SKILL.md) | Planned: notes, questions asked and a thank-you draft, transcribed locally, with everyone's consent. | |
 | [Interview prep](jobsmith/skills/prep/SKILL.md) | Planned: likely questions for a role and practice answers from your own stories. | |
 | [Offers](jobsmith/skills/offers/SKILL.md) | Planned: offers side by side and negotiation talking points. | |
@@ -112,6 +112,26 @@ Every answer comes from the first of these that can answer it well. Only the las
 Whatever writes it, the same checks apply before it's sent: claims and numbers must come from your facts, phrases
 you never use get flagged, and anything below your confidence setting waits for you. The more of your own writing
 you add (`jobsmith voice add essay.md`), the more of it needs no model at all.
+
+### What works without AI
+
+| | With no AI connected |
+|---|---|
+| Finding roles (job boards, GitHub lists), fit scores, skill match, the "you may not qualify" checks | Works: none of it uses AI |
+| Reading your resume | LaTeX is read exactly; a PDF or Word resume is imported line by line (an AI reads it more cleanly) |
+| Profile questions on a form: name, contact, links, school, work authorization, demographics | Filled from your confirmed profile, as always |
+| Autopilot on a form your profile answers | Fills it and sends it, within your caps. A question only an AI could write, even an optional cover letter box, holds it for you |
+| Written questions ("Why us?") | From your own writing when it fits the question; otherwise held for you |
+| Posting traps, employer AI policies, caps, your approval of each site's first application | Works: none of it uses AI |
+| Inbox: confirmations and replies | Works |
+| Extension: autofill and "Write with Jobsmith" | Autofill works; Write uses your own writing when it fits |
+| Cover letters, company research | Need an AI (research searches the web) |
+| Outreach drafts | A plain template you edit |
+
+[`tests/test_no_ai.py`](tests/test_no_ai.py) proves the autopilot row on every CI run: the practice copy, every AI
+provider blocked: a saved form the profile answers is sent end to end, the same form with a cover letter box is held
+for you, and one with a written question is held with that question left empty. If an AI is connected but can't be
+reached, the same holds: what only it could write waits for you.
 
 **smith** is Jobsmith's own private AI: Qwen3 through [Ollama](https://ollama.com), installed into your user folder
 with no admin rights, sized to your memory (8 GB: qwen3:4b, 16 GB: qwen3:8b, 24 GB: qwen3:14b, 32 GB+: qwen3:30b-a3b).
