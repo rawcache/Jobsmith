@@ -15,6 +15,9 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent))
+from icims_fixture import typed_values  # noqa: E402  (one rule for what counts as typed)
+
 PAGES = {  # capture -> (fixture, which page it is, for the stand-in)
     "2_start.html": ("workday_nvidia_posting.html", "posting"),
     "3_after_manual.html": ("workday_nvidia_signin.html", "signin"),
@@ -40,7 +43,7 @@ def build(captured: str, which: str, script: str) -> str:
     # anywhere in the page, attributes too (an aria-label can hold an address), and any text a box holds
     emails = set(re.findall(r"[\w.+-]+@[\w-]+\.[a-z]{2,}\b", page)) - {"alex.rivera@example.edu"}
     phones = re.findall(r"\(?\b\d{3}\)?[ .-]\d{3}[ .-]\d{4}\b", re.sub(r"<style\b.*?</style>", "", page, flags=re.S))
-    typed = [v for v in re.findall(r'<input\b[^>]*\svalue="([^"]+)"', page) if v not in ("on", "true", "false")] + \
+    typed = typed_values(page) + \
         [t for t in re.findall(r"<textarea\b[^>]*>(.*?)</textarea>", page, flags=re.S) if t.strip()]
     if emails or phones or typed:
         raise SystemExit(f"personal details or typed values in the page: {sorted(emails)} {phones} {typed[:5]}")

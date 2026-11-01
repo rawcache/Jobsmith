@@ -49,6 +49,25 @@ async def test_a_datadome_frame_is_a_bot_check_even_before_its_words_load(page):
     assert await base.bot_wall(page) == "a bot check from geo.captcha-delivery.com"
 
 
+async def test_a_chat_widgets_box_in_another_frame_doesnt_hide_a_bot_check(page):
+    """Only the page and the frame an application lives in (iCIMS's) count as a form: a recruiter-chat widget's
+    name box in a frame of its own is no reason to think the bot check is a form."""
+    await _serve_datadome(page)
+    await page.goto((WALLS / "smartrecruiters_datadome.html").resolve().as_uri())
+    await page.frame_locator("iframe").locator("h1").wait_for()
+    await page.evaluate("""document.body.insertAdjacentHTML('beforeend', '<iframe name="te__acsWidgetMenu" srcdoc="' +
+      '<label>First name <input name=firstName></label>"></iframe>')""")
+    await page.wait_for_function("frames.length >= 2")
+    assert await base.bot_wall(page) == "Access is temporarily restricted"
+
+
+async def test_a_form_in_icims_frame_is_never_a_bot_check(page):
+    await page.goto((FIXTURES / "icims_idemia_posting.html").resolve().as_uri())
+    await page.frame(name="icims_content_iframe").locator("a.iCIMS_ApplyOnlineButton").click()
+    await page.frame(name="icims_content_iframe").wait_for_url("**/icims_idemia_email_frame.html")
+    assert await base.bot_wall(page) == ""
+
+
 @pytest.mark.parametrize("form", ["lever_palantir_form.html", "ashby_ramp_form.html", "greenhouse_figma_live.html"])
 async def test_an_application_form_is_never_a_bot_check(page, form):
     """Real forms carry hCaptcha or reCAPTCHA under their fields; that's a CAPTCHA at Submit, not a wall."""

@@ -18,6 +18,16 @@ import re
 import sys
 from pathlib import Path
 
+NOT_TYPED = re.compile(r'\stype="(hidden|submit|button|reset|image|radio|checkbox)"', re.I)
+
+
+def typed_values(page: str) -> list[str]:
+    """Values in boxes you type into. A radio button's or checkbox's value is its option ("Y"), and a hidden or
+    submit input's isn't yours either; a text box with a value means someone typed into it before it was saved."""
+    return [v for tag in re.findall(r"<input\b[^>]*>", page) if not NOT_TYPED.search(tag)
+            for v in re.findall(r'\svalue="([^"]+)"', tag)]
+
+
 PAGES = {  # capture -> (fixture, which page it is, for the stand-in)
     "1_posting_top.html": ("icims_idemia_posting.html", "top"),
     "1_posting.html": ("icims_idemia_posting_frame.html", "posting"),
@@ -51,8 +61,7 @@ def build(captured: str, which: str, script: str) -> str:
         raise SystemExit(f"still loads from the network: {left[:5]}")
     emails = set(re.findall(r"[\w.+-]+@[\w-]+\.[a-z]{2,}\b", page)) - {"alex.rivera@example.edu"}
     phones = re.findall(r"\(?\b\d{3}\)?[ .-]\d{3}[ .-]\d{4}\b", re.sub(r"<style\b.*?</style>", "", page, flags=re.S))
-    typed = [v for tag in re.findall(r"<input\b[^>]*>", page) if 'type="hidden"' not in tag and 'type="submit"' not in tag
-             for v in re.findall(r'\svalue="([^"]+)"', tag) if v not in ("on", "true", "false")] + \
+    typed = typed_values(page) + \
         [t for t in re.findall(r"<textarea\b[^>]*>(.*?)</textarea>", page, flags=re.S) if t.strip()]
     if emails or phones or typed:
         raise SystemExit(f"personal details or typed values in the page: {sorted(emails)} {phones} {typed[:5]}")
