@@ -605,8 +605,13 @@
       const heard = new Map();                       // window -> holds an application
       const listen = e => { if (e.data && e.data.jobsmith === "here") heard.set(e.source, !!e.data.application); };
       addEventListener("message", listen);
-      for (const w of big.flatMap(f => [f.win, ...f.inner])) try { w.postMessage({ jobsmith: "who" }, "*"); } catch (_) { /* gone */ }
-      setTimeout(() => {
+      const asked = [];
+      for (const w of big.flatMap(f => [f.win, ...f.inner])) try { w.postMessage({ jobsmith: "who" }, "*"); asked.push(w); } catch (_) { /* gone */ }
+      // Until every frame asked has answered, or a second has passed (a frame without Jobsmith never answers). A
+      // fixed quarter second was too short for a big form to be read on a slow machine (#25).
+      const started = Date.now();
+      const done = () => {
+        if (asked.some(w => !heard.has(w)) && Date.now() - started < 1000) return setTimeout(done, 50);
         removeEventListener("message", listen);
         // A frame is reached when it or a frame inside it holds an application and answered (a wrapper around a job
         // site's form), or when it and every frame inside it answered (a video, say: nothing left unseen)
@@ -617,7 +622,8 @@
                 frames: big.map(f => f.host), nested: big.reduce((n, f) => n + f.inner.length, 0),
                 bare: bare.map(f => f.host), bareApps: bare.filter(f => f.app).map(f => f.host),
                 forms: [...heard.values()].filter(Boolean).length });
-      }, 250);
+      };
+      setTimeout(done, 50);
       return true;                                   // replying after the frames have had a chance to answer
     }
     return false;
