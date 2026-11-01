@@ -38,6 +38,10 @@
       const l = p.querySelector("label, legend, .application-label, [class*='label']");
       if (l && !l.contains(el)) return clean(l.innerText);
     }
+    // Workday: the words are on the form field around the box (its upload box has none of its own)
+    const ff = el.closest('[data-automation-id^="formField-"]');
+    const q = ff && ff.querySelector('label, [data-automation-id="richText"], legend');
+    if (q && clean(q.innerText)) return clean(q.innerText);
     return clean(el.placeholder || el.name || el.id);
   }
 
@@ -63,6 +67,55 @@
     /\bpass(word|wd)\b/i.test(labelFor(el)));   // any box you type into (a PIN can be tel); a checkbox named is_pwd asks about a disability
   const HONEYPOT = /robots? only|if you('| a)re (a )?human|\bhoneypot\b|(do not|don't) (fill|enter|complete|type)[^.]{0,40}\b(humans?|robots?|bots?|spam)\b|\b(bots?|spam|robots?)\b[^.]{0,40}leave (this|it) (field )?(blank|empty)|leave (this|it) (field )?(blank|empty)[^.]{0,40}\b(bots?|spam|robots?|humans?)\b/i;   // as base.HONEYPOT
 
+  // Workday: a dropdown keeps its choice in a box beside its button; a search box shows what's picked as pills
+  // (multiSelectContainer); a dropdown's question can sit beside it in the same field. As base.SCAN_JS.
+  const besideDropdown = el => !!el.previousElementSibling && el.previousElementSibling.matches('button[aria-haspopup="listbox"]');
+  const promptBox = el => el.closest('[data-automation-id="multiSelectContainer"]');
+  const pills = el => [...promptBox(el).querySelectorAll('[data-automation-id="selectedItem"]')].map(p => clean(p.innerText));
+  const dropdownLabel = btn => {
+    const l = btn.id && document.querySelector(`label[for="${CSS.escape(btn.id)}"]`);
+    if (l && clean(l.innerText)) return clean(l.innerText);
+    const by = (btn.getAttribute("aria-labelledby") || "").split(/\s+/).map(i => i && document.getElementById(i))
+      .filter(Boolean).map(n => n.innerText).join(" ");
+    if (clean(by)) return clean(by);
+    const ff = btn.closest('[data-automation-id^="formField-"]');
+    const q = ff && ff.querySelector('label, [data-automation-id="richText"], legend');
+    if (q && clean(q.innerText)) return clean(q.innerText);
+    return clean((btn.getAttribute("aria-label") || "").replace(btn.innerText, " ").replace(/\bSelect One\b|\bRequired\s*$/g, " "));
+  };
+  // Workday lists what a search box has picked with role="option" too: never a choice
+  const choicesIn = root => [...root.querySelectorAll('[role="option"]')].filter(o => visible(o) && o.dataset.automationId !== "selectedItem");
+  const same = (a, b) => { [a, b] = [a, b].map(t => clean(t).toLowerCase()); return !!a && (a === b || b.includes(a) || (b.length > 2 && a.includes(b))); };
+
+  async function fillDropdown(btn, value) {
+    btn.click();
+    for (let t = 0; t < 25; t++) {
+      await sleep(200);
+      const opts = choicesIn(document); if (!opts.length) continue;
+      const i = best(opts.map(o => o.innerText), value);
+      if (i < 0) { press(btn, "Escape"); return false; }
+      const want = opts[i].innerText; opts[i].click(); await sleep(150);
+      return same(want, btn.innerText);
+    }
+    return false;
+  }
+
+  async function fillPrompt(el, value) {
+    for (const q of [...new Set([value, value.split(/[,(]/)[0].trim()])]) {
+      el.focus(); setNative(el, q); press(el, "Enter");
+      for (let t = 0; t < 20; t++) {
+        await sleep(200);
+        const list = document.querySelector('[data-automation-id="activeListContainer"]'); if (!list) continue;
+        const opts = choicesIn(list); if (!opts.length) break;
+        const i = best(opts.map(o => o.innerText), value); if (i < 0) break;
+        const want = opts[i].innerText; opts[i].click(); await sleep(150);
+        return pills(el).some(p => same(want, p));
+      }
+    }
+    setNative(el, ""); press(el, "Escape");
+    return false;
+  }
+
   function scan() {
     els.clear();
     const out = []; const groups = new Set();
@@ -70,6 +123,7 @@
       const type = (el.type || el.tagName).toLowerCase();
       if (["hidden", "submit", "button", "image", "reset", "search", "password"].includes(type)) continue;
       if (!visible(el) && type !== "file") continue;
+      if (besideDropdown(el)) continue;   // Workday keeps a dropdown's choice in a box beside its button: not a question
       // a honeypot sites hide from people to catch bots (Workday: "This input is for robots only"): never touched
       if (HONEYPOT.test(labelFor(el)) || isPassword(el)) continue;
       // A hidden copy that custom selects keep for the browser's "required" check (react-select's requiredInput):
@@ -87,17 +141,28 @@
           const t = clean((p.innerText || "").split("\n")[0]); if (t && t.length > 2 && !isOpt(t) && group.every(x => p.contains(x))) { label = t; break; } } }
         const id = tag(el); els.set(id, group);
         out.push({ id, label: label || labelFor(el), type: group.length > 1 ? (type === "radio" ? "radio" : "multiselect") : "checkbox",
-                   required: group.some(x => x.required), options: group.length > 1 ? group.map(labelFor) : [],
+                   required: group.some(x => x.required || x.getAttribute("aria-required") === "true") || !!(group.length > 1 && el.closest("[aria-required='true']")) || /[*✱]\s*$/.test((legend ? legend.innerText : "").trim()), options: group.length > 1 ? group.map(labelFor) : [],
                    filled: group.some(x => x.checked) });
         continue;
       }
       const id = tag(el); els.set(id, el);
-      const combo = el.getAttribute("role") === "combobox" || el.getAttribute("aria-autocomplete") === "list";
+      const prompt = !!promptBox(el);
+      const combo = prompt || el.getAttribute("role") === "combobox" || el.getAttribute("aria-autocomplete") === "list";
       out.push({ id, label: labelFor(el), name: el.name || el.id,      // name: so the engine knows Lever's eeo[…] fields
         type: type === "file" ? "file" : el.tagName === "SELECT" ? "select" : el.tagName === "TEXTAREA" ? "textarea" : combo ? "combobox" : "text",
         required: el.required || el.getAttribute("aria-required") === "true" || starred(el),
         options: el.tagName === "SELECT" ? [...el.options].map(o => clean(o.text)).filter(t => t && !/^select|^--|^please/i.test(t)) : [],
-        filled: type === "file" ? !!(el.files && el.files.length) : !!el.value });
+        filled: type === "file" ? !!(el.files && el.files.length) : prompt ? pills(el).length > 0 : !!el.value });
+    }
+    // Workday's dropdowns: <button aria-haspopup="listbox">Select One</button> in a form field (the header's menus
+    // aren't questions)
+    for (const btn of document.querySelectorAll('button[aria-haspopup="listbox"]')) {
+      if (!visible(btn) || !btn.closest('[data-automation-id^="formField-"], form')) continue;
+      const id = tag(btn); els.set(id, btn);
+      const shown = clean(btn.innerText);
+      out.push({ id, label: dropdownLabel(btn), name: btn.name || btn.id, type: "combobox",
+                 required: /\bRequired\s*$/.test(btn.getAttribute("aria-label") || ""), options: [],
+                 filled: !!shown && !/^select\b/i.test(shown) });
     }
     // Yes/No buttons (Ashby): two buttons that toggle aria-pressed beside a hidden checkbox. A radio question.
     for (const box of new Set([...document.querySelectorAll("button[aria-pressed]")].map(b => b.parentElement))) {
@@ -304,6 +369,8 @@
       target.dispatchEvent(new Event("change", { bubbles: true }));
       return true;
     }
+    if (target.tagName === "BUTTON" && target.getAttribute("aria-haspopup") === "listbox") return fillDropdown(target, a.pick || value);
+    if (promptBox(target)) return fillPrompt(target, a.pick || value);
     if (target.getAttribute("role") === "combobox" || target.getAttribute("aria-autocomplete") === "list") return fillCombobox(target, value, a.pick || value);
     if (target.value && target.value.trim()) return true;   // never overwrite what you typed
     if (isLookup(target)) return fillLookup(target, [value, a.pick].filter(Boolean));

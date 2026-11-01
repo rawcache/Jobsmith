@@ -1507,6 +1507,8 @@ def test_a_dialling_code_comes_from_your_phone_number_never_where_you_live(phone
     (["+1", "+44"], "+1"),                                          # codes only
     (["United Kingdom (+44)", "United States (+1)"], "United States (+1)"),
     (["United States Minor Outlying Islands (+1)", "United States (+1)"], ""),   # two +1 choices name it: yours
+    (["United States (+12)", "Bahamas (+1242)"], ""),               # longer codes are never +1
+    (["United States of America (+1)", "+1"], "+1"),                # a bare +1 first
 ])
 def test_a_dialling_code_choice_must_carry_your_numbers_code(options, picked):
     ans = {"phone": {"value": "617-555-0123", "confirmed": 1}, "country": {"value": "United States", "confirmed": 1}}
@@ -1523,3 +1525,10 @@ def test_an_unconfirmed_phone_or_country_never_picks_a_dialling_code():
         r = draft.deterministic({"field": "cc", "label": "Country Phone Code", "qtype": "select", "required": True,
                                  "options": ["Canada (+1)", "United States of America (+1)"]}, ans)
         assert r["answer"] == "" and r["issues"]
+
+
+def test_an_optional_dialling_code_box_with_no_match_is_left_quietly():
+    ans = {"phone": {"value": "617-555-0123", "confirmed": 1}, "country": {"value": "United States", "confirmed": 1}}
+    r = draft.deterministic({"field": "cc", "label": "Country Phone Code", "qtype": "select", "required": False,
+                             "options": ["United Kingdom (+44)"]}, ans)
+    assert r["answer"] == "" and r["issues"] == []

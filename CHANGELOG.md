@@ -20,6 +20,11 @@
 - iCIMS: the page-by-page filler works inside the frame iCIMS draws its application in, presses "Apply for this job
   online", and hands you iCIMS's email step ("Enter Your Information", whose Next finds your account or starts one)
   and its login page. The extension fills nothing on either.
+- Workday, signed in: autopilot fills the application page by page (My Information, My Experience, Application
+  Questions, Voluntary Disclosures) and stops at Review, proven on NVIDIA's real pages saved and emptied. It picks
+  Workday's dropdowns and search boxes from their lists, reads a dropdown's question when it sits beside the box,
+  attaches your resume, and fills education years. The extension fills the same dropdowns and search boxes. A new
+  Profile answer, "Phone type", answers Workday's Phone Device Type.
 - Workday: Jobsmith hands you the sign-in choice page (Sign in with Google, LinkedIn or email), which has no password
   box yet, instead of stopping with "No Next button"; it presses Apply Manually when you have no resume to autofill
   from; and it never fills a honeypot (Workday's hidden "This input is for robots only" box) or reads a password box
@@ -142,6 +147,10 @@
   password-reset and account codes are never typed; anything that doesn't match waits for you.
 
 ### Fixed
+- Workday's Review page puts Submit where Next goes; the page-by-page filler would have pressed it as Next without
+  asking. A Next button that reads Submit is now the Submit, pressed only when autopilot may submit.
+- A required Workday radio question (marked required on its group, not each choice) was read as optional, so an
+  unanswered one didn't hold the application. It holds it now, in autopilot and the extension.
 - A phone extension box only ever gets digits, in autopilot and the extension: never "+1" or a whole phone number
   (another tool's "+1" there turned a Workday number into "x+1"). Your profile has no extension, so the box is left
   blank, and a required one waits for you. A list of dialling codes ("United States of America (+1)") is answered

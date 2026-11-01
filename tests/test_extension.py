@@ -1557,3 +1557,85 @@ async def test_autofill_never_puts_anything_but_digits_in_a_phone_extension_box(
     assert not await page.evaluate(outlined, "#o3")
     assert await page.evaluate("[...document.querySelectorAll('input')].filter(e => e.value === '+1').length") == 0
     await _never_submitted(page)
+
+
+async def _on_workday(page, name: str, **opts):
+    """A saved Workday application page served at NVIDIA's own Workday address, with Jobsmith's panel on it and
+    every submit watched."""
+    html = (FIXTURES / f"workday_nvidia_{name}.html").read_text(encoding="utf-8")
+    url = "https://nvidia.wd5.myworkdayjobs.com/en-US/NVIDIAExternalCareerSite/job/x/apply/applyManually"
+
+    async def serve(route):
+        if route.request.url.split("?")[0] == url:
+            await route.fulfill(status=200, content_type="text/html", body=html)
+        else:
+            await route.abort()
+    await page.route("https://**/*", serve)
+    await page.add_init_script(_stub({"panelOpen": True}, **opts))
+    await page.goto(url)
+    await page.add_script_tag(path=str(EXT / "content.js"))
+    await page.wait_for_function("document.querySelector('#jobsmith-panel')?.shadowRoot?.querySelector('.wrap')")
+    await _watch_for_submits(page)
+
+
+@browser
+async def test_autofill_fills_workdays_my_information_page_and_never_moves_on(page):
+    """NVIDIA's My Information page, saved signed in and emptied. Fill picks the dropdowns (Country, State, Phone
+    Device Type) and the search boxes (How Did You Hear About Us?, Country Phone Code) from their lists, types the
+    rest, never puts "+1" in the phone extension, and never presses Save and Continue."""
+    std = lambda v: {"value": v, "kind": "standard"}
+    await _on_workday(page, "my_information", answers={
+        "How Did You Hear About Us?": std("LinkedIn"), "Country": std("United States of America"),
+        "First Name": std("Alex"), "Last Name": std("Rivera"), "City": std("Boston"), "State": std("Massachusetts"),
+        "Phone Device Type": std("Mobile"), "Country Phone Code": std("United States of America (+1)"),
+        "Phone Number": std("617-555-0123"), "Phone Extension": std("+1"),
+        "Have you previously worked for NVIDIA as an employee or contractor?": std("No")})
+    await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
+    note = "document.querySelector('#jobsmith-panel').shadowRoot.querySelector('.note')"
+    await page.wait_for_function(f"{note}?.innerText.includes('Filled')", timeout=30000)
+    shown = lambda i: page.evaluate(f"document.getElementById('{i}').innerText.trim()")
+    assert await shown("country--country") == "United States of America"
+    assert await shown("address--countryRegion") == "Massachusetts"
+    assert await shown("phoneNumber--phoneType") == "Mobile"
+    pills = lambda i: page.evaluate(f"""[...document.getElementById('{i}').closest('[data-automation-id="multiSelectContainer"]')
+        .querySelectorAll('[data-automation-id="selectedItem"]')].map(p => p.innerText.trim())""")
+    assert await pills("source--source") == ["LinkedIn"]
+    assert await pills("phoneNumber--countryPhoneCode") == ["United States of America (+1)"]
+    assert await page.input_value('[id="name--legalName--firstName"]') == "Alex"
+    assert await page.input_value('[id="phoneNumber--phoneNumber"]') == "617-555-0123"
+    assert await page.input_value('[id="phoneNumber--extension"]') == ""
+    assert await page.is_checked("#sijp3") and not await page.is_checked("#sijp2")       # No
+    labels = [f["label"] for f in await page.evaluate("__calls.find(c => c.type === 'answers').body.fields")]
+    assert "Settings" not in labels and not [l for l in labels if "Select One" in l], labels
+    assert page.url.endswith("/applyManually")                                      # still on My Information
+    await _never_submitted(page)
+
+
+@browser
+async def test_autofill_reads_workdays_application_questions_by_their_words(page):
+    """On the Application Questions page each dropdown's question is beside it, not in its ARIA name (" Select One
+    Required"): the engine is asked the question itself, and both are required."""
+    await _on_workday(page, "application_questions")
+    await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
+    await page.wait_for_function("__calls.some(c => c.type === 'answers')", timeout=30000)
+    fields = await page.evaluate("__calls.find(c => c.type === 'answers').body.fields")
+    asked = {f["label"]: f["required"] for f in fields}
+    assert asked == {
+        "Are you legally authorized to work in the country where this position is located?": True,
+        "Will you require employer support to obtain or maintain authorization to work in that country? e.g. (work permit)": True}, asked
+    await _never_submitted(page)
+
+
+@browser
+async def test_the_submit_watcher_sees_your_submit_on_workdays_review_page(page):
+    """Autofill never presses Workday's Submit (it sits in the footer's Next slot). When you press it, the watcher
+    notes it, so the thank-you page that follows is logged as your application."""
+    await _on_workday(page, "review")
+    await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
+    await page.wait_for_timeout(1500)
+    assert await page.evaluate("window.__submitPresses") == 0
+    assert await page.evaluate("sessionStorage.getItem('jobsmith-submit')") is None
+    await page.click('[data-automation-id="pageFooterNextButton"]')                      # you press Submit
+    assert await page.evaluate("window.__submitPresses") == 1
+    noted = json.loads(await page.evaluate("sessionStorage.getItem('jobsmith-submit')"))
+    assert noted["url"].endswith("/applyManually")

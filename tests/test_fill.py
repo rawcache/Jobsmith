@@ -1150,3 +1150,91 @@ async def test_workdays_review_submit_is_never_pressed_as_next(page, tmp_path, a
     assert asked == [1]
     assert res["status"] == ("submitted_clicked" if allowed else "review"), res
     assert await page.evaluate("window.__sent || 0") == (1 if allowed else 0)
+
+
+async def _alex_for_workday(fake_llm):
+    """Alex Rivera's practice profile, confirmed, with the answers a Workday form also asks for."""
+    await profile.ingest_document(FIXTURES / "sample_resume.tex")
+    for k, a in profile.answers().items():
+        if a.get("value"):
+            profile.set_answer(k, a["value"], confirmed=True)
+    for key, value in {"how_heard": "LinkedIn", "country": "United States", "phone_type": "Mobile",
+                       "work_authorized_us": "Yes", "needs_sponsorship": "No", "acknowledge_notices": "Yes",
+                       "race": "Decline to self-identify", "gender": "Decline to self-identify",
+                       "veteran_status": "Decline to self-identify", "enrollment_start": "Aug 2023",
+                       "resume_lists_all_employers": "Yes"}.items():
+        profile.set_answer(key, value, confirmed=True)
+    fake_llm(lambda s, p: {"answers": []})                    # nothing here needs an AI
+
+
+async def test_workday_signed_in_page_by_page_to_review_and_never_submits(fake_llm, page, tmp_path):
+    """NVIDIA's application on Workday, saved signed in and emptied (tests/fixtures/src/workday_fixture.py), from My
+    Information to Review: every page filled from Alex's profile and the run stops at Review, where Submit sits in
+    the footer's Next slot and is never pressed. The phone extension stays empty (that box once got "+1"), the
+    dialling code is picked from its list, and the voluntary questions come only from Alex's confirmed answers."""
+    from jobsmith.fill import multistep
+    await _alex_for_workday(fake_llm)
+    jid = sources.add_job_url(NVIDIA_WORKDAY, "NVIDIA", "AI Systems Software Engineering Intern - Summer 2027")
+    db.x("UPDATE jobs SET locations=? WHERE id=?", (json.dumps(["Austin, TX, United States"]), jid))
+    job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,)))
+
+    async def answer(fields):
+        results, _ = await draft.answer_fields(job, fields)
+        return {k: v.get("answer", "") for k, v in results.items()}
+
+    pdf = tmp_path / "Alex_Rivera_resume.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    logs, asked = [], []
+    res = await multistep.run(page, _workday("my_information"), answer=answer, files={"resume": str(pdf)},
+                              log=logs.append, wait_for_user=None, allow_submit=lambda: asked.append(1) or False)
+    assert res["status"] == "review", (res, logs)
+    # the one thing left: the Websites entry open on the saved page asks for a URL, and Alex has no website
+    assert res["issues"] == ["URL: no answer"], res
+    assert page.url.endswith("workday_nvidia_review.html") and asked == []       # held, so Submit isn't even asked
+    assert await page.evaluate("window.__submitPresses") == 0
+    held = json.loads(await page.evaluate("window.name"))
+    info, exp = held["my_information"], held["my_experience"]
+    assert info["source--source"] == "LinkedIn"
+    assert info["country--country"] == "United States of America"
+    assert info["name--legalName--firstName"] == "Alex" and info["name--legalName--lastName"] == "Rivera"
+    assert info["phoneNumber--phoneType"] == "Mobile"
+    assert info["phoneNumber--countryPhoneCode"] == "United States of America (+1)"
+    assert info["phoneNumber--phoneNumber"] in ("617-555-0123", "(617) 555-0123", "(617)-555-0123")
+    assert info["phoneNumber--extension"] == ""                                   # never "+1"
+    assert exp["education-5--degree"].startswith("Bachelor")
+    assert exp["education-5--fieldOfStudy"] == "Computer Engineering"
+    assert exp["education-5--gradeAverage"] == "3.62" and exp["file-upload-input-ref"] == "Alex_Rivera_resume.pdf"
+    assert exp["education-5--schoolName"] == "Example Institute of Technology"
+    assert (exp["education-5--firstYearAttended-dateSectionYear-input"],
+            exp["education-5--lastYearAttended-dateSectionYear-input"]) == ("2023", "2027")
+    assert info["candidateIsPreviousWorker"] == "No"                      # your resume lists every employer
+    assert exp["socialNetworkAccounts--linkedInAccount"].startswith("https://www.linkedin.com/in/alex-rivera-test")
+    qs = held["application_questions"]
+    assert sorted(v for k, v in qs.items() if k.startswith("primaryQuestionnaire--")) == ["No", "Yes"]
+    vol = held["voluntary_disclosures"]
+    assert vol["personalInfoUS--gender"] == "I do not wish to answer."
+    assert vol["personalInfoUS--veteranStatus"] == "I do not wish to self-identify"
+    assert vol["acceptTermsAndAgreements"] == "checked"
+
+
+async def test_workdays_signed_in_pages_are_read_by_their_own_words(page):
+    """What the reader makes of NVIDIA's saved Workday pages: a dropdown's question when it sits beside the button
+    (not "Select One Required"), a radio group required by its group (aria-required), the upload box by its field's
+    words, a year box by its question, and never the box Workday keeps beside each dropdown or the header's menu."""
+    await page.goto(_workday("application_questions"))
+    got = {f["label"]: (f["qtype"], f["required"]) for f in await scan_form(page)}
+    assert got == {
+        "Are you legally authorized to work in the country where this position is located?": ("listbox", True),
+        "Will you require employer support to obtain or maintain authorization to work in that country? e.g. "
+        "(work permit)": ("listbox", True)}, got
+    await page.goto(_workday("my_information"))
+    fields = await scan_form(page)
+    got = {f["label"]: (f["qtype"], f["required"]) for f in fields}
+    assert got["Have you previously worked for NVIDIA as an employee or contractor?"] == ("radio", True)
+    assert got["How Did You Hear About Us?"] == ("select", True) and got["Phone Extension"] == ("text", False)
+    assert "Settings" not in {f.get("value") for f in fields} and all(f["label"] for f in fields)
+    assert not [f for f in fields if f["field"].startswith("[data-automation-id") or "Select One" in f["label"]]
+    await page.goto(_workday("my_experience"))
+    got = {f["label"]: f["qtype"] for f in await scan_form(page)}
+    assert got["Upload a file (5MB max)"] == "file" and got["From Year"] == "text"
+    assert got["To (Actual or Expected) Year"] == "text" and got["Field of Study"] == "select"

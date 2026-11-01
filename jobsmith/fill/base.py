@@ -51,8 +51,8 @@ SCAN_JS = r"""
     return '';
   };
   // ...or, with none, its placeholder, then its name or id (a box read by "q_123" has no words: `unworded` below)
-  const labelFor = el => ownLabel(el) || clean(el.placeholder || el.name || el.id);
-  const unworded = el => !ownLabel(el) && !clean(el.placeholder || '');
+  const labelFor = el => ownLabel(el) || fieldLabel(el) || clean(el.placeholder || el.name || el.id);
+  const unworded = el => !ownLabel(el) && !fieldLabel(el) && !clean(el.placeholder || '');
   // the section each field sits in ("Employment", "Education"), from the nearest heading above it
   const heads = [...document.querySelectorAll('h1, h2, h3, h4, legend, [role="heading"]')].filter(h => clean(h.innerText));
   const groupFor = el => { let g = ''; for (const h of heads) { if (h.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) g = clean(h.innerText); else break; } return g.slice(0, 60); };
@@ -61,6 +61,24 @@ SCAN_JS = r"""
     return /[*✱]\s*$/.test((l ? l.innerText : wrap ? own(wrap, el) : '').trim()); };
   // "#name" when the id is a plain CSS name; Ashby's ids can start with a digit, so those are [id="…"]
   const byId = id => /^[A-Za-z_][\w-]*$/.test(id) ? `#${id}` : `[id="${id}"]`;
+  // Workday: a dropdown keeps its choice in a box beside its button (not a question); a search box with picked
+  // items as pills (multiSelectContainer); a date's year box, named "Year", whose question is the field's label
+  const besideDropdown = el => !!el.previousElementSibling && el.previousElementSibling.matches('button[aria-haspopup="listbox"]');
+  const promptBox = el => el.closest('[data-automation-id="multiSelectContainer"]');
+  const fieldLabel = el => { const ff = el.closest('[data-automation-id^="formField-"]');
+    const l = ff && ff.querySelector('label, [data-automation-id="richText"], legend'); return l ? clean(l.innerText) : ''; };
+  const dateLabel = el => el.closest('[data-automation-id="dateInputWrapper"]') ? clean(`${fieldLabel(el)} ${el.getAttribute('aria-label') || ''}`) : '';
+  // a dropdown's question: its label, else the question beside it in the same field (Workday's application
+  // questions), else its ARIA name without what it shows and "Select One" / "Required"
+  const dropdownLabel = el => {
+    const l = el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+    if (l && clean(l.innerText)) return clean(l.innerText);
+    const by = (el.getAttribute('aria-labelledby') || '').split(/\s+/).map(i => i && document.getElementById(i))
+      .filter(Boolean).map(n => n.innerText).join(' ');
+    if (clean(by)) return clean(by);
+    if (fieldLabel(el)) return fieldLabel(el);
+    return clean((el.getAttribute('aria-label') || '').replace(el.innerText, ' ').replace(/\bSelect One\b|\bRequired\s*$/g, ' '));
+  };
   const CHOICE_TYPES = ['checkbox', 'radio', 'select-one', 'select-multiple', 'file', 'range', 'color'];
   const out = []; const seenGroups = new Set();
   for (const el of document.querySelectorAll('input, textarea, select')) {
@@ -76,7 +94,9 @@ SCAN_JS = r"""
         [el.name, el.id].some(n => /(^|[_-])pwd$/i.test(n || '')) ||
         /\bpass(word|wd)\b/i.test(labelFor(el)))) continue;
     if (!vis(el) && type !== 'file') continue;
-    const key = el.id ? byId(el.id) : (el.name ? `[name="${el.name}"]` : null);
+    if (besideDropdown(el)) continue;
+    const auto = el.getAttribute('data-automation-id');
+    const key = el.id ? byId(el.id) : (el.name ? `[name="${el.name}"]` : (auto ? `[data-automation-id="${auto}"]` : null));
     if (!key) continue;
     if (type === 'radio' || type === 'checkbox') {
       const g = el.name || el.id; if (seenGroups.has(g)) continue;
@@ -94,15 +114,23 @@ SCAN_JS = r"""
       out.push({ field: el.name ? `[name="${el.name}"]` : key, label: label || opts[0],
                  ...(!label && group.every(unworded) ? { unworded: true } : {}), value: group.some(x => x.checked) ? 'set' : '',
                  qtype: group.length > 1 ? (type === 'radio' ? 'radio' : 'multiselect') : 'checkbox',
-                 required: group.some(x => x.required), options: group.length > 1 ? opts : [], description: '', group: groupFor(el) });
+                 required: group.some(x => x.required || x.getAttribute('aria-required') === 'true') || !!(group.length > 1 && el.closest('[aria-required="true"]')) || /[*✱]\s*$/.test((legend ? legend.innerText : '').trim()), options: group.length > 1 ? opts : [], description: '', group: groupFor(el) });
       continue;
     }
     const role = el.getAttribute('role');
+    const prompt = promptBox(el);
+    if (prompt) {
+      out.push({ field: key, label: labelFor(el), qtype: 'select', prompt: true,
+                 value: [...prompt.querySelectorAll('[data-automation-id="selectedItem"]')].map(p => clean(p.innerText)).join(', '),
+                 required: el.getAttribute('aria-required') === 'true' || starred(el), options: [], description: '',
+                 group: groupFor(el) });
+      continue;
+    }
     // a react-select shows its choice beside the input (which is empty): read what it shows
     const comboValue = () => { const c = el.closest('[class*=control]'); let t = c ? c.innerText : '';
       if (!c && el.parentElement) { const sv = el.parentElement.querySelector('[class*="single-value"], [class*="singleValue"]'); t = sv ? sv.innerText : ''; }
       t = clean(t); return /^select\b/i.test(t) ? '' : t; };
-    out.push({ field: key, label: labelFor(el), ...(unworded(el) ? { unworded: true } : {}), value: type === 'file' ? (el.files && el.files.length ? 'file' : '') : (el.value || (role === 'combobox' ? comboValue() : '')),
+    out.push({ field: key, label: dateLabel(el) || labelFor(el), ...(unworded(el) ? { unworded: true } : {}), value: type === 'file' ? (el.files && el.files.length ? 'file' : '') : (el.value || (role === 'combobox' ? comboValue() : '')),
       qtype: type === 'file' ? 'file' : el.tagName === 'SELECT' ? 'select' : el.tagName === 'TEXTAREA' ? 'textarea' : role === 'combobox' ? 'select' : 'text',
       required: el.required || el.getAttribute('aria-required') === 'true' || starred(el),
       options: el.tagName === 'SELECT' ? [...el.options].map(o => clean(o.text)).filter(t => t && !/^select|^--|^please/i.test(t)) : [],
@@ -126,14 +154,15 @@ SCAN_JS = r"""
   }
   // custom dropdowns (Workday and others): <button aria-haspopup="listbox">Select One</button>
   for (const el of document.querySelectorAll('button[aria-haspopup="listbox"], [role="button"][aria-haspopup="listbox"]')) {
-    if (!vis(el)) continue;
+    if (!vis(el) || el.closest('header, nav, [data-automation-id="header"]')) continue;   // the site's own menus
     const auto = el.getAttribute('data-automation-id');
     const key = el.id ? byId(el.id) : (auto ? `[data-automation-id="${auto}"]` : null);
     if (!key) continue;
     const txt = clean(el.innerText);
-    out.push({ field: key, label: labelFor(el), ...(unworded(el) ? { unworded: true } : {}), qtype: 'listbox',
+    out.push({ field: key, label: dropdownLabel(el), ...(dropdownLabel(el) ? {} : { unworded: true }), qtype: 'listbox',
                value: /^select/i.test(txt) ? '' : txt,
-               required: el.getAttribute('aria-required') === 'true' || /\*/.test(labelFor(el)), options: [], description: '', group: groupFor(el) });
+               required: el.getAttribute('aria-required') === 'true' || /\bRequired\s*$/.test(el.getAttribute('aria-label') || '') ||
+                 starred(el), options: [], description: '', group: groupFor(el) });
   }
   return out;
 }
@@ -381,11 +410,15 @@ async def fill_buttons(page: Page, selector: str, value: str) -> bool:
     return await buttons.nth(idx).get_attribute("aria-pressed") == "true"
 
 
+# Workday shows what you picked in a search box as items with role="option" too (selectedItem): never a choice
+_CHOICES = '[role="option"]:not([data-automation-id="selectedItem"]):visible'
+
+
 async def fill_listbox(page: Page, selector: str, value: str) -> bool:
     btn = page.locator(selector).first
     await btn.scroll_into_view_if_needed(timeout=5000)
     await btn.click(timeout=5000)
-    opts = page.locator('[role="option"]')
+    opts = page.locator(_CHOICES)
     try:
         await opts.first.wait_for(timeout=5000)
     except PWTimeout:
@@ -397,7 +430,44 @@ async def fill_listbox(page: Page, selector: str, value: str) -> bool:
         return False
     await opts.nth(idx).click()
     await page.wait_for_timeout(300)
-    return True
+    return _option_shown(texts[idx], await btn.inner_text())
+
+
+def _option_shown(picked: str, shown: str) -> bool:
+    # whether a box now shows the choice picked (a button can show it with more around it, or a shorter form)
+    a, b = (" ".join(t.split()).lower() for t in (picked, shown))
+    return bool(a) and (a == b or a in b or (len(b) > 2 and b in a))
+
+
+_IN_PROMPT_JS = "e => !!e.closest('[data-automation-id=\"multiSelectContainer\"]')"
+
+
+async def fill_prompt(page: Page, selector: str, value: str) -> bool:
+    """Workday's search box (How Did You Hear About Us?, Country Phone Code, Field of Study): type, press Enter, pick
+    the one choice that matches. It took when the box shows that choice as a picked item."""
+    loc = page.locator(selector).first
+    box = loc.locator('xpath=ancestor::*[@data-automation-id="multiSelectContainer"][1]')
+    await loc.scroll_into_view_if_needed(timeout=5000)
+    for query in dict.fromkeys([value, re.split(r"[,(]", value)[0].strip()]):
+        await loc.click(timeout=5000)
+        await loc.fill(query)
+        await loc.press("Enter")
+        opts = page.locator(f'[data-automation-id="activeListContainer"] {_CHOICES}')
+        try:
+            await opts.first.wait_for(timeout=4000)
+        except PWTimeout:
+            continue
+        texts = [t.strip() for t in await opts.all_inner_texts()]
+        idx = _best_option(texts, value)
+        if idx is None:
+            continue
+        await opts.nth(idx).click()
+        await page.wait_for_timeout(300)
+        picked = [t.strip() for t in await box.locator('[data-automation-id="selectedItem"]').all_inner_texts()]
+        return any(_option_shown(texts[idx], p) for p in picked)
+    await page.keyboard.press("Escape")
+    await loc.fill("")
+    return False
 
 
 # A text box with its own list of places under it (Lever's Current location): typing shows the list, and leaving the
@@ -462,6 +532,8 @@ async def fill_field(page: Page, selector: str, qtype: str, value: str, file_pat
     if qtype not in ("file", "radio", "multiselect", "checkbox") and value.strip() and \
             not EXTENSION_DIGITS.fullmatch(value.strip()) and await is_extension_box(page.locator(selector).first):
         return False                                        # never "+1" or a phone number in an extension box
+    if qtype in ("select", "text") and await page.locator(selector).first.evaluate(_IN_PROMPT_JS):
+        return await fill_prompt(page, selector, value)
     if qtype == "listbox":
         return await fill_listbox(page, selector, value)
     if qtype == "file":
@@ -470,6 +542,9 @@ async def fill_field(page: Page, selector: str, qtype: str, value: str, file_pat
         await page.locator(selector).first.set_input_files(file_path, timeout=8000)
         return True
     if qtype in ("radio", "multiselect", "checkbox"):
+        if selector.startswith("[name="):
+            # the inputs only: Workday's radio group sits in a <div> with the same name
+            selector = f"input{selector}"
         if await page.locator(selector).first.evaluate(
                 "e => !!e.parentElement && !!e.parentElement.querySelector(':scope > button[aria-pressed]')"):
             return await fill_buttons(page, selector, value)

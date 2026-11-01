@@ -24,6 +24,7 @@ ANSWER_BANK: list[tuple[str, str, str]] = [
     ("email", "Email for applications", "Contact"),
     ("school_email", "School email", "Contact"),
     ("phone", "Phone", "Contact"),
+    ("phone_type", "Phone type (Mobile, Home or Work)", "Contact"),
     ("address_line1", "Street address", "Contact"),
     ("city", "City", "Contact"),
     ("state_province", "State", "Contact"),

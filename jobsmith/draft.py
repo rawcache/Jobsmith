@@ -387,6 +387,8 @@ def _edu_date(field: dict) -> tuple[str, int] | None:
     """Greenhouse's education date pickers, by field name or (on other sites, or via the extension) by label."""
     if field["field"] in EDU_DATE_FIELDS:
         return EDU_DATE_FIELDS[field["field"]]
+    if m := re.search(r"--(first|last)YearAttended-dateSectionYear-input", field["field"]):     # Workday
+        return ("enrollment_start" if m.group(1) == "first" else "graduation_date", 1)
     if re.search(r"employ|experience|work history", field.get("group") or "", re.I):
         return None
     m = EDU_DATE_LABEL.match(field.get("label", "").strip())
