@@ -16,6 +16,7 @@ RULES: list[tuple[str, str]] = [
     # Same rule as EXT_LABEL in fill/base.py and content.js.
     (r"^\W*(?:[a-z]+\W+){0,2}ext(?:ension)?\b\W*$|^\W*(?:(?:tele)?phone\s+)?ext(?:ension|\.|\b)", "phone_extension"),
     (r"(country|dial(l?ing)?) (phone )?code\b|\bcountry calling code", "phone_country_code"),
+    (r"phone (device )?type|type of phone", "phone_type"),
     (r"phone|mobile", "phone"),
     (r"^resume|^cv\b|resume/cv", "resume"),
     (r"cover letter", "cover_letter"),
@@ -30,7 +31,7 @@ RULES: list[tuple[str, str]] = [
      r"state.*(reside|live)|^state$", "state"),
     (r"u\.?s\.? person|export control|\bitar\b|\bear\b regulations|deemed export|international traffic in arms", "us_person"),
     (r"citizenship status|status of (your )?citizenship|^citizenship$|what is your citizenship", "citizenship_status"),
-    (r"sponsor|visa", "needs_sponsorship"),
+    (r"sponsor|visa|employer support to (obtain|maintain|get)", "needs_sponsorship"),
     (r"authori[sz]ed to work|eligible to work|legally (able|permitted|authori)|right to work", "work_authorized_us"),
     (r"u\.?s\.? citizen|citizenship", "us_citizen"),
     (r"(confirm|acknowledge)( receipt)?.*(notice|polic|agreement|statement|terms)|privacy notice|\bccpa\b|\bgdpr\b|"

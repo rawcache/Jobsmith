@@ -70,7 +70,44 @@ Autofill with Resume and Use My Last Application go to the sign-in choice, Sign 
 those pages, and the sign-in and create-account buttons send nothing (`window.__signInPresses` counts them). The
 pages keep Workday's honeypot, "This input is for robots only, do not enter if you're human."
 
-The pages behind sign-in come from the maintainer's own browser: [docs/guides/save-workday-pages.md](../../../docs/guides/save-workday-pages.md).
+### Signed in: `workday_apply.js` + `workday_fixture.py --signed-in` → My Information … Review
+
+The application itself (`workday_nvidia_my_information.html`, `_my_experience`, `_application_questions`,
+`_voluntary_disclosures`, `_review`) was saved on 2026-11-01 from the maintainer's own Chrome, signed in, following
+[docs/guides/save-workday-pages.md](../../../docs/guides/save-workday-pages.md). Those five are every page this
+posting has (no Self Identify page). They were filled in by hand and by another autofill tool, so every value on them
+is treated as a real person's. `workday_fixture.py --signed-in`:
+
+- removes the other tool's markup whole (Simplify's panel, its fonts and its page margin) and stops if any is left;
+- empties every box, unticks every choice, puts every dropdown in the form back to "Select One", removes every
+  picked item, and writes Alex Rivera's address in place of the account's email address;
+- swaps Workday's own ids (32-hex instance ids, UUIDs) for counters, the same one for the same id on every page;
+- on Review, writes Alex Rivera's made-up answers in place of what was sent, by the box each sits in, and stops if a
+  box it doesn't know holds an answer;
+- rounds numbers in icon drawings and colours to one decimal place, so a search of the fixtures for someone's details
+  (a GPA, a street number) never lands on an icon;
+- then the same checks as the public pages: nothing from the network, no email but Alex's, no phone number but
+  Alex's (on Review), nothing typed.
+
+Workday adds its styles from its scripts, so the saved pages carry none and look plain. Before committing, also search
+the result for the saver's own details (name, email, school, links, answers): the builder can't know them.
+
+`workday_apply.js` is our stand-in for Workday's scripts on these pages, none of Workday's code and none of its lists
+(every list was closed when saved, so the choices are ours, a few per box): a dropdown opens its choices and shows the
+one picked; a search box (How Did You Hear About Us?, Country Phone Code, Field of Study, Skills) shows matching
+choices after Enter in a list marked `activeListContainer` and adds the pick as a pill, as the saved pages show
+picked items. That list's name and a dropdown's open list (`role="option"` items) are our best understanding of
+Workday's, not seen on these saves: a check on a live Workday form is still to do; Save and Continue and
+Back move between the pages after keeping each page's values in `window.name` for the tests; Submit on Review sends
+nothing (`window.__submitPresses` counts it). Workday's Submit sits in the footer's Next slot
+(`pageFooterNextButton`), as on the real Review page.
+
+The page that shows Workday's errors when a required box is empty wasn't saved:
+[#28](https://github.com/rawcache/Jobsmith/issues/28).
+
+```bash
+uv run python tests/fixtures/src/workday_fixture.py --signed-in SAVED_DIR tests/fixtures
+```
 
 To rebuild, walk the posting again with a read-only capture (save `2_start.html`, `3_after_manual.html`,
 `4_signin_email.html` and `5_create_account.html`), then:
