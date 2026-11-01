@@ -18,13 +18,17 @@ from test_extension import browser
 AI_HOSTS = ("generativelanguage.googleapis.com", "api.anthropic.com", "api.openai.com", "127.0.0.1:11434",
             "localhost:11434")
 ESSAY, OFFERS = "question_1004", "question_1005"
+KEYS = {"anthropic_api": "anthropic_api_key", "openai_api": "openai_api_key", "gemini_api": "gemini_api_key"}
+HOST = {"anthropic_api": "api.anthropic.com", "openai_api": "api.openai.com",
+        "gemini_api": "generativelanguage.googleapis.com"}
+CASES = ["none connected", *(f"unreachable: {k}" for k in KEYS)]
 DEMO_RESUME = config.__file__.replace("config.py", "demo_data/resume.tex")
 
 
 @pytest.fixture
 def no_ai(monkeypatch, request):
     """The practice copy with every way to an AI shut: their hosts refuse, `claude` and `ollama` can't start, and
-    (for "unreachable") keys for all three providers are set, so Jobsmith tries them and is refused."""
+    (for "unreachable: <provider>") that provider's key is set and chosen, so Jobsmith tries it and is refused."""
     tried: list[str] = []
     monkeypatch.setattr(config, "DEMO", True)
     llm.set_backend_override(None)
@@ -32,6 +36,7 @@ def no_ai(monkeypatch, request):
     for k in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setattr(llm, "find_claude", lambda *a, **k: None)
+    monkeypatch.setattr(llm, "OLLAMA_URL", "http://127.0.0.1:11434")      # whatever OLLAMA_HOST says, it's blocked
 
     def refuse(url: str) -> None:
         if any(h in str(url) for h in AI_HOSTS):
@@ -62,9 +67,9 @@ def no_ai(monkeypatch, request):
     monkeypatch.setattr(asyncio, "create_subprocess_exec", exec_)
     monkeypatch.setattr(subprocess, "Popen", lambda cmd, *a, **k: no_ai_process(cmd) or real_popen(cmd, *a, **k))
     settings = {"llm_backend": "auto", "research_backend": "same"}
-    if request.param == "unreachable":
-        settings.update(anthropic_api_key="sk-ant-test", openai_api_key="sk-test", gemini_api_key="AIza-test",
-                        llm_backend="anthropic_api")
+    if request.param.startswith("unreachable"):
+        kind = request.param.split(": ")[1]
+        settings.update({KEYS[kind]: "test-key-not-real", "llm_backend": kind})
     db.set_settings(settings)
     return tried
 
@@ -104,7 +109,7 @@ def _job(tmp_path, name: str, essay: bool = False, letter: bool = False) -> str:
 
 
 @browser
-@pytest.mark.parametrize("no_ai", ["none connected", "unreachable"], indirect=True)
+@pytest.mark.parametrize("no_ai", CASES, indirect=True)
 async def test_the_practice_copys_autopilot_runs_end_to_end_with_every_ai_blocked(no_ai, tmp_path, monkeypatch, request):
     no_ai_kind = request.node.callspec.params["no_ai"]
     await _alex(tmp_path)
@@ -139,7 +144,8 @@ async def test_the_practice_copys_autopilot_runs_end_to_end_with_every_ai_blocke
     assert sub["sent_by"] == "autopilot" and sub["confirmations"]
     sent = {f["label"]: f for f in sub["fields"]}
     assert sent["First Name"]["answer"] == "Alex" and sent["Email"]["answer"] == "alex.rivera@example.com"
-    assert not [f for f in sub["fields"] if f.get("answer") and f.get("kind") in ("generated", "agent")], sub
+    assert sub["untraced"] == 0 and {f["source"] for f in sub["fields"] if f["answer"]} <= {"profile", "resume", "file"}, sub
+    assert not [d for d in draft.drafts_for(plain) if d["kind"] in ("generated", "agent") and draft.final_value(d)]
 
     # the same form with an optional cover letter box only an AI (or Alex) could write: held for Alex, never sent
     # with the box quietly left empty
@@ -149,7 +155,10 @@ async def test_the_practice_copys_autopilot_runs_end_to_end_with_every_ai_blocke
     # what it tried: with "auto" and nothing connected, only a look for a local smith (refused); otherwise the one
     # AI that's connected (refused)
     asked = {u.split("/")[2] if "//" in u else u for u in no_ai}
-    assert asked <= ({"127.0.0.1:11434"} if no_ai_kind == "none connected" else {"api.anthropic.com"}), no_ai
+    if no_ai_kind == "none connected":
+        assert asked <= {"127.0.0.1:11434"}, no_ai
+    else:
+        assert asked == {HOST[no_ai_kind.split(": ")[1]]}, no_ai                 # it really tried, and was refused
 
     # the form with a written question: held for Alex, the question left empty, nothing sent
     job = db.q1("SELECT status, hold_reason FROM jobs WHERE id=?", (written,))
