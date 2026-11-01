@@ -1500,3 +1500,26 @@ def test_a_dialling_code_comes_from_your_phone_number_never_where_you_live(phone
     r = draft.deterministic(field, ans)
     assert r["answer"] == picked, r
     assert bool(r["issues"]) is (not picked) and r["confidence"] == (1.0 if picked else 0.0)
+
+
+@pytest.mark.parametrize("options, picked", [
+    (["United Kingdom (+44)", "Canada (+1)"], ""),                  # "United" alone is never the US
+    (["+1", "+44"], "+1"),                                          # codes only
+    (["United Kingdom (+44)", "United States (+1)"], "United States (+1)"),
+    (["United States Minor Outlying Islands (+1)", "United States (+1)"], ""),   # two +1 choices name it: yours
+])
+def test_a_dialling_code_choice_must_carry_your_numbers_code(options, picked):
+    ans = {"phone": {"value": "617-555-0123", "confirmed": 1}, "country": {"value": "United States", "confirmed": 1}}
+    for qtype in ("select", "listbox", "radio"):
+        r = draft.deterministic({"field": "cc", "label": "Country Phone Code", "qtype": qtype, "required": True,
+                                 "options": options}, ans)
+        assert r["answer"] == picked and bool(r["issues"]) is (not picked), r
+
+
+def test_an_unconfirmed_phone_or_country_never_picks_a_dialling_code():
+    for phone_ok, country_ok in ((0, 1), (1, 0)):
+        ans = {"phone": {"value": "617-555-0123", "confirmed": phone_ok},
+               "country": {"value": "United States", "confirmed": country_ok}}
+        r = draft.deterministic({"field": "cc", "label": "Country Phone Code", "qtype": "select", "required": True,
+                                 "options": ["Canada (+1)", "United States of America (+1)"]}, ans)
+        assert r["answer"] == "" and r["issues"]
