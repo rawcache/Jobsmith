@@ -26,14 +26,18 @@ async function pageScript(tab) {
     }
   }
   let now = info;                                    // read afresh every time the popup opens
-  if ((info.frames || []).some(h => JOB_SITES.test(h))) {
-    // Chrome adds it only to the frames the extension may reach; the others are skipped
+  // A job site's frame, or frames inside frames (a wrapper around one; what's inside can't be seen from here)
+  if ((info.frames || []).some(h => JOB_SITES.test(h)) || info.nested) {
+    // Chrome adds it only to the frames the extension may reach, at any depth; the others are skipped
     await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, files: ["content.js"] })
       .catch(() => { info.reload = true; });
     now = await ask().catch(() => info);             // which frames hold a form, now they can say
   }
+  const unreached = h => !JOB_SITES.test(h);
   // A form was reached, so another site's frame beside it (a video, a map) isn't worth a reload.
-  if (!info.application && !now.forms && (now.bare || []).some(h => !JOB_SITES.test(h))) info.reload = true;
+  if (!info.application && !now.forms && (now.bare || []).some(unreached)) info.reload = true;
+  // The page is an application itself (a talent-network box, say) but the real one is in another site's frame
+  if (info.application && (now.bareApps || []).some(unreached)) info.reload = true;
   return info;
 }
 

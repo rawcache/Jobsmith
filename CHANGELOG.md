@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Added
+- The extension reaches an application form inside a frame inside a frame (a company's own embed around a job
+  site's form), up to three deep; "Write with Jobsmith" buttons appear beside open questions in a job site's frame
+  too (the panel stays on the page itself); and when a page with its own short form also holds the real application
+  in a frame Jobsmith can't reach yet, the popup says "Reload this page" (not for a video's or map's frame).
 - iCIMS: the page-by-page filler works inside the frame iCIMS draws its application in, presses "Apply for this job
   online", and hands you iCIMS's email step ("Enter Your Information", whose Next finds your account or starts one)
   and its login page. The extension fills nothing on either.
