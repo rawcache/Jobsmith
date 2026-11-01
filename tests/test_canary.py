@@ -111,10 +111,14 @@ async def test_a_box_whose_label_matches_its_id_is_labelled(browser):
         '<button type="button" aria-haspopup="listbox" id="dd">Select One</button>',
         '<label for="agree">agree</label><input type="checkbox" id="agree">',        # words that match its id
         '<fieldset><legend>Size</legend><label><input type="radio" name="size"> S</label>'
-        '<label><input type="radio" name="size"> M</label></fieldset>')) + "</form>")
+        '<label><input type="radio" name="size"> M</label></fieldset>',
+        '<button type="button" aria-haspopup="listbox" id="state" aria-label="State">Select One</button>',
+        '<div><p>Are you 18 or older?</p><label><input type="radio" name="adult" value="y"> Yes</label>'
+        '<label><input type="radio" name="adult" value="n"> No</label></div>')) + "</form>")
     raw = {f["field"]: f for f in await page.evaluate(base.SCAN_JS)}
     assert sorted(k for k, f in raw.items() if f.get("unworded")) == sorted(
         ['[id="123abc"]', '[name="q_9"]', '[name="mystery"]', '[name="pick"]', '#dd']), raw
+    assert raw['[name="adult"]']["label"] == "Are you 18 or older?" and raw["#state"]["label"] == "State"
     await page.close()
 
 
