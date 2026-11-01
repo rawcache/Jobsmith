@@ -30,8 +30,8 @@ and career-ops do, adds Simplify's extension and Cluely's notes, and runs as one
 **Never:** sending messages for the user, automating LinkedIn, typing passwords or creating accounts, solving
 CAPTCHAs, typing sign-in, two-step, password-reset or account codes, writing facts the user doesn't have. The one
 emailed code Jobsmith may type is the one a job site sends to verify an application right after Jobsmith pressed its
-Submit: from the user's own connected inbox, from that application's job site, within 15 minutes of the click, naming
-that company or role. Anything else waits for the user.
+Submit: from the user's own connected inbox, from that application's job site, within 15 minutes of the click, for an
+application, naming that company (or, from the employer's own email, the role). Anything else waits for the user.
 
 ## Phases (each ends at a gate it must pass before the next starts)
 

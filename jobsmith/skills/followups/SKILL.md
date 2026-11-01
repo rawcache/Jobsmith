@@ -13,7 +13,8 @@ command: jobsmith followups
 Reads your inbox read-only (Gmail, Outlook / Microsoft 365, or any IMAP server), on your computer:
 
 - Types the code a job site emails to verify an application, only when Jobsmith pressed that application's Submit
-  itself, the email is from that job site, arrived within 15 minutes and names the company or role. Never a sign-in,
+  itself, the email is from that job site, arrived within 15 minutes, says it's for an application and names the
+  company (or, from the employer's own email, the role). Never a sign-in,
   two-step, password-reset or account code: those, and anything else, wait for you.
 - Moves applications along when a company replies: received, assessment, interview, offer, rejected.
 - A week after you applied with no reply, drafts a short follow-up for you to send.
