@@ -625,11 +625,12 @@
 
   // Frames inside a frame, two more levels down (page -> wrapper -> job site's form is the usual case). A window
   // from another site still shows its frames, so this works across sites; nothing inside them is read.
+  const UNSEEN = Object.freeze({});                  // frames past the limit: never asked, so never "answered"
   function framesInside(win, depth = 2) {
     const out = [];
-    if (depth > 3) return out;
     let n = 0;
     try { n = win.frames.length; } catch (_) { return out; }
+    if (depth > 3) return n ? [UNSEEN] : out;
     for (let i = 0; i < n; i++) {
       let w; try { w = win.frames[i]; } catch (_) { continue; }
       out.push(w, ...framesInside(w, depth + 1));
