@@ -10,7 +10,8 @@ import imaplib
 import re
 from datetime import datetime, timedelta
 from email.header import decode_header, make_header
-from email.utils import parsedate_to_datetime
+from email.utils import parseaddr, parsedate_to_datetime
+from urllib.parse import urlsplit
 
 from . import db
 
@@ -234,15 +235,69 @@ def _recent(since: float) -> list[dict]:
     return out
 
 
-def pick_code(messages: list[dict], company: str) -> str | None:
-    key = _norm(company)
-    for msg in sorted(messages, key=lambda m: -m["when"]):
-        hay = _norm(f"{msg['from']} {msg['subject']} {msg['body'][:1500]}")
-        if (len(key) >= 3 and key in hay) or "greenhouse" in hay:
-            code = extract_code(msg["subject"], msg["body"])
-            if code:
-                return code
+# Emailed codes Jobsmith may type for you: only the one a job site sends right after Submit to verify that application
+# (Greenhouse's "security code for your application"). Never a code to sign in, for two-step sign-in, to reset a
+# password or to make an account; anything that doesn't match every rule below waits for you.
+CODE_WINDOW = 15 * 60                  # from Jobsmith's Submit click
+SENDERS = {"greenhouse": ("greenhouse.io", "greenhouse-mail.io"), "lever": ("lever.co",), "ashby": ("ashbyhq.com",),
+           "workday": ("myworkday.com", "workday.com"), "icims": ("icims.com",),
+           "smartrecruiters": ("smartrecruiters.com",)}
+NOT_APPLICATION = re.compile(
+    r"\b(sign(ing)?[ -]?(in|on)|log(ging)?[ -]?(in|on)|login|two[ -]?(factor|step)|2fa|mfa|multi[ -]?factor|"
+    r"password|reset|create (an |a new |your )?account|new account|account (creation|activation|registration|setup)|"
+    r"activate your account|verify your (email|account)|confirm your (email|account))\b", re.I)
+_SECOND_LEVEL = {"co", "com", "ac", "org", "net", "gov", "edu"}
+
+
+def _site_of(host: str) -> str:
+    """acme.com from careers.acme.com; acme.co.uk from jobs.acme.co.uk."""
+    parts = [p for p in (host or "").lower().split(".") if p]
+    keep = 3 if len(parts) >= 3 and parts[-2] in _SECOND_LEVEL else 2
+    return ".".join(parts[-keep:])
+
+
+def job_site_domains(job: dict) -> set[str]:
+    """Where this application's job site sends its email from: the application page's own site, and the job
+    site's known mail domains (Greenhouse mails from greenhouse-mail.io)."""
+    host = urlsplit(job.get("url") or "").hostname or ""
+    return ({_site_of(host)} if "." in host else set()) | set(SENDERS.get(job.get("ats") or "", ()))
+
+
+def _from_domain(sender: str) -> str:
+    return parseaddr(sender or "")[1].rpartition("@")[2].lower()
+
+
+def code_refusal(msg: dict, job: dict, clicked: float) -> str | None:
+    """Why this email's code isn't for Jobsmith to type into this application, or None when it is."""
+    sender, allowed = _from_domain(msg.get("from", "")), job_site_domains(job)
+    if not any(sender == d or sender.endswith("." + d) for d in allowed):
+        return f"from {sender or 'an unknown sender'}, not {job.get('company') or 'the'} job site"
+    if not clicked - 60 <= msg.get("when", 0) <= clicked + CODE_WINDOW:
+        return "not within 15 minutes of Submit"
+    text = f"{msg.get('subject', '')}\n{msg.get('body', '')[:3000]}"
+    if NOT_APPLICATION.search(text):
+        return "reads as a sign-in or account code"
+    hay, company, role = _norm(text), _norm(job.get("company") or ""), _norm(job.get("title") or "")
+    if not ((len(company) >= 3 and company in hay) or (len(role) >= 6 and role in hay)):
+        return f"doesn't name {job.get('company') or 'the company'} or the role"
     return None
+
+
+def application_code(messages: list[dict], job: dict, clicked: float | None) -> tuple[str | None, list[str]]:
+    """The code a job site emailed to verify this application after Jobsmith pressed Submit (at `clicked`), and why
+    every other code-carrying email was passed over. No click by Jobsmith, no code."""
+    refused: list[str] = []
+    if clicked is None:
+        return None, ["Submit wasn't pressed by Jobsmith, so the code is yours to enter"]
+    for msg in sorted(messages, key=lambda m: -m.get("when", 0)):
+        code = extract_code(msg.get("subject", ""), msg.get("body", ""))
+        if not code:
+            continue
+        why = code_refusal(msg, job, clicked)
+        if why is None:
+            return code, refused
+        refused.append(f"\"{(msg.get('subject') or '')[:80]}\": {why}")
+    return None, refused
 
 
 def email_ready() -> bool:
@@ -251,16 +306,17 @@ def email_ready() -> bool:
     return False if DEMO else mail.ready()
 
 
-async def find_code(company: str, since: float) -> str | None:
-    """A verification code emailed by this company since `since`, or None. Never raises."""
+async def find_code(job: dict, clicked: float | None) -> tuple[str | None, list[str]]:
+    """application_code() on the inbox you connected (read-only). Never raises."""
+    import time
     s = db.get_settings()
-    if not email_ready() or s.get("gmail_codes") is False:
-        return None
+    if not email_ready() or s.get("gmail_codes") is False or clicked is None or time.time() > clicked + CODE_WINDOW:
+        return None, []
     try:
-        msgs = await asyncio.to_thread(_recent, since)
+        msgs = await asyncio.to_thread(_recent, clicked - 60)
     except Exception:
-        return None
-    return pick_code(msgs, company)
+        return None, []
+    return application_code(msgs, job, clicked)
 
 
 async def test_connection() -> dict:

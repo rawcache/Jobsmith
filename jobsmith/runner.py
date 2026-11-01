@@ -902,7 +902,7 @@ async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None
 async def watch_tab(job_id: str, page, run_dir: Path, run: Run) -> None:
     """Outside the concurrency slot: watch the tab until you (or Jobsmith) submit. Spots the
     'we emailed you a code' step and asks you for the code instead of leaving you guessing."""
-    job = db.q1("SELECT company, title FROM jobs WHERE id=?", (job_id,)) or {}
+    job = db.q1("SELECT company, title, url, ats FROM jobs WHERE id=?", (job_id,)) or {}
     deadline = time.time() + 45 * 60
     try:
         await _watch(job_id, page, run_dir, run, job, deadline)
@@ -914,8 +914,8 @@ async def _watch(job_id: str, page, run_dir: Path, run: Run, job: dict, deadline
     from .fill.base import page_confirms_submission, security_code_prompt
     from .scheduler import notify
     from . import outcomes
-    asked = notified = False
-    asked_at = last_mail = 0.0
+    asked = notified = auto = False
+    last_mail, clicked = 0.0, None
     tried: set[str] = set()
     while time.time() < deadline:
         try:
@@ -934,24 +934,36 @@ async def _watch(job_id: str, page, run_dir: Path, run: Run, job: dict, deadline
             prompt = await security_code_prompt(page)
             if prompt and not asked:
                 asked = True
-                asked_at = time.time()
                 tried: set[str] = set()
+                refused_seen: set[str] = set()
+                clicked = guardrails.submitted_at(job_id)
+                # Jobsmith types an emailed code only to verify an application it just submitted itself (see
+                # outcomes.application_code); a page asking for a sign-in or account code is always yours
+                auto = outcomes.email_ready() and clicked is not None and not outcomes.NOT_APPLICATION.search(prompt)
                 live_set(job_id, phase="code", needs_code=True, note=prompt)
-                if outcomes.email_ready():
-                    run.log(f"Verification step: {prompt}. Looking for the code in your email.")
+                if auto:
+                    run.log(f"Verification step: {prompt}. Looking in your email for the code {job.get('company', '')} "
+                            "sent for this application.")
                 else:
                     run.log(f"Verification step: {prompt}. Paste the code into Jobsmith (or the browser).")
                     notify("Jobsmith needs a code", f"{job.get('company', '')}: check your email for the verification code.")
-            if prompt and asked and outcomes.email_ready() and time.time() - asked_at < 10 * 60 \
-                    and time.time() - last_mail >= 12:
+            if prompt and asked and auto and time.time() - last_mail >= 12:
                 last_mail = time.time()
-                code = await outcomes.find_code(job.get("company", ""), asked_at)
+                code, refused = await outcomes.find_code(job, clicked)
+                for why in refused:
+                    if why not in refused_seen:
+                        refused_seen.add(why)
+                        run.log(f"Not using an emailed code: {why}.")
                 if code and code not in tried:
                     tried.add(code)
-                    run.log("Found the code in your email and entered it.")
+                    run.log("Found this application's code in your email and entered it.")
                     await live_code(job_id, code)
                     continue
-                if time.time() - asked_at > 4 * 60 and not notified:
+                if time.time() > clicked + outcomes.CODE_WINDOW:
+                    auto = False              # past the window: no code is taken from email any more; it's yours
+                    run.log("No matching code within 15 minutes of Submit. Paste it into Jobsmith (or the browser).")
+                    notify("Jobsmith needs a code", f"{job.get('company', '')}: paste the verification code in Jobsmith.")
+                elif time.time() - clicked > 4 * 60 and not notified:
                     notified = True
                     notify("Jobsmith needs a code", f"{job.get('company', '')}: no code in your inbox yet. Paste it in Jobsmith when it arrives.")
             elif not prompt and asked and LIVE.get(job_id, {}).get("needs_code"):

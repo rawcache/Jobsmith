@@ -1084,8 +1084,9 @@ def test_emailed_codes_are_found_and_matched_to_the_company():
     assert outcomes.extract_code("Thanks for applying", "We received your application for the Software Engineer role.") is None
     msgs = [{"from": "Other Co <no-reply@other.com>", "subject": "Your code", "body": "Your code is 111222", "when": 5},
             {"from": "Acme Robotics <no-reply@us.greenhouse-mail.io>", "subject": gh[0], "body": gh[1], "when": 4}]
-    assert outcomes.pick_code(msgs, "Acme Robotics") == "kD8sQw2Z"
-    assert outcomes.pick_code(msgs[:1], "Acme Robotics") is None
+    job = {"company": "Acme Robotics", "ats": "greenhouse", "url": "https://job-boards.greenhouse.io/acme/jobs/1"}
+    assert outcomes.application_code(msgs, job, 0)[0] == "kD8sQw2Z"          # the rest: tests/test_codes.py
+    assert outcomes.application_code(msgs[:1], job, 0)[0] is None
 
 
 async def test_dashboard_checklists():
