@@ -20,6 +20,12 @@
 - iCIMS: the page-by-page filler works inside the frame iCIMS draws its application in, presses "Apply for this job
   online", and hands you iCIMS's email step ("Enter Your Information", whose Next finds your account or starts one)
   and its login page. The extension fills nothing on either.
+- SmartRecruiters: autopilot and the extension fill the first page of its application (name, email and its
+  confirmation, City picked from its list, phone, LinkedIn, website, your resume in the Resume box) and stop there
+  for you, tested on Bosch's "Application Engineer" form saved blank. Jobsmith never uses its "autocomplete your
+  application" upload or Apply With LinkedIn, Indeed or SEEK, and never presses Next: the pages after it haven't
+  been seen yet. Reading a form now reaches inside web components (shadow roots), in autopilot and the extension,
+  and the extension notices a Submit pressed inside one.
 - Workday, signed in: autopilot fills the application page by page (My Information, My Experience, Application
   Questions, Voluntary Disclosures) and stops at Review, tested on NVIDIA's real pages saved and emptied. Workday's
   lists were closed when those pages were saved, so the open lists in the tests are a stand-in; how they look on a

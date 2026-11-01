@@ -11,6 +11,23 @@
     const r = el.getBoundingClientRect(); const s = getComputedStyle(el);
     return (r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none") || el.type === "file";
   };
+  // Web-component forms (SmartRecruiters) keep their boxes inside shadow roots: the page's own and every open one
+  // inside it, never this panel's. An id or a label[for] is looked up in the box's own root first. As base.SCAN_JS.
+  const shadowRoots = () => {
+    const r = [document];
+    for (let i = 0; i < r.length; i++) for (const e of r[i].querySelectorAll("*")) if (e.shadowRoot && e.id !== "jobsmith-panel") r.push(e.shadowRoot);
+    return r;
+  };
+  const $$ = sel => shadowRoots().flatMap(r => [...r.querySelectorAll(sel)]);
+  const byIdFrom = (el, id) => el.getRootNode().getElementById?.(id) || document.getElementById(id) ||
+    shadowRoots().map(r => r.getElementById(id)).find(Boolean) || null;
+  const labelTag = el => el.id ? (el.getRootNode().querySelector?.(`label[for="${CSS.escape(el.id)}"]`) ||
+    document.querySelector(`label[for="${CSS.escape(el.id)}"]`)) : null;
+  // the nearest element around `el` matching `sel`, out through the shadow roots it sits in
+  const around = (el, sel) => {
+    for (let n = el; n; n = n.parentNode instanceof ShadowRoot ? n.parentNode.host : n.parentElement) if (n.matches?.(sel)) return n;
+    return null;
+  };
   const send = msg => new Promise(res => chrome.runtime.sendMessage(msg, r => res(r || { ok: false, error: chrome.runtime.lastError?.message })));
 
   // ------------------------------------------------------------------ reading the form
@@ -27,9 +44,9 @@
   };
 
   function labelFor(el) {
-    if (el.id) { const l = document.querySelector(`label[for="${CSS.escape(el.id)}"]`); if (l) return clean(l.innerText); }
+    const l = labelTag(el); if (l) return clean(l.innerText);
     const by = el.getAttribute("aria-labelledby");
-    if (by) { const t = by.split(/\s+/).map(i => document.getElementById(i)).filter(Boolean).map(n => n.innerText).join(" "); if (clean(t)) return clean(t); }
+    if (by) { const t = by.split(/\s+/).map(i => byIdFrom(el, i)).filter(Boolean).map(n => n.innerText).join(" "); if (clean(t)) return clean(t); }
     if (el.getAttribute("aria-label")) return clean(el.getAttribute("aria-label"));
     const wrap = el.closest("label"); if (wrap) return clean(own(wrap, el));
     const fs = el.closest("fieldset"); if (fs && fs.querySelector("legend")) return clean(fs.querySelector("legend").innerText);
@@ -47,7 +64,7 @@
 
   // "First Name*": the asterisk (Lever: ✱) marks a required field (labelFor strips it)
   const starred = el => {
-    const l = el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+    const l = labelTag(el);
     const wrap = !l && el.closest("label");
     return /[*✱]\s*$/.test((l ? l.innerText : wrap ? own(wrap, el) : "").trim());
   };
@@ -73,9 +90,9 @@
   const promptBox = el => el.closest('[data-automation-id="multiSelectContainer"]');
   const pills = el => [...promptBox(el).querySelectorAll('[data-automation-id="selectedItem"]')].map(p => clean(p.innerText));
   const dropdownLabel = btn => {
-    const l = btn.id && document.querySelector(`label[for="${CSS.escape(btn.id)}"]`);
+    const l = labelTag(btn);
     if (l && clean(l.innerText)) return clean(l.innerText);
-    const by = (btn.getAttribute("aria-labelledby") || "").split(/\s+/).map(i => i && document.getElementById(i))
+    const by = (btn.getAttribute("aria-labelledby") || "").split(/\s+/).map(i => i && byIdFrom(btn, i))
       .filter(Boolean).map(n => n.innerText).join(" ");
     if (clean(by)) return clean(by);
     const ff = btn.closest('[data-automation-id^="formField-"]');
@@ -119,7 +136,7 @@
   function scan() {
     els.clear();
     const out = []; const groups = new Set();
-    for (const el of document.querySelectorAll("input, textarea, select")) {
+    for (const el of $$("input, textarea, select")) {
       const type = (el.type || el.tagName).toLowerCase();
       if (["hidden", "submit", "button", "image", "reset", "search", "password"].includes(type)) continue;
       if (!visible(el) && type !== "file") continue;
@@ -131,7 +148,7 @@
       if (type !== "file" && el.getAttribute("aria-hidden") === "true" && el.tabIndex < 0) continue;
       if (type === "radio" || type === "checkbox") {
         const g = el.name || el.id; if (!g || groups.has(g)) continue; groups.add(g);
-        const group = el.name ? [...document.querySelectorAll(`input[name="${CSS.escape(el.name)}"]`)] : [el];
+        const group = el.name ? [...el.getRootNode().querySelectorAll(`input[name="${CSS.escape(el.name)}"]`)] : [el];
         const fs = el.closest("fieldset"); const legend = fs && fs.querySelector("legend");
         let label = legend ? clean(legend.innerText) : "";
         // the first line of the nearest box holding every option, unless that line is an option itself (a lone
@@ -145,18 +162,24 @@
                    filled: group.some(x => x.checked) });
         continue;
       }
+      // SmartRecruiters: its "autocomplete your application" upload reads a resume to fill the form for you (never
+      // used: Jobsmith fills it); any other upload's question is its section's title ("Resume *")
+      if (type === "file" && around(el, '[data-test="apply-with-resume-container"]')) continue;
+      const section = type === "file" && around(el, ".form-section")?.querySelector('[data-test="section-title"]');
+      const mark = section && section.querySelector('[data-test="section-required-mark"]');
       const id = tag(el); els.set(id, el);
       const prompt = !!promptBox(el);
       const combo = prompt || el.getAttribute("role") === "combobox" || el.getAttribute("aria-autocomplete") === "list";
-      out.push({ id, label: labelFor(el), name: el.name || el.id,      // name: so the engine knows Lever's eeo[…] fields
+      out.push({ id, label: section ? clean(section.textContent.replace(mark ? mark.textContent : "", " ")) : labelFor(el),
+        name: el.name || el.id,      // name: so the engine knows Lever's eeo[…] fields
         type: type === "file" ? "file" : el.tagName === "SELECT" ? "select" : el.tagName === "TEXTAREA" ? "textarea" : combo ? "combobox" : "text",
-        required: el.required || el.getAttribute("aria-required") === "true" || starred(el),
+        required: el.required || el.getAttribute("aria-required") === "true" || starred(el) || !!mark,
         options: el.tagName === "SELECT" ? [...el.options].map(o => clean(o.text)).filter(t => t && !/^select|^--|^please/i.test(t)) : [],
         filled: type === "file" ? !!(el.files && el.files.length) : prompt ? pills(el).length > 0 : !!el.value });
     }
     // Workday's dropdowns: <button aria-haspopup="listbox">Select One</button> in a form field (the header's menus
     // aren't questions)
-    for (const btn of document.querySelectorAll('button[aria-haspopup="listbox"]')) {
+    for (const btn of $$('button[aria-haspopup="listbox"]')) {
       if (!visible(btn) || !btn.closest('[data-automation-id^="formField-"], form')) continue;
       const id = tag(btn); els.set(id, btn);
       const shown = clean(btn.innerText);
@@ -165,7 +188,7 @@
                  filled: !!shown && !/^select\b/i.test(shown) });
     }
     // Yes/No buttons (Ashby): two buttons that toggle aria-pressed beside a hidden checkbox. A radio question.
-    for (const box of new Set([...document.querySelectorAll("button[aria-pressed]")].map(b => b.parentElement))) {
+    for (const box of new Set($$("button[aria-pressed]").map(b => b.parentElement))) {
       const bs = [...box.children].filter(b => b.tagName === "BUTTON" && b.hasAttribute("aria-pressed"));
       if (bs.length !== 2 || !bs.every(b => /^(yes|no)$/i.test(clean(b.innerText))) || !visible(bs[0])) continue;
       let head = null;
@@ -245,7 +268,7 @@
   function optionsNear(el) {
     // The field's own list: aria-controls, else the closest options to the field (pages often have other lists).
     const id = el.getAttribute("aria-controls") || el.getAttribute("aria-owns");
-    const box = id && document.getElementById(id);
+    const box = id && byIdFrom(el, id);
     if (box) return [...box.querySelectorAll("[role='option']")].filter(visible);
     for (let p = el.parentElement, i = 0; p && i < 4; p = p.parentElement, i++) {
       const o = [...p.querySelectorAll("[role='option']")].filter(visible);
@@ -675,8 +698,9 @@
   // When you press Submit and the page then thanks you, log it to Applications (and suggest similar roles).
   const THANKS = /thank you for (applying|your application|submitting)|application (has been )?(submitted|received)|we('ve| have) received your application|thanks for applying|successfully (submitted|applied)/i;
   document.addEventListener("click", e => {
-    const b = e.target.closest && e.target.closest("button, input[type=submit], a[role=button]");
-    if (!b || b.closest("#jobsmith-panel")) return;
+    const hit = e.composedPath ? e.composedPath()[0] : e.target;      // the button itself, inside a shadow root too
+    const b = hit && hit.nodeType === 1 ? around(hit, "button, input[type=submit], a[role=button]") : null;
+    if (!b || around(b, "#jobsmith-panel")) return;      // the panel's own buttons
     const t = (b.innerText || b.value || "").trim();
     if (/^(submit|submit application|apply|send application|finish)/i.test(t))
       sessionStorage.setItem("jobsmith-submit", JSON.stringify({ url: location.href, title: pageTitle(), at: Date.now() }));

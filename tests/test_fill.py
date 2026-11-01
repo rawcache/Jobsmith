@@ -271,6 +271,59 @@ async def test_lever_saved_palantir_form_is_filled_and_held_before_submit(fake_l
     assert not db.q("SELECT 1 FROM runs WHERE job_id=? AND kind='submit'", (jid,))
 
 
+BOSCH_SR = "https://jobs.smartrecruiters.com/BoschGroup/0000000000000-application-engineer"   # made up: no URL kept
+SR_FORM = (FIXTURES / "smartrecruiters_bosch_form.html").resolve().as_uri()
+
+
+async def test_smartrecruiters_saved_bosch_form_is_filled_and_held_before_next(fake_llm, tmp_path, monkeypatch):
+    """Bosch's Application Engineer form on SmartRecruiters (tests/fixtures/smartrecruiters_bosch_form.html, saved
+    blank from the maintainer's own Chrome), drawn inside web components' shadow roots, through the whole autopilot
+    path: scan, draft, fill, hold. Each box is read by its own words; the resume goes in the Resume box, never the
+    "autocomplete your application" upload; City is picked from its list; the phone's code stays the +1 it shows.
+    SmartRecruiters asks more after Next, so Jobsmith stops on this page: Next and Submit are never pressed, and
+    Apply With Indeed or SEEK never."""
+    async def no_watch(*a):
+        return None
+    monkeypatch.setattr(runner, "watch_tab", no_watch)
+    jid = await _lever_job(tmp_path)
+    db.x("UPDATE jobs SET url=?, ats='smartrecruiters', company='Bosch', title='Application Engineer', "
+         "description='Application engineering at Bosch.' WHERE id=?", (SR_FORM, jid))
+    trust("smartrecruiters")
+    asked = []
+
+    def responder(system, prompt):
+        asked.append(prompt.split("QUESTIONS TO ANSWER:")[1])
+        return {"answers": []}
+    fake_llm(responder)
+    await runner.prepare(jid, research=False)
+    fields = {f["label"]: f for f in db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,)))["questions"]}
+    assert "Choose a file or drop it here" not in fields, sorted(fields)        # the autocomplete upload is skipped
+    assert fields["Resume"]["qtype"] == "file" and fields["Resume"]["required"]
+    try:
+        await runner.fill(jid, submit=True)
+        page = runner.LIVE[jid]["page"]
+        ans = profile.answers()
+        assert await page.input_value('input[id="first-name-input"]') == "Alex"
+        assert await page.input_value('input[id="last-name-input"]') == "Rivera"
+        assert await page.input_value('input[id="email-input"]') == ans["email"]["value"]
+        assert await page.input_value('input[id="confirm-email-input"]') == ans["email"]["value"]
+        assert await page.input_value('input[id="spl-form-element_3"]') == ans["phone"]["value"]
+        assert await page.input_value('input[id="spl-form-element_8"]') == "Boston, MA, USA"     # from its list
+        assert "+1" in await page.inner_text('button[aria-label="Country code"]')
+        assert await page.evaluate("document.querySelector('[data-test=\"resume-upload\"]')"
+                                   ".shadowRoot.querySelector('input[type=file]').files.length") == 1
+        assert await page.evaluate("document.querySelector('[data-test=\"apply-with-resume-container\"]')"
+                                   ".shadowRoot.querySelector('input[type=file]').files.length") == 0
+        assert await page.evaluate("window.__nextPresses") == 0
+        assert not await page_confirms_submission(page)
+    finally:
+        await runner.browser.close()
+    job = db.q1("SELECT status, hold_reason FROM jobs WHERE id=?", (jid,))
+    assert job["status"] == "filled" and "asks more after its Next button" in job["hold_reason"], job["hold_reason"]
+    assert not db.q("SELECT 1 FROM runs WHERE job_id=? AND kind='submit'", (jid,))
+    assert not [a for a in asked if "Phone" in a or "Country code" in a], asked
+
+
 async def test_lever_asks_about_the_jobs_own_country_so_a_london_job_waits_for_you(fake_llm, tmp_path, monkeypatch):
     """"Authorized to work in the country for which you are applying?" names no country: it's the job's. Your
     confirmed answers are for the US, so for a job in London it's left for you, never answered from them."""

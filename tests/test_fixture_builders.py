@@ -8,12 +8,14 @@ from conftest import FIXTURES
 
 sys.path.insert(0, str(FIXTURES / "src"))
 import icims_fixture  # noqa: E402
+import smartrecruiters_fixture  # noqa: E402
 import workday_fixture  # noqa: E402
 
-BUILDERS = [lambda page: icims_fixture.build(page, "email", ""), lambda page: workday_fixture.build(page, "signin", "")]
+BUILDERS = [lambda page: icims_fixture.build(page, "email", ""), lambda page: workday_fixture.build(page, "signin", ""),
+            lambda page: smartrecruiters_fixture.build(page, "")]
 
 
-@pytest.fixture(params=BUILDERS, ids=["icims", "workday"])
+@pytest.fixture(params=BUILDERS, ids=["icims", "workday", "smartrecruiters"])
 def _build(request):
     return lambda body: request.param(f"<html><body><form>{body}</form></body></html>")
 
@@ -87,3 +89,20 @@ def test_a_review_answer_the_builder_doesnt_know_stops_it():
         _signed_in(review, "review")
     page = _signed_in(review.replace('<span id="favouriteColour">Teal</span>', ""), "review")
     assert "Alex Rivera" in page and "Teal" not in page
+
+
+def test_a_saved_smartrecruiters_form_loads_nothing_and_keeps_no_ids():
+    """The saved form keeps its components' shadow roots (declarative templates) and its own markup, and loses what
+    would load from the network, SmartRecruiters' ids and another extension's panel."""
+    page = smartrecruiters_fixture.build(
+        '<html><head><link rel="stylesheet" href="https://c.smartrecruiters.com/a.css"><style id="simplify-inter-font-'
+        'faces">@font-face{src:url(chrome-extension://x/a.woff2)}</style></head><body><div class="simplify-jobs-shadow-'
+        'root"><template shadowrootmode="open"><img src="chrome-extension://x/i.svg"></template></div><spl-input '
+        'id="first-name"><template shadowrootmode="open"><input id="first-name-input" value=""></template></spl-input>'
+        '<img src="https://c.smartrecruiters.com/flag.png"><a href="https://jobs.smartrecruiters.com/BoschGroup/x">x</a>'
+        '<div data-company="5f3c1d2e4a6b7c8d9e0f1a2b" data-pub="3fa85f64-5717-4562-b3fc-2c963f66afa6"></div>'
+        '<div data-settings=\'{"u":"https://track.example/p"}\'></div></body></html>', "/* stand-in */")
+    assert 'shadowrootmode="open"><input id="first-name-input"' in page and "/* stand-in */" in page
+    assert "simplify" not in page.lower() and "chrome-extension" not in page
+    assert "https://" not in page and "5f3c1d2e" not in page and "3fa85f64" not in page
+    assert 'data-jobsmith-page="smartrecruiters"' in page

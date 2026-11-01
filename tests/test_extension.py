@@ -1671,3 +1671,71 @@ async def test_autofill_never_picks_a_phone_code_that_isnt_your_numbers(page):
         '[data-automation-id="multiSelectContainer"]').querySelectorAll('[data-automation-id="selectedItem"]')].length""")
     assert pills == 0                                     # "United Kingdom (+44)" is never taken for +1
     await _never_submitted(page)
+
+
+SR_URL = "https://jobs.smartrecruiters.com/oneclick-ui/company/BoschGroup/publication/00000000-0000-4000-8000-000000000000"
+
+
+async def _on_smartrecruiters(page, **opts):
+    """The saved Bosch form served at a SmartRecruiters address, with Jobsmith's panel on it and every submit
+    watched."""
+    html = (FIXTURES / "smartrecruiters_bosch_form.html").read_text(encoding="utf-8")
+
+    async def serve(route):
+        if route.request.url.split("?")[0] == SR_URL:
+            await route.fulfill(status=200, content_type="text/html", body=html)
+        else:
+            await route.abort()
+    await page.route("https://**/*", serve)
+    await page.add_init_script(_stub({"panelOpen": True}, **opts))
+    await page.goto(SR_URL)
+    await page.add_script_tag(path=str(EXT / "content.js"))
+    await page.wait_for_function("document.querySelector('#jobsmith-panel')?.shadowRoot?.querySelector('.wrap')")
+    await _watch_for_submits(page)
+
+
+@browser
+async def test_autofill_fills_smartrecruiters_form_inside_its_components_and_never_moves_on(page):
+    """Bosch's form on SmartRecruiters keeps every box inside web components' shadow roots. Fill reads each by its
+    own words, puts the resume in the Resume box (never the "autocomplete your application" upload), picks City
+    from its list, and never presses Next, Apply With Indeed or SEEK."""
+    std = lambda v: {"value": v, "kind": "standard"}
+    await _on_smartrecruiters(page, resume="resume.pdf", answers={
+        "First name": std("Alex"), "Last name": std("Rivera"), "Email": std("alex.rivera@example.edu"),
+        "Confirm your email": std("alex.rivera@example.edu"), "City": std("Boston, MA, USA"),
+        "Phone number": std("617-555-0123")})
+    await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
+    note = "document.querySelector('#jobsmith-panel').shadowRoot.querySelector('.note')"
+    await page.wait_for_function(f"{note}?.innerText.includes('Filled')", timeout=30000)
+    fields = {f["label"]: f for f in await page.evaluate("__calls.find(c => c.type === 'answers').body.fields")}
+    assert {"First name", "Last name", "Email", "Confirm your email", "LinkedIn", "Website", "City", "Phone number",
+            "Resume"} <= set(fields), sorted(fields)
+    assert fields["Resume"]["type"] == "file" and fields["Resume"]["required"]
+    assert "Choose a file or drop it here" not in fields
+    assert await page.input_value('input[id="first-name-input"]') == "Alex"
+    assert await page.input_value('input[id="confirm-email-input"]') == "alex.rivera@example.edu"
+    assert await page.input_value('input[id="spl-form-element_3"]') == "617-555-0123"
+    assert await page.input_value('input[id="spl-form-element_8"]') == "Boston, MA, USA"
+    files = lambda box: page.evaluate(f"""document.querySelector('[data-test="{box}"]').shadowRoot
+        .querySelector('input[type=file]').files.length""")
+    assert await files("resume-upload") == 1 and await files("apply-with-resume-container") == 0
+    assert await page.evaluate("window.__nextPresses") == 0
+    assert page.url == SR_URL
+    await _never_submitted(page)
+
+
+@browser
+async def test_the_submit_watcher_sees_a_submit_inside_a_web_component_but_not_next(page):
+    """SmartRecruiters' buttons sit inside shadow roots, so the watcher reads the button pressed, not the component
+    around it. Next isn't sending it; a Submit drawn the same way is, so the thank-you page after it is logged."""
+    await _on_smartrecruiters(page)
+    await page.click('[data-test="footer-next"]')
+    assert await page.evaluate("window.__nextPresses") == 1
+    assert await page.evaluate("sessionStorage.getItem('jobsmith-submit')") is None
+    await page.evaluate("""() => {
+      const host = document.createElement('oc-button'); host.id = 'written-submit';
+      host.attachShadow({ mode: 'open' }).innerHTML = '<button type="button">Submit</button>';
+      document.body.appendChild(host); }""")
+    await page.click("#written-submit button")
+    noted = json.loads(await page.evaluate("sessionStorage.getItem('jobsmith-submit')"))
+    assert noted["url"] == SR_URL
