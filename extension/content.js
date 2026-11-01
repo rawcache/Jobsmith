@@ -582,8 +582,8 @@
     if (r.ok) { state.similar = r.data; state.msg = ""; state.open = true; render(); load(); }
   }
 
-  addEventListener("message", e => {                 // the page above asking whether this frame has Jobsmith
-    if (e.data && e.data.jobsmith === "who" && e.source === window.parent)
+  addEventListener("message", e => {                 // the page above (or the top page, past a wrapper frame) asking
+    if (e.data && e.data.jobsmith === "who" && (e.source === window.parent || e.source === window.top))
       e.source.postMessage({ jobsmith: "here", application: holdsForm(scan()) }, "*");
   });
 
@@ -599,20 +599,50 @@
       // (running it twice is harmless) and asks for a reload when another site's frame has no script yet; a frame's
       // script answers "who's there?" below. A page could fake that answer, but all it would hide is the reload hint.
       const big = [...document.querySelectorAll("iframe[src]")].filter(f => { const r = f.getBoundingClientRect(); return r.width > 200 && r.height > 200; })
-        .map(f => { try { return { win: f.contentWindow, host: new URL(f.src, location.href).hostname }; } catch (_) { return null; } }).filter(Boolean);
-      const here = new Set(); let forms = 0;
-      const heard = e => { if (e.data && e.data.jobsmith === "here") { here.add(e.source); forms += e.data.application ? 1 : 0; } };
-      addEventListener("message", heard);
-      for (const f of big) try { f.win.postMessage({ jobsmith: "who" }, "*"); } catch (_) { /* gone */ }
+        .map(f => { try { const u = new URL(f.src, location.href);
+                          return { win: f.contentWindow, host: u.hostname, inner: framesInside(f.contentWindow),
+                                   app: framedApplication(u, f) }; } catch (_) { return null; } }).filter(Boolean);
+      const heard = new Map();                       // window -> holds an application
+      const listen = e => { if (e.data && e.data.jobsmith === "here") heard.set(e.source, !!e.data.application); };
+      addEventListener("message", listen);
+      for (const w of big.flatMap(f => [f.win, ...f.inner])) try { w.postMessage({ jobsmith: "who" }, "*"); } catch (_) { /* gone */ }
       setTimeout(() => {
-        removeEventListener("message", heard);
+        removeEventListener("message", listen);
+        // A frame is reached when its own script answered, or (a wrapper around a job site's form) a frame inside
+        // it holds an application and answered
+        const bare = big.filter(f => !heard.has(f.win) && !f.inner.some(w => heard.get(w)));
         reply({ application: looksLikeApplication(fields), fields: fields.length, title: pageTitle(),
-                frames: big.map(f => f.host), bare: big.filter(f => !here.has(f.win)).map(f => f.host), forms });
+                frames: big.map(f => f.host), nested: big.reduce((n, f) => n + f.inner.length, 0),
+                bare: bare.map(f => f.host), bareApps: bare.filter(f => f.app).map(f => f.host),
+                forms: [...heard.values()].filter(Boolean).length });
       }, 250);
       return true;                                   // replying after the frames have had a chance to answer
     }
     return false;
   });
+
+  // Frames inside a frame, two more levels down (page -> wrapper -> job site's form is the usual case). A window
+  // from another site still shows its frames, so this works across sites; nothing inside them is read.
+  function framesInside(win, depth = 2) {
+    const out = [];
+    if (depth > 3) return out;
+    let n = 0;
+    try { n = win.frames.length; } catch (_) { return out; }
+    for (let i = 0; i < n; i++) {
+      let w; try { w = win.frames[i]; } catch (_) { continue; }
+      out.push(w, ...framesInside(w, depth + 1));
+    }
+    return out;
+  }
+  // Whether a frame Jobsmith can't look into is an application rather than a video or a map, from what the page
+  // says about it: its address or title (/apply, "Job application"), or its size (an application is long).
+  const MEDIA = /(^|\.)(youtube(-nocookie)?\.com|vimeo\.com|wistia\.(com|net)|vidyard\.com|loom\.com|google\.com|spotify\.com|twitter\.com|x\.com|facebook\.com|instagram\.com|linkedin\.com)$/i;
+  function framedApplication(url, el) {
+    if (MEDIA.test(url.hostname)) return false;
+    const says = `${url.pathname} ${url.search} ${el.title || ""} ${el.name || ""} ${el.id || ""}`;
+    return /appl(y|ication)|candidate|career|recruit|hiring|\bjobs?\b|job[-_]?app/i.test(says) ||
+      el.getBoundingClientRect().height > 900;
+  }
 
   function openPanel() {
     state.open = true; chrome.storage.local.set({ panelOpen: true });
@@ -621,8 +651,18 @@
     if (fresh) { load(); addWriteButtons(); checkThanks(); }
   }
 
+  // In a frame that holds an application (a company page embedding Greenhouse, say): the Write buttons beside its
+  // open questions. The panel stays on the top page, one per tab.
+  let framed = false;
+  async function startFrame() {
+    if (framed || !holdsForm(scan())) return;
+    const ping = await send({ type: "ping" });
+    if (!ping.ok || framed) return;                  // Jobsmith isn't running: stay out of the way
+    framed = true; addWriteButtons();
+  }
+
   async function start() {
-    if (window.top !== window) return;               // the panel lives in the top page only
+    if (window.top !== window) return startFrame();  // the panel lives in the top page only
     if (!isPosting()) return;
     const ping = await send({ type: "ping" });
     if (!ping.ok) return;                            // Jobsmith isn't running: stay out of the way
@@ -636,6 +676,9 @@
   addEventListener("resize", () => place());
   new MutationObserver(() => {
     clearTimeout(window.__jobsmithT);
-    window.__jobsmithT = setTimeout(() => { if (host) { place(); addWriteButtons(); checkThanks(); } else start(); }, 1200);
+    window.__jobsmithT = setTimeout(() => {
+      if (window.top !== window) { if (framed) addWriteButtons(); else startFrame(); }
+      else if (host) { place(); addWriteButtons(); checkThanks(); } else start();
+    }, 1200);
   }).observe(document.body, { childList: true, subtree: true });
 })();

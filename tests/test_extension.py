@@ -1,5 +1,6 @@
 """The Chrome extension's own scripts in a real (headless) browser, with chrome.* stubbed: where the folded tab
 goes when another extension's tab is on the right edge, the popup opening the panel, and autofill with no PDF."""
+import contextlib
 import json
 import os
 import re
@@ -1148,14 +1149,15 @@ def _self_signed(hosts: list[str], folder: Path) -> tuple[str, str]:
 LISTED, UNLISTED = "job-boards.greenhouse.io", "apply.unlisted-ats.test"
 
 
-@browser
-@pytest.mark.parametrize("form_host, beside", [(LISTED, None), (UNLISTED, None), (LISTED, UNLISTED), (UNLISTED, LISTED)])
-async def test_popup_reaches_a_job_site_form_in_a_frame_opened_before_the_extension(form_host, beside, tmp_path):
-    """A company's careers page embeds an application form in a frame from another site, and the tab was open before
-    the extension was loaded, so no frame has Jobsmith's script. The real popup adds it to the top page and to a frame
-    from a listed job site (manifest host_permissions; see SECURITY.md), and autofill fills that form. A frame from
-    any other site gets "Reload this page" and is left alone; beside a job-site form (a video, say), it's just skipped.
-    A job-site frame with no form in it (a video) doesn't hide the reload another site's form needs.
+WRAPPER = "embed.careers-cdn.test"          # a company's own embed host, not a job site: its frame wraps the form
+
+
+@contextlib.asynccontextmanager
+async def _extension_after_tab(tmp_path, careers_html, form_routes: dict, settle, engine_routes: dict | None = None):
+    """A careers page open in Chromium before the extension is loaded, so no frame has Jobsmith's script; then the
+    real extension, pointed at a stand-in engine. form_routes are served on the job-site, unlisted and wrapper hosts
+    (one server, so careers_html(port) builds its frame addresses); settle(tab) waits for the page's frames to load.
+    Yields the context, the tab, and popup(), which opens the real popup on that tab once it has reached every frame.
 
     The careers page is served from 127.0.0.1, which the extension may reach (the engine's address): that stands in
     for the access a click on the toolbar button grants to the top page, which a test can't click."""
@@ -1163,17 +1165,13 @@ async def test_popup_reaches_a_job_site_form_in_a_frame_opened_before_the_extens
     import socket
     import subprocess
     import tempfile
+    from types import SimpleNamespace
     from playwright.async_api import async_playwright
-    tls = _self_signed([LISTED, UNLISTED], tmp_path)
-    form = _serve({"/apply": (200, "text/html", (FIXTURES / "greenhouse_board_posting.html").read_bytes()),
-                   "/video": (200, "text/html", b"<p>A video</p><input id='q' aria-label='Search videos'>")}, tls=tls)
+    tls = _self_signed([LISTED, UNLISTED, WRAPPER], tmp_path)
+    form = _serve(form_routes, tls=tls)
     engine = _serve({"/api/ext/ping": (200, "application/json", b'{"ok": true, "ai": "none", "ai_ok": false, "resume": null}'),
-                     "/api/ext/answers": (200, "application/json", _engine_answers)})
-    form_url = f"https://{form_host}:{form.server_port}/apply"
-    page_html = (f'<h1>Careers</h1><iframe id="gh" src="{form_url}" style="width:1000px;height:2400px"></iframe>' +
-                 (f'<iframe id="other" src="https://{beside}:{form.server_port}/video" '
-                  f'style="width:640px;height:360px"></iframe>' if beside else ""))
-    careers = _serve({"/careers": (200, "text/html", page_html.encode())})
+                     "/api/ext/answers": (200, "application/json", _engine_answers), **(engine_routes or {})})
+    careers = _serve({"/careers": (200, "text/html", careers_html(form.server_port).encode())})
     careers_url = f"http://127.0.0.1:{careers.server_port}/careers"
     # Chromium with an ordinary profile (Playwright's own contexts are incognito-like, where extensions don't run),
     # driven over the DevTools protocol so the extension can be loaded after the tab is open.
@@ -1183,7 +1181,8 @@ async def test_popup_reaches_a_job_site_form_in_a_frame_opened_before_the_extens
     profile_dir = tempfile.mkdtemp(prefix="jobsmith-chrome-")
     chrome = subprocess.Popen([CHROMIUM, "--headless=new", f"--remote-debugging-port={port}", f"--user-data-dir={profile_dir}",
                                "--enable-unsafe-extension-debugging", "--no-first-run", "--no-default-browser-check",
-                               f"--host-resolver-rules=MAP {LISTED} 127.0.0.1, MAP {UNLISTED} 127.0.0.1",
+                               f"--host-resolver-rules=MAP {LISTED} 127.0.0.1, MAP {UNLISTED} 127.0.0.1, "
+                               f"MAP {WRAPPER} 127.0.0.1",
                                "--ignore-certificate-errors", *browser_args(),
                                # Ubuntu 24.04 (CI) blocks Chrome's sandbox for ordinary users; Playwright's own
                                # launches turn it off the same way
@@ -1218,62 +1217,179 @@ async def test_popup_reaches_a_job_site_form_in_a_frame_opened_before_the_extens
                     if "ERR_ABORTED" not in str(e) or attempt == 2:
                         raise
                     await asyncio.sleep(0.5)
-            frame = tab.frame(url=form_url)
-            await frame.wait_for_selector("#first_name")
+            await settle(tab)
             ext_id = (await (await b.new_browser_cdp_session()).send(
                 "Extensions.loadUnpacked", {"path": str(EXT)}))["id"]               # loaded after the tab opened
-            assert await frame.evaluate("document.querySelector('[data-jobsmith-id]') === null")   # no script in it yet
-
             # Point the extension at this test's engine from its service worker: a page (the popup) would ping
             # the default engine, the real one on 8765, before the address was saved.
             worker = next((w for w in ctx.service_workers if ext_id in w.url), None) or \
                 await ctx.wait_for_event("serviceworker", predicate=lambda w: ext_id in w.url, timeout=15000)
             await worker.evaluate(f"chrome.storage.local.set({{engine: 'http://127.0.0.1:{engine.server_port}'}})")
-            popup = await ctx.new_page()
-            # Opened as a page, the popup's "active tab" is itself: point it at the only other tab, the careers page
-            # (tab URLs are hidden without the "tabs" permission). Everything else is the real extension.
-            await popup.add_init_script(ONLY_THE_CAREERS_TAB)
-            await popup.goto(f"chrome-extension://{ext_id}/popup.html")
-            await popup.wait_for_selector("body[data-ready]", timeout=20000)           # done reaching every frame
-            await tab.wait_for_selector("#jobsmith-panel", state="attached", timeout=10000)   # the popup opened the panel
-            await _watch_for_submits(tab, frame)
-            hint = None if await popup.is_hidden("#result") else await popup.inner_text("#result")
-            await popup.click("#fill")                                                     # (closes the popup)
-            if form_host == LISTED:
-                assert hint is None                                                         # no reload needed
-                await frame.wait_for_function("document.getElementById('first_name').value === 'Alex'", timeout=15000)
-                assert await frame.input_value("#email") == "alex.rivera@example.com"
-                await frame.wait_for_function("document.querySelector('#jobsmith-panel')?.shadowRoot?.querySelector('.note')"
-                                              "?.innerText.includes('Filled')")       # autofill finished in the frame
-            else:
-                assert hint == "Reload this page to fill the form inside it."
-                await tab.wait_for_timeout(2000)
-                assert await frame.input_value("#first_name") == ""                         # not reached: reload it
-                assert await frame.evaluate("document.querySelector('[data-jobsmith-id]') === null")
-            # Open the popup again: the frame's state is read afresh, not remembered from the first time.
-            if not popup.is_closed():
-                await popup.close()
-            again = await ctx.new_page()
-            await again.add_init_script(ONLY_THE_CAREERS_TAB)
-            await again.goto(f"chrome-extension://{ext_id}/popup.html")
-            await again.wait_for_selector("body[data-ready]", timeout=20000)
-            assert await again.inner_text("#fill") != "Can't fill this page"                 # it reached the tab
-            if form_host == LISTED:
-                assert await again.is_hidden("#result")                                     # the frame has it now
-                assert await frame.evaluate("document.querySelectorAll('#jobsmith-panel').length") == 1   # not injected twice
-                await frame.fill("#first_name", "")
-                await again.click("#fill")                                                  # and it still fills
-                await frame.wait_for_function("document.getElementById('first_name').value === 'Alex'", timeout=15000)
-            else:
-                assert await again.inner_text("#result") == "Reload this page to fill the form inside it."
-            if beside:                                                       # nothing typed or shown there
-                other = tab.frame(url=lambda u: u.endswith("/video"))
-                assert await other.evaluate("document.querySelector('#jobsmith-panel') === null")
-                assert await other.input_value("#q") == ""
-            await _never_submitted(tab)
+
+            async def popup():
+                # Opened as a page, the popup's "active tab" is itself: point it at the only other tab, the careers
+                # page (tab URLs are hidden without the "tabs" permission). Everything else is the real extension.
+                pop = await ctx.new_page()
+                await pop.add_init_script(ONLY_THE_CAREERS_TAB)
+                await pop.goto(f"chrome-extension://{ext_id}/popup.html")
+                await pop.wait_for_selector("body[data-ready]", timeout=20000)           # done reaching every frame
+                return pop
+
+            async def hint(pop):
+                return None if await pop.is_hidden("#result") else await pop.inner_text("#result")
+            yield SimpleNamespace(ctx=ctx, tab=tab, popup=popup, hint=hint, port=form.server_port)
             await b.close()
     finally:
         chrome.kill()
         for s in (form, engine, careers):
             s.shutdown()
         __import__("shutil").rmtree(profile_dir, ignore_errors=True)
+
+
+FORM_ROUTES = {"/apply": (200, "text/html", (FIXTURES / "greenhouse_board_posting.html").read_bytes()),
+               "/video": (200, "text/html", b"<p>A video</p><input id='q' aria-label='Search videos'>")}
+RELOAD = "Reload this page to fill the form inside it."
+
+
+@browser
+@pytest.mark.parametrize("form_host, beside, wrapped", [
+    (LISTED, None, False), (UNLISTED, None, False), (LISTED, UNLISTED, False), (UNLISTED, LISTED, False),
+    (LISTED, None, True), (UNLISTED, None, True)])            # #15: page -> wrapper frame -> the form's frame
+async def test_popup_reaches_a_job_site_form_in_a_frame_opened_before_the_extension(form_host, beside, wrapped,
+                                                                                       tmp_path):
+    """A company's careers page embeds an application form in a frame from another site, and the tab was open before
+    the extension was loaded, so no frame has Jobsmith's script. The real popup adds it to the top page and to a frame
+    from a listed job site (manifest host_permissions; see SECURITY.md), and autofill fills that form. A frame from
+    any other site gets "Reload this page" and is left alone; beside a job-site form (a video, say), it's just skipped.
+    A job-site frame with no form in it (a video) doesn't hide the reload another site's form needs. A form inside a
+    wrapper frame (the company's own embed, from a site Jobsmith may not reach) is found the same way, three deep at
+    most, and the wrapper never gets the script."""
+    form_url = lambda port: f"https://{form_host}:{port}/apply"
+    routes = dict(FORM_ROUTES)
+
+    def careers(port):
+        inner = (f'<iframe id="gh" src="{form_url(port)}" style="width:1000px;height:2400px"></iframe>')
+        if wrapped:
+            routes["/wrap"] = (200, "text/html", f"<p>Embedded careers</p>{inner}".encode())
+            inner = f'<iframe id="wrap" src="https://{WRAPPER}:{port}/wrap" style="width:1040px;height:2500px"></iframe>'
+        return ('<h1>Careers</h1>' + inner +
+                (f'<iframe id="other" src="https://{beside}:{port}/video" style="width:640px;height:360px"></iframe>'
+                 if beside else ""))
+
+    async def settle(tab):
+        await tab.wait_for_load_state("load")
+        frame = next(f for f in tab.frames if f.url.endswith("/apply"))
+        await frame.wait_for_selector("#first_name")
+    async with _extension_after_tab(tmp_path, careers, routes, settle) as x:
+        tab = x.tab
+        frame = next(f for f in tab.frames if f.url.endswith("/apply"))
+        assert await frame.evaluate("document.querySelector('[data-jobsmith-id]') === null")   # no script in it yet
+        popup = await x.popup()
+        await tab.wait_for_selector("#jobsmith-panel", state="attached", timeout=10000)   # the popup opened the panel
+        await _watch_for_submits(tab, frame)
+        hint = await x.hint(popup)
+        await popup.click("#fill")                                                     # (closes the popup)
+        if form_host == LISTED:
+            assert hint is None                                                         # no reload needed
+            await frame.wait_for_function("document.getElementById('first_name').value === 'Alex'", timeout=15000)
+            assert await frame.input_value("#email") == "alex.rivera@example.com"
+            await frame.wait_for_function("document.querySelector('#jobsmith-panel')?.shadowRoot?.querySelector('.note')"
+                                          "?.innerText.includes('Filled')")       # autofill finished in the frame
+        else:
+            assert hint == RELOAD
+            await tab.wait_for_timeout(2000)
+            assert await frame.input_value("#first_name") == ""                         # not reached: reload it
+            assert await frame.evaluate("document.querySelector('[data-jobsmith-id]') === null")
+        # Open the popup again: the frame's state is read afresh, not remembered from the first time.
+        if not popup.is_closed():
+            await popup.close()
+        again = await x.popup()
+        assert await again.inner_text("#fill") != "Can't fill this page"                 # it reached the tab
+        if form_host == LISTED:
+            assert await again.is_hidden("#result")                                     # the frame has it now
+            assert await frame.evaluate("document.querySelectorAll('#jobsmith-panel').length") == 1   # not injected twice
+            await frame.fill("#first_name", "")
+            await again.click("#fill")                                                  # and it still fills
+            await frame.wait_for_function("document.getElementById('first_name').value === 'Alex'", timeout=15000)
+        else:
+            assert await again.inner_text("#result") == RELOAD
+        if beside:                                                       # nothing typed or shown there
+            other = tab.frame(url=lambda u: u.endswith("/video"))
+            assert await other.evaluate("document.querySelector('#jobsmith-panel') === null")
+            assert await other.input_value("#q") == ""
+        await _never_submitted(tab)
+
+
+TALENT_NETWORK = ("<h1>Careers at Acme</h1><form><h2>Join our talent network</h2>"
+                  "<label for=fn>First Name</label><input id=fn><label for=ln>Last Name</label><input id=ln>"
+                  "<label for=em>Email</label><input id=em type=email><label for=ph>Phone</label><input id=ph></form>")
+
+
+@browser
+@pytest.mark.parametrize("path, reload", [("/apply", True), ("/video", False)])
+async def test_popup_says_reload_when_the_real_application_is_in_another_sites_frame(path, reload, tmp_path):
+    """#17: the careers page has its own short form (a talent network), so it looks like an application itself, and
+    the real one is in a frame from a site Jobsmith may not reach, opened before the extension. The popup says
+    "Reload this page" for that frame, and not for a video's frame on the same page."""
+    def careers(port):
+        return TALENT_NETWORK + (f'<iframe src="https://{UNLISTED}:{port}{path}" title="Embedded content" '
+                                 f'style="width:900px;height:{700 if path == "/apply" else 360}px"></iframe>')
+
+    async def settle(tab):
+        await tab.wait_for_load_state("load")
+        await next(f for f in tab.frames if f.url.endswith(path)).wait_for_selector("input")
+    async with _extension_after_tab(tmp_path, careers, FORM_ROUTES, settle) as x:
+        await _watch_for_submits(x.tab)
+        popup = await x.popup()
+        assert await popup.inner_text("#fill") == "Fill this application"
+        assert await x.hint(popup) == (RELOAD if reload else None)
+        await _never_submitted(x.tab)
+
+
+@browser
+async def test_write_with_jobsmith_works_beside_a_question_in_a_job_sites_frame(tmp_path):
+    """#16: a company page embeds Greenhouse's form in a frame. The real popup reaches the frame; the Write button
+    then shows beside its open question (the panel stays on the top page, one per tab). Pressed three times: a held
+    answer is never typed in, a flagged one is typed in with "Check this", and a clean one says "Edit freely". The
+    submit watcher is on in the frame throughout."""
+    replies = iter([{"text": "", "hold": "asks for a written answer, but the answer is a word or two", "qkind": "essay"},
+                    {"text": ESSAY, "qkind": "essay", "check": "generic, doesn't mention Figma: check this"},
+                    {"text": ESSAY, "qkind": "essay"}])
+
+    def generate(body):
+        assert body["label"] == "Why do you want to join Figma?"
+        return json.dumps({"based_on": [], "error": None, **next(replies)}).encode()
+
+    def careers(port):
+        return (f'<h1>Careers at Figma</h1><iframe src="https://{LISTED}:{port}/apply" '
+                f'style="width:1000px;height:2400px"></iframe>')
+
+    async def settle(tab):
+        await tab.wait_for_load_state("load")
+        await next(f for f in tab.frames if f.url.endswith("/apply")).wait_for_selector("#first_name")
+    async with _extension_after_tab(tmp_path, careers, FORM_ROUTES, settle,
+                                    {"/api/ext/generate": (200, "application/json", generate)}) as x:
+        frame = next(f for f in x.tab.frames if f.url.endswith("/apply"))
+        await _watch_for_submits(x.tab, frame)
+        await (await x.popup()).close()
+        write = "document.getElementById('question_12497120004').nextElementSibling?.shadowRoot"
+        await frame.wait_for_function(f"{write}?.querySelector('button')", timeout=15000)
+        assert await x.tab.evaluate("document.querySelectorAll('#jobsmith-panel').length") == 1
+        assert await frame.evaluate("document.querySelector('#jobsmith-panel') === null")      # no second panel
+
+        async def press(times=1):
+            for _ in range(times):
+                await frame.evaluate(f"{write}.querySelector('button').click()")
+            await frame.wait_for_function(f"!{write}.querySelector('button').disabled && "
+                                          f"!/Writing|replaces/.test({write}.querySelector('span').innerText)")
+            return await frame.evaluate(f"{write}.querySelector('span').innerText")
+        note = await press()
+        assert "Held for you" in note and await frame.input_value("#question_12497120004") == ""
+        note = await press()
+        assert note.startswith("Check this: generic, doesn't mention Figma") and "Edit freely" not in note
+        assert await frame.input_value("#question_12497120004") == ESSAY
+        await frame.evaluate(f"{write}.querySelector('button').click()")       # it has text: the first press asks
+        await frame.wait_for_function(f"{write}.querySelector('span').innerText.includes('replaces')")
+        note = await press()
+        assert note == "Edit freely." and await frame.input_value("#question_12497120004") == ESSAY
+        await _never_submitted(x.tab)
