@@ -657,11 +657,15 @@ async def bot_wall(page: Page) -> str:
     so any control on the page itself, a radio button too, is the application's."""
     fillable = ('input:visible:not([type="hidden"]):not([type="submit"]):not([type="button"]), textarea:visible, '
                 'select:visible')
-    try:
-        if await page.locator(fillable).count():
-            return ""
-    except Exception:
-        return ""
+    for frame in page.frames:                        # the form may be in a frame of its own (iCIMS)
+        if BOT_WALL_FRAMES.search(frame.url) or CHALLENGE_FRAMES.search(frame.url):
+            continue
+        try:
+            if await frame.locator(fillable).count():
+                return ""
+        except Exception:
+            if frame is page.main_frame:
+                return ""
     for frame in page.frames:                        # DataDome draws its page in a frame of its own
         try:
             body = await frame.locator("body").inner_text(timeout=3000)
@@ -675,6 +679,9 @@ async def bot_wall(page: Page) -> str:
     return f"a bot check from {hit.split('/')[2]}" if hit else ""
 
 
+CHALLENGE_FRAMES = re.compile(r"recaptcha/.*/(bframe|anchor)|hcaptcha\.com/captcha|challenges\.cloudflare", re.I)
+
+
 async def captcha_visible(page: Page) -> bool:
     for fr in page.frames:
         if re.search(r"recaptcha/.*/bframe|hcaptcha.*challenge|challenges\.cloudflare", fr.url):
@@ -685,3 +692,33 @@ async def captcha_visible(page: Page) -> bool:
             except Exception:
                 continue
     return False
+
+
+# Sites that draw the whole application in one frame of their own page: the frame's name. iCIMS sends a visit to the
+# frame's own address back to the page around it, so the form is filled where it is.
+FORM_FRAMES = ("icims_content_iframe",)
+
+
+class InFrame:
+    """A page seen through the frame that holds its form. Reading, filling and clicking go to the frame; the
+    keyboard, the mouse and the page's frames stay the page's (a key press goes wherever the focus is, frame or
+    not). Everything in this package that takes a page takes one of these."""
+
+    PAGE_ONLY = {"keyboard", "mouse", "frames", "main_frame", "frame", "context", "screenshot", "bring_to_front",
+                 "is_closed", "on", "once", "remove_listener", "route", "video", "close"}
+
+    def __init__(self, page: Page, frame):
+        self.page, self.frame_ = page, frame
+
+    def __getattr__(self, name):
+        return getattr(self.page if name in self.PAGE_ONLY else self.frame_, name)
+
+
+def form_view(page: Page):
+    """The page, or the frame on it that holds the application (FORM_FRAMES). Ask again after every click: the
+    frame can come and go as the site moves between pages."""
+    for name in FORM_FRAMES:
+        frame = page.frame(name=name)
+        if frame and not frame.is_detached():
+            return InFrame(page, frame)
+    return page

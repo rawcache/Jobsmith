@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Added
+- iCIMS: the page-by-page filler works inside the frame iCIMS draws its application in, presses "Apply for this job
+  online", and hands you iCIMS's email step ("Enter Your Information", whose Next finds your account or starts one)
+  and its login page. The extension fills nothing on either.
 - Workday: Jobsmith hands you the sign-in choice page (Sign in with Google, LinkedIn or email), which has no password
   box yet, instead of stopping with "No Next button"; it presses Apply Manually when you have no resume to autofill
   from; and it never fills a honeypot (Workday's hidden "This input is for robots only" box) or reads a password box

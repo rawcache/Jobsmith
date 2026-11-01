@@ -79,6 +79,34 @@ To rebuild, walk the posting again with a read-only capture (save `2_start.html`
 uv run python tests/fixtures/src/workday_fixture.py /tmp/workday tests/fixtures
 ```
 
+## `icims_flow.js` + `icims_fixture.py` → `../icims_idemia_*.html`
+
+IDEMIA's "Full Stack Software Engineering Internship" on iCIMS
+(`uscareers-idemia.icims.com/jobs/8707/full-stack-software-engineering-internship/job`), walked on 2026-10-31 through
+`jobsmith/readonly.py` (GETs only; analytics, New Relic and hCaptcha's site check were blocked) from the posting to
+sign-in, pressing "Apply for this job online" and "Log back in!" and typing nothing. iCIMS draws the posting in its
+careers page's `icims_content_iframe` frame, so the page around it and the frame were saved apart, scripts removed:
+`icims_idemia_posting.html` loads `icims_idemia_posting_frame.html` in that frame; `icims_idemia_email_frame.html` is
+what the frame shows after Apply ("Enter Your Information": Email, then Next, behind an invisible hCaptcha); and
+`icims_idemia_login.html` is iCIMS's login at login.icims.com (Auth0's "Username or email address", Continue with
+Google, LinkedIn…). `icims_fixture.py` drops what would load from the network (iCIMS's stylesheets too, so the
+pages look plainer than live), the chat widget and the hCaptcha frames; blanks hCaptcha's site key, the login's
+one-time state, iCIMS's link hashes and its customer number; adds `icims_flow.js`; and refuses a page with an email
+address, a phone number, a typed value or a key left in it.
+
+`icims_flow.js` is our stand-in for iCIMS's scripts, none of iCIMS's code: Apply moves the frame to the email step,
+"Log back in!" opens the login in place of the page, and Next and every Continue send nothing
+(`window.__signInPresses` counts them, in the frame or page the button is on).
+
+The pages behind sign-in come from the maintainer's own browser: [docs/guides/save-icims-pages.md](../../../docs/guides/save-icims-pages.md).
+
+To rebuild, walk the posting again with a read-only capture (save `1_posting_top.html`, the frame's `1_posting.html`,
+the frame's `2_email.html` after Apply, and `3_auth0_top.html` after "Log back in!"), then:
+
+```bash
+uv run python tests/fixtures/src/icims_fixture.py /tmp/icims tests/fixtures
+```
+
 ## `lever_form.js` + `lever_fixture.py` → `../lever_palantir_form.html`
 
 `lever_palantir_form.html` is Palantir's application form for "Forward Deployed Software Engineer, Internship -

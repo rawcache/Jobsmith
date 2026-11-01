@@ -592,6 +592,37 @@ async def test_autofill_fills_nothing_on_workdays_create_account_page(page):
 
 
 @browser
+@pytest.mark.parametrize("fixture, url", [
+    ("icims_idemia_email_frame.html",
+     "https://uscareers-idemia.icims.com/jobs/8707/full-stack-software-engineering-internship/login?in_iframe=1"),
+    ("icims_idemia_login.html", "https://login.icims.com/u/login/identifier"),
+])
+async def test_autofill_fills_nothing_on_icims_sign_in(page, fixture, url):
+    """iCIMS's "Enter Your Information" (Email, then Next, which finds your account or starts one) and its login
+    page, saved read-only from IDEMIA and served at their own addresses. Neither has a password box showing, and
+    both are still a sign-in: Fill types no email and asks the engine nothing."""
+    html = (FIXTURES / fixture).read_text(encoding="utf-8")
+
+    async def serve(route):
+        if route.request.url.split("?")[0] == url.split("?")[0]:
+            await route.fulfill(status=200, content_type="text/html", body=html)
+        else:
+            await route.abort()
+    await page.route("https://**/*", serve)
+    await page.add_init_script(_stub({"panelOpen": True}))
+    await page.goto(url)
+    await page.add_script_tag(path=str(EXT / "content.js"))
+    await page.wait_for_function("document.querySelector('#jobsmith-panel')?.shadowRoot?.querySelector('.wrap')")
+    await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
+    note = "document.querySelector('#jobsmith-panel').shadowRoot.querySelector('.note')"
+    await page.wait_for_function(f"{note}?.innerText.includes('yours to do')", timeout=10000)
+    assert not await page.evaluate("__calls.some(c => c.type === 'answers')")
+    assert await page.eval_on_selector_all("input", "els => els.filter(e => e.value && !['hidden', 'submit']"
+                                           ".includes(e.type)).length") == 0
+    assert await page.evaluate("window.__signInPresses") == 0
+
+
+@browser
 async def test_autofill_never_reads_a_honeypot(page):
     """Workday's hidden box, word for word, added to the saved Lever form: the engine is never asked about it, and
     it stays empty."""

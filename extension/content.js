@@ -477,7 +477,11 @@
   async function fill() {
     if (busy) return;
     busy = true; state.open = true;
-    if ([...document.querySelectorAll("input")].some(e => visible(e) && isPassword(e))) {   // a sign-in or a new account
+    // a sign-in or a new account: a password box, iCIMS's "Email, then Next" (it finds your account or starts one),
+    // or iCIMS's own login page (Auth0's _form-login-id)
+    if ([...document.querySelectorAll("input")].some(e => visible(e) && isPassword(e)) ||
+        [...document.querySelectorAll("#enterEmailSubmitButton, form._form-login-id button")].some(visible) ||
+        location.hostname === "login.icims.com") {
       say("This page signs you in or makes an account, which is yours to do. Once you're past it, press Fill again.", "warn");
       busy = false; return;
     }

@@ -14,9 +14,10 @@ from typing import Callable
 
 from playwright.async_api import Page
 
-from .base import CONFIRM_RE, BotWall, bot_wall, css_for, dismiss_banners, fill_field, scan_form
+from .base import CONFIRM_RE, BotWall, bot_wall, css_for, dismiss_banners, fill_field, form_view, scan_form
 
-START_BUTTONS = ['[data-automation-id="adventureButton"]', 'a:has-text("Apply Now")', 'button:has-text("Apply Now")',
+# iCIMS: "Apply for this job online" (its "Log back in!" link is a sign-in, never the start)
+START_BUTTONS = ['[data-automation-id="adventureButton"]', 'a.iCIMS_ApplyOnlineButton', 'a:has-text("Apply Now")', 'button:has-text("Apply Now")',
                  'a:has-text("Apply")', 'button:has-text("Apply")']
 AUTOFILL_BUTTONS = ['[data-automation-id="autofillWithResume"]', 'a:has-text("Autofill with Resume")',
                     'button:has-text("Autofill with Resume")', 'button:has-text("Upload Resume")']
@@ -45,13 +46,21 @@ async def _first_visible(page: Page, selectors: list[str]):
     return None
 
 
-# A sign-in that offers ways in before any password box shows (Workday: Google, LinkedIn, or email)
+# A sign-in that offers ways in before any password box shows (Workday: Google, LinkedIn, or email; iCIMS: your
+# email, then Next, which finds your account or starts a new one)
 SIGN_IN_CHOICES = ['[data-automation-id="SignInWithEmailButton"]', '[data-automation-id="GoogleSignInButton"]',
-                   'button:has-text("Sign in with email")', 'a:has-text("Sign in with email")']
+                   'button:has-text("Sign in with email")', 'a:has-text("Sign in with email")',
+                   '#enterEmailSubmitButton', 'form._form-login-id button._button-login-id']
+# iCIMS's own login (login.icims.com, Auth0's "Username or email address" with "Continue with Google"...; the
+# _form-login-id form above is Auth0's): a sign-in page wherever it's served
+SIGN_IN_ADDRESSES = re.compile(r"^https://login\.icims\.com/", re.I)
 
 
 async def needs_sign_in(page: Page) -> bool:
+    page = form_view(page) if isinstance(page, Page) else page
     try:
+        if SIGN_IN_ADDRESSES.search(page.url):
+            return True
         if await page.locator('input[type="password"]:visible').count():
             return True
         if await _first_visible(page, SIGN_IN_CHOICES):
@@ -102,14 +111,16 @@ async def run(page: Page, url: str, *, answer: Callable, files: dict, log: Calla
     filled_total, issues = 0, []
 
     await dismiss_banners(page, log)
-    start = await _first_visible(page, START_BUTTONS)
-    if start and not await page.locator("form input:visible, form textarea:visible").count():
+    view = form_view(page)                       # iCIMS: the application is in a frame of the page
+    start = await _first_visible(view, START_BUTTONS)
+    if start and not await view.locator("form input:visible, form textarea:visible").count():
         await start.click()
         await page.wait_for_timeout(2500)
+        view = form_view(page)
         # Workday's "Start Your Application": from your resume when there is one, else by hand. Either way the
         # next page (often a sign-in) is checked like any other
-        how = (files.get("resume") and await _first_visible(page, AUTOFILL_BUTTONS)) or \
-            await _first_visible(page, MANUAL_BUTTONS)
+        how = (files.get("resume") and await _first_visible(view, AUTOFILL_BUTTONS)) or \
+            await _first_visible(view, MANUAL_BUTTONS)
         if how:
             await how.click()
             await page.wait_for_timeout(2500)
@@ -126,12 +137,13 @@ async def run(page: Page, url: str, *, answer: Callable, files: dict, log: Calla
             await page.wait_for_timeout(2000)
 
         await dismiss_banners(page, log)           # each page can bring its own
-        auto = await _first_visible(page, AUTOFILL_BUTTONS)
+        view = form_view(page)
+        auto = await _first_visible(view, AUTOFILL_BUTTONS)
         if auto and files.get("resume"):
             await auto.click()
             await page.wait_for_timeout(1500)
 
-        fields = [f for f in await scan_form(page) if f["qtype"] != "hidden"]
+        fields = [f for f in await scan_form(view) if f["qtype"] != "hidden"]
         todo = [f for f in fields if not f.get("value")]
         log(f"Page {page_no}: {len(fields)} fields, {len(todo)} empty")
         answers = await answer(todo) if todo else {}
@@ -148,7 +160,7 @@ async def run(page: Page, url: str, *, answer: Callable, files: dict, log: Calla
                     issues.append(f"{f['label']}: no answer")
                 continue
             try:
-                ok = await fill_field(page, css_for(f["field"]), f["qtype"], val, fp)
+                ok = await fill_field(view, css_for(f["field"]), f["qtype"], val, fp)
                 filled_total += int(bool(ok))
                 if ok and on_filled:
                     on_filled(f["field"])
@@ -159,7 +171,7 @@ async def run(page: Page, url: str, *, answer: Callable, files: dict, log: Calla
                     issues.append(f"{f['label']}: {e.__class__.__name__}")
 
         try:
-            body = await page.locator("body").inner_text(timeout=3000)
+            body = await view.locator("body").inner_text(timeout=3000)
             if on_page:
                 on_page(body)
             if CONFIRM_RE.search(body):
@@ -170,12 +182,12 @@ async def run(page: Page, url: str, *, answer: Callable, files: dict, log: Calla
         if on_nodes:
             from ..traps import PAGE_JS
             try:
-                on_nodes(await page.evaluate(PAGE_JS))
+                on_nodes(await view.evaluate(PAGE_JS))
             except Exception:
                 pass
 
-        nxt = await _first_visible(page, NEXT_BUTTONS)
-        sub = await submit_button(page)
+        nxt = await _first_visible(view, NEXT_BUTTONS)
+        sub = await submit_button(view)
         if sub and not nxt:
             if not issues and allow_submit():      # asked last: it counts the submission toward the caps
                 log("Review page reached and everything is trusted: submitting.")
@@ -187,12 +199,13 @@ async def run(page: Page, url: str, *, answer: Callable, files: dict, log: Calla
         if not nxt:
             log("No Next button found on this page.")
             return {"status": "stuck", "filled": filled_total, "issues": issues + ["No Next button"]}
-        before = page.url + str(len(fields))
+        before = view.url + str(len(fields))
         await nxt.click()
         await page.wait_for_timeout(2500)
-        after_fields = await scan_form(page)
-        if page.url + str(len(after_fields)) == before:
-            errs = await page_errors(page)
+        view = form_view(page)
+        after_fields = await scan_form(view)
+        if view.url + str(len(after_fields)) == before:
+            errs = await page_errors(view)
             if errs:
                 log("The site didn't accept this page: " + "; ".join(errs))
                 return {"status": "stuck", "filled": filled_total, "issues": issues + errs}
