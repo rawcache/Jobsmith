@@ -1639,3 +1639,35 @@ async def test_the_submit_watcher_sees_your_submit_on_workdays_review_page(page)
     assert await page.evaluate("window.__submitPresses") == 1
     noted = json.loads(await page.evaluate("sessionStorage.getItem('jobsmith-submit')"))
     assert noted["url"].endswith("/applyManually")
+
+
+@browser
+async def test_autofill_answers_workdays_voluntary_questions_from_your_decline_and_never_a_wrong_code(page):
+    """Your confirmed "Decline to self-identify" picks Workday's own wording for it ("I do not wish to answer.",
+    "I do not wish to self-identify"); and on My Information a phone code is only ever your number's own."""
+    std = lambda v: {"value": v, "kind": "standard"}
+    await _on_workday(page, "voluntary_disclosures", answers={
+        "What is your ethnicity?": std("Decline to self-identify"), "What is your gender?": std("Decline to self-identify"),
+        "Do you identify as one of the following protected veterans (Disabled Veteran, Recently Separated Veteran, "
+        "Active Duty Wartime or Campaign Badge Veteran, Armed Forces Service Medal Veteran)?": std("Decline to self-identify")})
+    await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
+    note = "document.querySelector('#jobsmith-panel').shadowRoot.querySelector('.note')"
+    await page.wait_for_function(f"{note}?.innerText.includes('Filled')", timeout=30000)
+    shown = lambda i: page.evaluate(f"document.getElementById('{i}').innerText.trim()")
+    assert await shown("personalInfoUS--ethnicity") == "I do not wish to answer. (United States of America)"
+    assert await shown("personalInfoUS--gender") == "I do not wish to answer."
+    assert await shown("personalInfoUS--veteranStatus") == "I do not wish to self-identify"
+    await _never_submitted(page)
+
+
+@browser
+async def test_autofill_never_picks_a_phone_code_that_isnt_your_numbers(page):
+    std = lambda v: {"value": v, "kind": "standard"}
+    await _on_workday(page, "my_information", answers={"Country Phone Code": std("United Kingdom (+1)")})
+    await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
+    note = "document.querySelector('#jobsmith-panel').shadowRoot.querySelector('.note')"
+    await page.wait_for_function(f"{note}?.innerText.includes('Filled')", timeout=30000)
+    pills = await page.evaluate("""[...document.getElementById('phoneNumber--countryPhoneCode').closest(
+        '[data-automation-id="multiSelectContainer"]').querySelectorAll('[data-automation-id="selectedItem"]')].length""")
+    assert pills == 0                                     # "United Kingdom (+44)" is never taken for +1
+    await _never_submitted(page)

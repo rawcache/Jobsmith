@@ -1506,7 +1506,8 @@ def test_a_dialling_code_comes_from_your_phone_number_never_where_you_live(phone
     (["United Kingdom (+44)", "Canada (+1)"], ""),                  # "United" alone is never the US
     (["+1", "+44"], "+1"),                                          # codes only
     (["United Kingdom (+44)", "United States (+1)"], "United States (+1)"),
-    (["United States Minor Outlying Islands (+1)", "United States (+1)"], ""),   # two +1 choices name it: yours
+    (["United States Minor Outlying Islands (+1)", "United States (+1)"], "United States (+1)"),   # its own name
+    (["United States Minor Outlying Islands (+1)", "US Virgin Islands (+1)"], ""),   # neither is it: yours
     (["United States (+12)", "Bahamas (+1242)"], ""),               # longer codes are never +1
     (["United States of America (+1)", "+1"], "+1"),                # a bare +1 first
 ])

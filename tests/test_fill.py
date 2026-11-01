@@ -1238,3 +1238,17 @@ async def test_workdays_signed_in_pages_are_read_by_their_own_words(page):
     got = {f["label"]: f["qtype"] for f in await scan_form(page)}
     assert got["Upload a file (5MB max)"] == "file" and got["From Year"] == "text"
     assert got["To (Actual or Expected) Year"] == "text" and got["Field of Study"] == "select"
+
+
+async def test_workdays_phone_code_search_picks_only_your_numbers_code(page):
+    """Workday's Country Phone Code is a search box. Only a choice carrying exactly +1 and named for the country is
+    picked: "United Kingdom (+1)" finds "United Kingdom (+44)" by name, and is left empty."""
+    from jobsmith.fill.base import fill_field
+    await page.goto(_workday("my_information"))
+    sel = '[id="phoneNumber--countryPhoneCode"]'
+    pills = f"""[...document.querySelector('{sel}').closest('[data-automation-id="multiSelectContainer"]')
+        .querySelectorAll('[data-automation-id="selectedItem"]')].map(p => p.innerText.trim())"""
+    assert not await fill_field(page, sel, "select", "United Kingdom (+1)")
+    assert await page.evaluate(pills) == []
+    assert await fill_field(page, sel, "select", "United States (+1)")
+    assert await page.evaluate(pills) == ["United States of America (+1)"]
