@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How Jobsmith behaves</title>
+<meta name="description" content="What Jobsmith does and never does on job sites: its limits, the answers it will and won't send, what it hands to you, how it's tested, and what leaves your computer.">
+<meta property="og:title" content="How Jobsmith behaves on job sites">
+<meta property="og:description" content="Its limits, the answers it will and won't send, what it hands to you, and what leaves your computer.">
+<meta name="theme-color" content="#f2f0ec" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#161412" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 52' fill='%239a3412'%3E%3Crect x='44' y='0' width='3' height='3'/%3E%3Crect x='48' y='0' width='3' height='3'/%3E%3Crect x='40' y='4' width='3' height='3'/%3E%3Crect x='44' y='4' width='3' height='3'/%3E%3Crect x='36' y='8' width='3' height='3'/%3E%3Crect x='40' y='8' width='3' height='3'/%3E%3Crect x='12' y='12' width='3' height='3'/%3E%3Crect x='16' y='12' width='3' height='3'/%3E%3Crect x='20' y='12' width='3' height='3'/%3E%3Crect x='24' y='12' width='3' height='3'/%3E%3Crect x='32' y='12' width='3' height='3'/%3E%3Crect x='36' y='12' width='3' height='3'/%3E%3Crect x='12' y='16' width='3' height='3'/%3E%3Crect x='16' y='16' width='3' height='3'/%3E%3Crect x='20' y='16' width='3' height='3'/%3E%3Crect x='24' y='16' width='3' height='3'/%3E%3Crect x='28' y='16' width='3' height='3'/%3E%3Crect x='32' y='16' width='3' height='3'/%3E%3Crect x='12' y='20' width='3' height='3'/%3E%3Crect x='16' y='20' width='3' height='3'/%3E%3Crect x='20' y='20' width='3' height='3'/%3E%3Crect x='24' y='20' width='3' height='3'/%3E%3Crect x='0' y='24' width='3' height='3'/%3E%3Crect x='4' y='24' width='3' height='3'/%3E%3Crect x='8' y='24' width='3' height='3'/%3E%3Crect x='12' y='24' width='3' height='3'/%3E%3Crect x='16' y='24' width='3' height='3'/%3E%3Crect x='20' y='24' width='3' height='3'/%3E%3Crect x='24' y='24' width='3' height='3'/%3E%3Crect x='28' y='24' width='3' height='3'/%3E%3Crect x='32' y='24' width='3' height='3'/%3E%3Crect x='36' y='24' width='3' height='3'/%3E%3Crect x='40' y='24' width='3' height='3'/%3E%3Crect x='44' y='24' width='3' height='3'/%3E%3Crect x='48' y='24' width='3' height='3'/%3E%3Crect x='52' y='24' width='3' height='3'/%3E%3Crect x='56' y='24' width='3' height='3'/%3E%3Crect x='60' y='24' width='3' height='3'/%3E%3Crect x='4' y='28' width='3' height='3'/%3E%3Crect x='8' y='28' width='3' height='3'/%3E%3Crect x='12' y='28' width='3' height='3'/%3E%3Crect x='16' y='28' width='3' height='3'/%3E%3Crect x='20' y='28' width='3' height='3'/%3E%3Crect x='24' y='28' width='3' height='3'/%3E%3Crect x='28' y='28' width='3' height='3'/%3E%3Crect x='32' y='28' width='3' height='3'/%3E%3Crect x='36' y='28' width='3' height='3'/%3E%3Crect x='40' y='28' width='3' height='3'/%3E%3Crect x='44' y='28' width='3' height='3'/%3E%3Crect x='48' y='28' width='3' height='3'/%3E%3Crect x='52' y='28' width='3' height='3'/%3E%3Crect x='56' y='28' width='3' height='3'/%3E%3Crect x='60' y='28' width='3' height='3'/%3E%3Crect x='8' y='32' width='3' height='3'/%3E%3Crect x='12' y='32' width='3' height='3'/%3E%3Crect x='16' y='32' width='3' height='3'/%3E%3Crect x='20' y='32' width='3' height='3'/%3E%3Crect x='24' y='32' width='3' height='3'/%3E%3Crect x='28' y='32' width='3' height='3'/%3E%3Crect x='32' y='32' width='3' height='3'/%3E%3Crect x='36' y='32' width='3' height='3'/%3E%3Crect x='40' y='32' width='3' height='3'/%3E%3Crect x='44' y='32' width='3' height='3'/%3E%3Crect x='48' y='32' width='3' height='3'/%3E%3Crect x='52' y='32' width='3' height='3'/%3E%3Crect x='56' y='32' width='3' height='3'/%3E%3Crect x='60' y='32' width='3' height='3'/%3E%3Crect x='24' y='36' width='3' height='3'/%3E%3Crect x='28' y='36' width='3' height='3'/%3E%3Crect x='32' y='36' width='3' height='3'/%3E%3Crect x='36' y='36' width='3' height='3'/%3E%3Crect x='40' y='36' width='3' height='3'/%3E%3Crect x='44' y='36' width='3' height='3'/%3E%3Crect x='48' y='36' width='3' height='3'/%3E%3Crect x='52' y='36' width='3' height='3'/%3E%3Crect x='28' y='40' width='3' height='3'/%3E%3Crect x='32' y='40' width='3' height='3'/%3E%3Crect x='36' y='40' width='3' height='3'/%3E%3Crect x='40' y='40' width='3' height='3'/%3E%3Crect x='44' y='40' width='3' height='3'/%3E%3Crect x='48' y='40' width='3' height='3'/%3E%3Crect x='24' y='44' width='3' height='3'/%3E%3Crect x='28' y='44' width='3' height='3'/%3E%3Crect x='32' y='44' width='3' height='3'/%3E%3Crect x='36' y='44' width='3' height='3'/%3E%3Crect x='40' y='44' width='3' height='3'/%3E%3Crect x='44' y='44' width='3' height='3'/%3E%3Crect x='48' y='44' width='3' height='3'/%3E%3Crect x='52' y='44' width='3' height='3'/%3E%3Crect x='16' y='48' width='3' height='3'/%3E%3Crect x='20' y='48' width='3' height='3'/%3E%3Crect x='24' y='48' width='3' height='3'/%3E%3Crect x='28' y='48' width='3' height='3'/%3E%3Crect x='32' y='48' width='3' height='3'/%3E%3Crect x='36' y='48' width='3' height='3'/%3E%3Crect x='40' y='48' width='3' height='3'/%3E%3Crect x='44' y='48' width='3' height='3'/%3E%3Crect x='48' y='48' width='3' height='3'/%3E%3Crect x='52' y='48' width='3' height='3'/%3E%3Crect x='56' y='48' width='3' height='3'/%3E%3Crect x='60' y='48' width='3' height='3'/%3E%3C/svg%3E">
+<style>
+  :root {
+    /* the extension panel's paper and ink; the rust only on the one thing to do, where you are, and the logo */
+    --paper: #f2f0ec; --card: #fbfaf8; --ink: #1c1917; --text: #3a3631; --muted: #66615a; --line: #e0dcd4; --line-strong: #cfc9bf;
+    --ember: #9a3412; --ember-hover: #7c2d12; --on-ember: #ffffff; --ember-hot: #e07a4f; --ring: rgb(154 52 18 / .18);
+    --term: #161412; --term-text: #ece7df; --term-dim: #a39b90; --ok: #4ade80; --hold: #facc15;
+    --bar: rgb(242 240 236 / .82); --shadow: 0 1px 2px rgb(28 25 23 / .06), 0 30px 70px -28px rgb(28 25 23 / .32);
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #161412; --card: #1f1c19; --ink: #f3efe9; --text: #d2ccc2; --muted: #a39b90; --line: #2f2b27; --line-strong: #403a34;
+      --ember: #e07a4f; --ember-hover: #e88c66; --on-ember: #161412; --ring: rgb(224 122 79 / .28);
+      --term: #0f0d0c; --bar: rgb(22 20 18 / .82); --shadow: 0 1px 2px rgb(0 0 0 / .4), 0 30px 80px -24px rgb(0 0 0 / .7);
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; scroll-padding-top: 76px; }
+  body { margin: 0; background: var(--paper); color: var(--text); font: 16px/1.6 var(--font); -webkit-font-smoothing: antialiased; }
+  a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+  a:hover { text-decoration-color: currentColor; }
+  :focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; border-radius: 6px; }
+  code { font-family: var(--mono); font-size: .92em; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+  /* top bar */
+  header.top { position: sticky; top: 0; z-index: 10; background: var(--bar); backdrop-filter: saturate(1.4) blur(12px);
+    -webkit-backdrop-filter: saturate(1.4) blur(12px); border-bottom: 1px solid transparent; transition: border-color .2s; }
+  header.top.scrolled { border-bottom-color: var(--line); }
+  .bar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; height: 64px; }
+  .brand { display: inline-flex; align-items: center; gap: 10px; font: 700 18px var(--font); color: var(--ink); text-decoration: none; letter-spacing: -0.02em; justify-self: start; }
+  .mark { color: var(--ember); }
+  .bar nav { display: flex; gap: 4px; }
+  .bar nav a { font: 500 14.5px var(--font); color: var(--muted); text-decoration: none; padding: 6px 12px; border-radius: 8px; display: inline-flex; align-items: center; gap: 8px; }
+  .bar nav a:hover { color: var(--ink); background: var(--card); }
+  .stars { font: 600 12px var(--mono); color: var(--ink); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; }
+  .stars[hidden] { display: none; }
+  .bar .cta { justify-self: end; }
+
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 44px; padding: 0 20px; border-radius: 10px;
+    font: 600 15px var(--font); text-decoration: none; border: 1px solid transparent; cursor: pointer; white-space: nowrap; }
+  .btn.small { height: 36px; padding: 0 14px; font-size: 14px; border-radius: 9px; }
+  .btn.primary { background: var(--ember); color: var(--on-ember); }
+  .btn.primary:hover { background: var(--ember-hover); }
+  .btn.secondary { background: var(--card); color: var(--ink); border-color: var(--line-strong); }
+  .btn.secondary:hover { border-color: var(--ink); }
+
+  footer { margin: 128px 0 0; border-top: 1px solid var(--line); }
+  .foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 20px 40px; padding: 32px 0 48px; font-size: 14px; color: var(--muted); }
+  .foot .brand { font-size: 16px; }
+  .foot nav { display: flex; flex-wrap: wrap; gap: 8px 24px; }
+  .foot a { color: var(--muted); }
+  .foot p { margin: 10px 0 0; }
+
+  /* this page */
+  main { max-width: 760px; margin: 0 auto; padding: 72px 24px 0; }
+  .kicker { font: 600 13px var(--mono); color: var(--muted); letter-spacing: .02em; margin: 0 0 14px; }
+  main h1 { color: var(--ink); font: 750 clamp(32px, 6vw, 52px)/1.08 var(--font); letter-spacing: -0.035em; margin: 0; text-wrap: balance; }
+  .lede { font-size: 18px; color: var(--muted); margin: 18px 0 0; text-wrap: pretty; }
+  main h2 { color: var(--ink); font: 700 24px/1.25 var(--font); letter-spacing: -0.02em; margin: 56px 0 4px; }
+  main h2 + p.sub { margin: 0 0 14px; color: var(--muted); }
+  ul.rules { list-style: none; margin: 16px 0 0; padding: 0; border-top: 1px solid var(--line); }
+  ul.rules li { padding: 14px 0; border-bottom: 1px solid var(--line); text-wrap: pretty; }
+  ul.rules b { color: var(--ink); font-weight: 650; }
+  .never { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; margin: 18px 0 0; }
+  .never p { margin: 0 0 8px; color: var(--ink); font-weight: 650; }
+  .never ul { margin: 0; padding-left: 20px; }
+  .never li { margin: 4px 0; }
+  table.out { width: 100%; border-collapse: collapse; margin: 16px 0 0; font-size: 15px; }
+  table.out th, table.out td { text-align: left; vertical-align: top; padding: 10px 12px 10px 0; border-bottom: 1px solid var(--line); }
+  table.out th { color: var(--ink); font-weight: 650; width: 34%; }
+  .fine { font-size: 14px; color: var(--muted); }
+  .fine b { color: var(--ink); font-weight: 650; }
+  @media (max-width: 760px) {
+    .bar { grid-template-columns: 1fr auto auto; }
+    .bar nav a.hide-sm { display: none; }
+    .bar nav { justify-self: end; margin-right: 8px; }
+    main { padding-top: 48px; }
+  }
+  @media (max-width: 560px) {
+    .wrap { padding: 0 16px; }
+    main { padding: 40px 16px 0; }
+    table.out th, table.out td { display: block; width: auto; padding: 0; border: 0; }
+    table.out th { padding-top: 12px; }
+    table.out td { padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+  }
+  @media (max-width: 400px) { .bar nav a { padding: 6px 8px; } }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap bar">
+    <a class="brand" href="./" aria-label="Jobsmith home"><svg class="mark" width="26" height="21" viewBox="0 0 64 52" fill="currentColor" aria-hidden="true"><rect x="44" y="0" width="3" height="3"/><rect x="48" y="0" width="3" height="3"/><rect x="40" y="4" width="3" height="3"/><rect x="44" y="4" width="3" height="3"/><rect x="36" y="8" width="3" height="3"/><rect x="40" y="8" width="3" height="3"/><rect x="12" y="12" width="3" height="3"/><rect x="16" y="12" width="3" height="3"/><rect x="20" y="12" width="3" height="3"/><rect x="24" y="12" width="3" height="3"/><rect x="32" y="12" width="3" height="3"/><rect x="36" y="12" width="3" height="3"/><rect x="12" y="16" width="3" height="3"/><rect x="16" y="16" width="3" height="3"/><rect x="20" y="16" width="3" height="3"/><rect x="24" y="16" width="3" height="3"/><rect x="28" y="16" width="3" height="3"/><rect x="32" y="16" width="3" height="3"/><rect x="12" y="20" width="3" height="3"/><rect x="16" y="20" width="3" height="3"/><rect x="20" y="20" width="3" height="3"/><rect x="24" y="20" width="3" height="3"/><rect x="0" y="24" width="3" height="3"/><rect x="4" y="24" width="3" height="3"/><rect x="8" y="24" width="3" height="3"/><rect x="12" y="24" width="3" height="3"/><rect x="16" y="24" width="3" height="3"/><rect x="20" y="24" width="3" height="3"/><rect x="24" y="24" width="3" height="3"/><rect x="28" y="24" width="3" height="3"/><rect x="32" y="24" width="3" height="3"/><rect x="36" y="24" width="3" height="3"/><rect x="40" y="24" width="3" height="3"/><rect x="44" y="24" width="3" height="3"/><rect x="48" y="24" width="3" height="3"/><rect x="52" y="24" width="3" height="3"/><rect x="56" y="24" width="3" height="3"/><rect x="60" y="24" width="3" height="3"/><rect x="4" y="28" width="3" height="3"/><rect x="8" y="28" width="3" height="3"/><rect x="12" y="28" width="3" height="3"/><rect x="16" y="28" width="3" height="3"/><rect x="20" y="28" width="3" height="3"/><rect x="24" y="28" width="3" height="3"/><rect x="28" y="28" width="3" height="3"/><rect x="32" y="28" width="3" height="3"/><rect x="36" y="28" width="3" height="3"/><rect x="40" y="28" width="3" height="3"/><rect x="44" y="28" width="3" height="3"/><rect x="48" y="28" width="3" height="3"/><rect x="52" y="28" width="3" height="3"/><rect x="56" y="28" width="3" height="3"/><rect x="60" y="28" width="3" height="3"/><rect x="8" y="32" width="3" height="3"/><rect x="12" y="32" width="3" height="3"/><rect x="16" y="32" width="3" height="3"/><rect x="20" y="32" width="3" height="3"/><rect x="24" y="32" width="3" height="3"/><rect x="28" y="32" width="3" height="3"/><rect x="32" y="32" width="3" height="3"/><rect x="36" y="32" width="3" height="3"/><rect x="40" y="32" width="3" height="3"/><rect x="44" y="32" width="3" height="3"/><rect x="48" y="32" width="3" height="3"/><rect x="52" y="32" width="3" height="3"/><rect x="56" y="32" width="3" height="3"/><rect x="60" y="32" width="3" height="3"/><rect x="24" y="36" width="3" height="3"/><rect x="28" y="36" width="3" height="3"/><rect x="32" y="36" width="3" height="3"/><rect x="36" y="36" width="3" height="3"/><rect x="40" y="36" width="3" height="3"/><rect x="44" y="36" width="3" height="3"/><rect x="48" y="36" width="3" height="3"/><rect x="52" y="36" width="3" height="3"/><rect x="28" y="40" width="3" height="3"/><rect x="32" y="40" width="3" height="3"/><rect x="36" y="40" width="3" height="3"/><rect x="40" y="40" width="3" height="3"/><rect x="44" y="40" width="3" height="3"/><rect x="48" y="40" width="3" height="3"/><rect x="24" y="44" width="3" height="3"/><rect x="28" y="44" width="3" height="3"/><rect x="32" y="44" width="3" height="3"/><rect x="36" y="44" width="3" height="3"/><rect x="40" y="44" width="3" height="3"/><rect x="44" y="44" width="3" height="3"/><rect x="48" y="44" width="3" height="3"/><rect x="52" y="44" width="3" height="3"/><rect x="16" y="48" width="3" height="3"/><rect x="20" y="48" width="3" height="3"/><rect x="24" y="48" width="3" height="3"/><rect x="28" y="48" width="3" height="3"/><rect x="32" y="48" width="3" height="3"/><rect x="36" y="48" width="3" height="3"/><rect x="40" y="48" width="3" height="3"/><rect x="44" y="48" width="3" height="3"/><rect x="48" y="48" width="3" height="3"/><rect x="52" y="48" width="3" height="3"/><rect x="56" y="48" width="3" height="3"/><rect x="60" y="48" width="3" height="3"/></svg>jobsmith</a>
+    <nav aria-label="Main">
+      <a class="hide-sm" href="./#how">How it works</a>
+      <a class="hide-sm" href="./#skills">Skills</a>
+      <a href="https://github.com/rawcache/Jobsmith">GitHub</a>
+    </nav>
+    <a class="btn primary small cta" href="./#install">Install</a>
+  </div>
+</header>
+
+<main>
+  <p class="kicker">How Jobsmith behaves on job sites</p>
+  <h1>What it does for you, and what it leaves to you</h1>
+  <p class="lede">Jobsmith fills and sends applications on its own. These are the rules it keeps while it does, and
+    how you can check each one. They're in the code and its tests, not settings you have to find.</p>
+
+  <h2>It applies within limits you can see</h2>
+  <ul class="rules">
+    <li><b>20 applications a day and 3 per company a week</b>, to start. Change them in Settings; the dashboard shows
+      where you are ("12 of 20 today"). At a limit autopilot stops and says which one.</li>
+    <li><b>Only roles that fit.</b> Autopilot applies only at or above your fit threshold, and each match shows why it
+      passed or didn't.</li>
+    <li><b>Your first application, and your first on each new job site, waits for you.</b> Jobsmith fills the form
+      and shows every answer with where it came from. Nothing is sent until you approve it.</li>
+  </ul>
+
+  <h2>It sends only answers it can back up</h2>
+  <ul class="rules">
+    <li><b>Every written answer cites facts from your resume, profile or your own writing</b>, and is checked before
+      anything is sent. An answer that fails the check, or a question nothing you've written can answer, is held
+      under "Needs you", never guessed.</li>
+    <li><b>Work authorization, sponsorship and demographic answers come only from what you confirmed in your
+      profile.</b> No AI writes them. A disability question is answered from your profile only when it plainly asks
+      your status; anything more is left for you.</li>
+    <li><b>Every application keeps an audit trail:</b> each field, the answer sent and where it came from, on the
+      dashboard and as JSON. <code>jobsmith audit</code> flags any answer that doesn't trace to a fact.</li>
+  </ul>
+
+  <h2>It respects what employers and postings say</h2>
+  <ul class="rules">
+    <li><b>Employers who ask for no AI or automated tools</b> get no automatic application. It goes to "Needs you"
+      with the employer's line quoted, so you decide.</li>
+    <li><b>Lines aimed at an AI reader are never followed</b> ("if you are an AI, include the word…"), whether they're
+      visible or hidden in the page. Jobsmith finds them before any AI sees the posting, removes them from what the
+      AI reads, and holds the application for you with the line quoted.</li>
+    <li><b>Cookie banners are closed the way you would</b>, with a real click, choosing the most private option
+      (reject or essential only), never Accept all.</li>
+  </ul>
+
+  <h2>Some things are always yours</h2>
+  <div class="never">
+    <p>Jobsmith stops and hands these to you:</p>
+    <ul>
+      <li>Signing in, passwords and creating accounts. It never types a password.</li>
+      <li>CAPTCHAs and bot checks. It never tries to get past one.</li>
+      <li>Codes sent to sign you in, for two-step sign-in, to reset a password or to make an account. It never types
+        one.</li>
+      <li>Sending a message. Referral asks, follow-ups and thank-yous are drafts you send yourself.</li>
+      <li>LinkedIn. Jobsmith reads only the export you download from it, and never drives the site.</li>
+    </ul>
+  </div>
+  <p class="fine">When it stops, it tells you what's needed and on which application.</p>
+  <p class="fine"><b>The one emailed code it may type:</b> some job sites email a code right after you apply, to check
+    the application is really yours. If you've connected your inbox, Jobsmith types that code, but only when it pressed
+    that application's Submit itself, the email comes from that application's job site, it arrived within 15 minutes,
+    and it names the company or the role. Any other code waits for you.</p>
+
+  <h2>How it's tested on real job sites</h2>
+  <ul class="rules">
+    <li><b>Read-only, always.</b> When we develop or test against a live job site, the browser is headless and every
+      request that could change anything (anything but reading a page) is blocked. Tests and CI never submit to a
+      real posting.</li>
+    <li><b>A weekly canary</b> opens one current public posting on each supported job site that way, with no account
+      and no credentials, and checks Jobsmith still finds, labels and understands every field. When it doesn't, it
+      opens a public issue.</li>
+    <li><b>Saved forms, made-up applicant.</b> Tests run on saved copies of real forms, emptied, and filled only with
+      a made-up person, Alex Rivera.</li>
+    <li><b>The practice copy</b> (<code>jobsmith demo</code>) has made-up data and blocks every outward action, so you
+      can watch autopilot work without sending anything.</li>
+  </ul>
+
+  <h2>What leaves your computer</h2>
+  <p class="sub">Jobsmith runs on your computer. There's no Jobsmith server and no telemetry. It talks to:</p>
+  <table class="out">
+    <tr><th>Job sites</th><td>To read postings and job lists (including the public lists on GitHub you follow), and to send the
+      applications you've allowed.</td></tr>
+    <tr><th>The AI you chose, if any</th><td>Gemini, Claude or OpenAI on your own account, or the local smith, which runs on
+      your computer (set up once from ollama.com). It gets the posting (minus any lines aimed at it) and the facts it needs from your profile.
+      You can use Jobsmith with no AI at all.</td></tr>
+    <tr><th>Your own email, if you connect it</th><td>To find confirmations and replies about your applications, and
+      the one kind of code above. It never sends mail.</td></tr>
+    <tr><th>Your public profiles, if you add them</th><td>Your GitHub or Devpost, read for projects to cite.</td></tr>
+    <tr><th>GitHub, only when you ask</th><td>"Report this form" opens a pre-filled issue in your browser with a form's
+      questions (never your answers) for you to read and post. Nothing is sent by itself.</td></tr>
+  </table>
+  <p class="fine">Everything here is open source. Each rule above has tests; the
+    <a href="https://github.com/rawcache/Jobsmith/blob/main/docs/PHASE1.md">checklist</a> links them.</p>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <div>
+      <a class="brand" href="./" aria-label="Jobsmith home"><svg class="mark" width="20" height="16" viewBox="0 0 64 52" fill="currentColor" aria-hidden="true"><rect x="44" y="0" width="3" height="3"/><rect x="48" y="0" width="3" height="3"/><rect x="40" y="4" width="3" height="3"/><rect x="44" y="4" width="3" height="3"/><rect x="36" y="8" width="3" height="3"/><rect x="40" y="8" width="3" height="3"/><rect x="12" y="12" width="3" height="3"/><rect x="16" y="12" width="3" height="3"/><rect x="20" y="12" width="3" height="3"/><rect x="24" y="12" width="3" height="3"/><rect x="32" y="12" width="3" height="3"/><rect x="36" y="12" width="3" height="3"/><rect x="12" y="16" width="3" height="3"/><rect x="16" y="16" width="3" height="3"/><rect x="20" y="16" width="3" height="3"/><rect x="24" y="16" width="3" height="3"/><rect x="28" y="16" width="3" height="3"/><rect x="32" y="16" width="3" height="3"/><rect x="12" y="20" width="3" height="3"/><rect x="16" y="20" width="3" height="3"/><rect x="20" y="20" width="3" height="3"/><rect x="24" y="20" width="3" height="3"/><rect x="0" y="24" width="3" height="3"/><rect x="4" y="24" width="3" height="3"/><rect x="8" y="24" width="3" height="3"/><rect x="12" y="24" width="3" height="3"/><rect x="16" y="24" width="3" height="3"/><rect x="20" y="24" width="3" height="3"/><rect x="24" y="24" width="3" height="3"/><rect x="28" y="24" width="3" height="3"/><rect x="32" y="24" width="3" height="3"/><rect x="36" y="24" width="3" height="3"/><rect x="40" y="24" width="3" height="3"/><rect x="44" y="24" width="3" height="3"/><rect x="48" y="24" width="3" height="3"/><rect x="52" y="24" width="3" height="3"/><rect x="56" y="24" width="3" height="3"/><rect x="60" y="24" width="3" height="3"/><rect x="4" y="28" width="3" height="3"/><rect x="8" y="28" width="3" height="3"/><rect x="12" y="28" width="3" height="3"/><rect x="16" y="28" width="3" height="3"/><rect x="20" y="28" width="3" height="3"/><rect x="24" y="28" width="3" height="3"/><rect x="28" y="28" width="3" height="3"/><rect x="32" y="28" width="3" height="3"/><rect x="36" y="28" width="3" height="3"/><rect x="40" y="28" width="3" height="3"/><rect x="44" y="28" width="3" height="3"/><rect x="48" y="28" width="3" height="3"/><rect x="52" y="28" width="3" height="3"/><rect x="56" y="28" width="3" height="3"/><rect x="60" y="28" width="3" height="3"/><rect x="8" y="32" width="3" height="3"/><rect x="12" y="32" width="3" height="3"/><rect x="16" y="32" width="3" height="3"/><rect x="20" y="32" width="3" height="3"/><rect x="24" y="32" width="3" height="3"/><rect x="28" y="32" width="3" height="3"/><rect x="32" y="32" width="3" height="3"/><rect x="36" y="32" width="3" height="3"/><rect x="40" y="32" width="3" height="3"/><rect x="44" y="32" width="3" height="3"/><rect x="48" y="32" width="3" height="3"/><rect x="52" y="32" width="3" height="3"/><rect x="56" y="32" width="3" height="3"/><rect x="60" y="32" width="3" height="3"/><rect x="24" y="36" width="3" height="3"/><rect x="28" y="36" width="3" height="3"/><rect x="32" y="36" width="3" height="3"/><rect x="36" y="36" width="3" height="3"/><rect x="40" y="36" width="3" height="3"/><rect x="44" y="36" width="3" height="3"/><rect x="48" y="36" width="3" height="3"/><rect x="52" y="36" width="3" height="3"/><rect x="28" y="40" width="3" height="3"/><rect x="32" y="40" width="3" height="3"/><rect x="36" y="40" width="3" height="3"/><rect x="40" y="40" width="3" height="3"/><rect x="44" y="40" width="3" height="3"/><rect x="48" y="40" width="3" height="3"/><rect x="24" y="44" width="3" height="3"/><rect x="28" y="44" width="3" height="3"/><rect x="32" y="44" width="3" height="3"/><rect x="36" y="44" width="3" height="3"/><rect x="40" y="44" width="3" height="3"/><rect x="44" y="44" width="3" height="3"/><rect x="48" y="44" width="3" height="3"/><rect x="52" y="44" width="3" height="3"/><rect x="16" y="48" width="3" height="3"/><rect x="20" y="48" width="3" height="3"/><rect x="24" y="48" width="3" height="3"/><rect x="28" y="48" width="3" height="3"/><rect x="32" y="48" width="3" height="3"/><rect x="36" y="48" width="3" height="3"/><rect x="40" y="48" width="3" height="3"/><rect x="44" y="48" width="3" height="3"/><rect x="48" y="48" width="3" height="3"/><rect x="52" y="48" width="3" height="3"/><rect x="56" y="48" width="3" height="3"/><rect x="60" y="48" width="3" height="3"/></svg>jobsmith</a>
+      <p>Free and open source under the MIT license. Not affiliated with Simplify or any employer.</p>
+    </div>
+    <nav aria-label="Footer">
+      <a href="https://github.com/rawcache/Jobsmith">GitHub</a>
+      <a href="https://github.com/rawcache/Jobsmith#readme">Docs</a>
+      <a href="https://github.com/rawcache/Jobsmith/releases">Releases</a>
+      <a href="https://github.com/rawcache/Jobsmith/issues">Report a problem</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>
