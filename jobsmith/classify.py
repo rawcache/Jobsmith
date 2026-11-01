@@ -11,6 +11,11 @@ RULES: list[tuple[str, str]] = [
     (r"^full name|^name$|^your name|^(full )?legal (full )?name$", "full_name"),
     (r"(school|university|college|\.edu|student) e-?mail", "school_email"),
     (r"e-?mail", "email"),
+    # before "phone": an extension box takes digits only, and a dialling code isn't your number
+    # an extension box: "Ext", "Phone Ext.", "Office Extension" (a phone box that mentions one is still the phone).
+    # Same rule as EXT_LABEL in fill/base.py and content.js.
+    (r"^\W*(?:[a-z]+\W+){0,2}ext(?:ension)?\b\W*$|^\W*(?:(?:tele)?phone\s+)?ext(?:ension|\.|\b)", "phone_extension"),
+    (r"(country|dial(l?ing)?) (phone )?code\b|\bcountry calling code", "phone_country_code"),
     (r"phone|mobile", "phone"),
     (r"^resume|^cv\b|resume/cv", "resume"),
     (r"cover letter", "cover_letter"),

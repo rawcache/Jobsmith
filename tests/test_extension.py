@@ -48,7 +48,7 @@ CHROME_STUB = """
 window.__calls = []; window.__listeners = []; window.__store = Object.assign({}, window.__initialStore || {});
 window.__opts = window.__opts || {}; let injected = false;
 window.__tabAnswers = new Promise(r => { window.__letTabAnswer = r; });
-const ANSWERS = {"First Name": "Alex", "Last Name": "Rivera", "Email": "alex.rivera@example.com", "Phone": "555-010-2030"};
+const ANSWERS = {"First Name": "Alex", "Last Name": "Rivera", "Email": "alex.rivera@example.com", "Phone": "617-555-0123"};
 const reply = msg => {
   if (msg.type === "ping") return { ok: true, data: { ai: "Gemini", ai_ok: true, resume: __opts.resume || null } };
   if (msg.type === "answers") return { ok: true, data: { job_id: "j1", resume: __opts.resume || null, error: null,
@@ -216,7 +216,7 @@ async def test_autofill_fills_one_step_of_a_job_site_form_in_a_frame_and_nothing
         await f.wait_for_selector("input")
         await f.add_script_tag(path=str(EXT / "content.js"))
         await f.evaluate("__listeners.forEach(l => l({type: 'fill'}, {}, () => {})); 0")
-    await frames["step"].wait_for_function("document.getElementById('phone').value === '555-010-2030'")
+    await frames["step"].wait_for_function("document.getElementById('phone').value === '617-555-0123'")
     await page.wait_for_timeout(1000)
     assert await frames["signup"].input_value("#email") == ""
     assert await frames["video"].input_value("#q") == ""
@@ -321,7 +321,7 @@ async def test_autofill_without_a_resume_pdf_fills_the_rest(page):
     text = await page.evaluate(f"{note}.innerText")
     assert "Add your resume PDF to attach it" in text
     assert await page.input_value("#first_name") == "Alex" and await page.input_value("#email") == "alex.rivera@example.com"
-    assert await page.input_value("#phone") == "555-010-2030"
+    assert await page.input_value("#phone") == "617-555-0123"
     assert await page.evaluate("document.getElementById('resume').files.length") == 0
     assert not await page.evaluate("__calls.some(c => c.type === 'file')")             # didn't even ask for one
     needs = text.split("Needs you:")[1] if "Needs you:" in text else ""
@@ -368,16 +368,16 @@ async def test_autofill_never_types_the_phone_number_into_the_phone_country_box(
     """The Figma form's phone has a Country select beside it, with a hidden required copy inside the Phone fieldset.
     That copy was read as a "Phone" field and got the number. It isn't a field; and a number offered for the
     Country box itself is held, not typed."""
-    await _load(page, {"panelOpen": True}, answers={"Country": {"value": "555-010-2030", "qkind": "location"}})
+    await _load(page, {"panelOpen": True}, answers={"Country": {"value": "617-555-0123", "qkind": "location"}})
     await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
     note = "document.querySelector('#jobsmith-panel').shadowRoot.querySelector('.note')"
     await page.wait_for_function(f"{note}?.innerText.includes('Filled')")
-    assert await page.input_value("#phone") == "555-010-2030"
+    assert await page.input_value("#phone") == "617-555-0123"
     assert await page.input_value(COUNTRY_MIRROR) == ""
     assert await page.input_value("#country") == ""
     needs = (await page.evaluate(f"{note}.innerText")).split("Needs you:")[1]
     assert "Country" in needs and "isn't a place" in needs
-    assert await page.evaluate("[...document.querySelectorAll('input')].filter(e => e.value === '555-010-2030').length") == 1
+    assert await page.evaluate("[...document.querySelectorAll('input')].filter(e => e.value === '617-555-0123').length") == 1
     await _never_submitted(page)
 
 
@@ -774,10 +774,10 @@ def test_a_us_city_is_named_the_way_place_lookups_name_it():
 def test_a_phone_number_is_not_a_country():
     from jobsmith import classify, draft
     assert classify.question_kind("Country", "combobox") == "location"
-    assert draft.shape_fits("location", "555-010-2030") and draft.shape_fits("location", "+1 (555) 010-2030")
+    assert draft.shape_fits("location", "617-555-0123") and draft.shape_fits("location", "+1 (617) 555-0123")
     assert draft.shape_fits("location", "United States") is None and draft.shape_fits("location", "US") is None
     held = draft._checked({"label": "Country", "qtype": "combobox", "options": []},
-                          {"answer": "555-010-2030", "confidence": 0.9, "kind": "standard"}, {"company": "Figma"})
+                          {"answer": "617-555-0123", "confidence": 0.9, "kind": "standard"}, {"company": "Figma"})
     assert held["answer"] == "" and "isn't a place" in held["held"]
 
 
@@ -799,7 +799,7 @@ async def test_autofill_keeps_an_essay_asked_for_in_a_one_line_box(page):
 
 SHAPES = [(kind, value) for kind in ("location", "yes_no", "short", "essay", "open", "choice")
           for value in ("Boston, MA", "Yes", "No, but I could move within a month.", "I live in Boston.", "N/A", "NA",
-                        "Two words", ESSAY, " ".join(["word"] * 41), "One. Two. Three.", "555-010-2030")]
+                        "Two words", ESSAY, " ".join(["word"] * 41), "One. Two. Three.", "617-555-0123")]
 
 
 @browser
@@ -967,7 +967,7 @@ async def test_engine_answers_a_polite_question_for_a_fact_from_the_profile():
     """"Tell us your first name" is asking for your first name: the confirmed profile answer, no AI. "Tell us your
     phone troubleshooting process" isn't asking for your phone number."""
     profile.set_answer("first_name", "Alex", True)
-    profile.set_answer("phone", "555-010-2030", True)
+    profile.set_answer("phone", "617-555-0123", True)
     r = await extension.answers("https://job-boards.greenhouse.io/acme/jobs/10", [
         {"id": "js1", "label": "Tell us your first name", "type": "text", "required": True},
         {"id": "js2", "label": "Please tell us your phone number so we can reach you", "type": "text", "required": True},
@@ -975,8 +975,8 @@ async def test_engine_answers_a_polite_question_for_a_fact_from_the_profile():
         {"id": "js4", "label": "Tell us your first name (as on your ID)", "type": "text", "required": True}],
         title="Intern")
     by = {a["id"]: a for a in r["answers"]}
-    assert by["js1"]["value"] == "Alex" and by["js2"]["value"] == "555-010-2030" and by["js4"]["value"] == "Alex"
-    assert by["js3"]["value"] != "555-010-2030" and by["js3"]["qkind"] == "essay"
+    assert by["js1"]["value"] == "Alex" and by["js2"]["value"] == "617-555-0123" and by["js4"]["value"] == "Alex"
+    assert by["js3"]["value"] != "617-555-0123" and by["js3"]["qkind"] == "essay"
 
 
 def test_practice_copy_resume_pdf_matches_the_tex(tmp_path):
@@ -1036,7 +1036,7 @@ def test_practice_copy_resume_pdf_matches_the_tex(tmp_path):
     ("Tell us your expected pay", "text", "$45/hour", True),
     ("Please share your earliest start date", "text", "June 1, 2027", True),
     ("Tell us your salary expectations (explain how you arrived at this figure)", "text", "$45/hour", False),
-    ("Tell us your phone troubleshooting process", "text", "555-010-2030", False),   # a story that names a fact
+    ("Tell us your phone troubleshooting process", "text", "617-555-0123", False),   # a story that names a fact
     ("Tell us your city and how you chose it", "text", "Boston, MA", False),
     ("Tell us your experience with Python", "text", "Yes", False),                  # narrative, not a fact
     ("Tell us your experience with Python", "textarea", ESSAY, True),
@@ -1530,3 +1530,30 @@ async def test_the_page_waits_for_a_slow_frame_and_not_forever_for_a_silent_one(
         info = await asyncio.wait_for(page.evaluate(ask), 10)            # never answering at all fails, not hangs
         assert info["bare"] == bare and info["forms"] == forms and info["replies"] == 1, info
         assert within[0] <= info["ms"] < within[1], (url, info["ms"])
+
+
+@browser
+async def test_autofill_never_puts_anything_but_digits_in_a_phone_extension_box(page):
+    """Workday's phone extension box, word for word, and two others added to the saved Lever form: "+1" (or a whole
+    number) offered for an extension is held under Needs you and never typed; digits are typed."""
+    await page.add_init_script("""document.addEventListener('DOMContentLoaded', () => document.querySelector('form')
+      .insertAdjacentHTML('beforeend', '<label for="phoneNumber--extension">Phone Extension</label>' +
+      '<input id="phoneNumber--extension" type="text"><label for="o2">Office Ext</label><input id="o2" type="text">' +
+      '<label for="o3">Desk extension</label><input id="o3" type="text" autocomplete="tel-extension">'));""")
+    await _load(page, {"panelOpen": True}, fixture="lever_palantir_form.html", answers={
+        "Full name": {"value": "Alex Rivera", "kind": "standard"},
+        "Phone": {"value": "617-555-0123", "kind": "standard"},
+        "Phone Extension": {"value": "+1", "kind": "standard"},
+        "Office Ext": {"value": "617-555-0123", "kind": "standard"},
+        "Desk extension": {"value": "23", "kind": "standard"}})
+    await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
+    note = "document.querySelector('#jobsmith-panel').shadowRoot.querySelector('.note')"
+    await page.wait_for_function(f"{note}?.innerText.includes('Filled')", timeout=30000)
+    assert await page.input_value('[id="phoneNumber--extension"]') == ""
+    assert await page.input_value("#o2") == ""
+    assert await page.input_value("#o3") == "23"
+    outlined = "s => document.querySelector(s).style.outline.includes('solid')"    # marked under Needs you
+    assert await page.evaluate(outlined, '[id="phoneNumber--extension"]') and await page.evaluate(outlined, "#o2")
+    assert not await page.evaluate(outlined, "#o3")
+    assert await page.evaluate("[...document.querySelectorAll('input')].filter(e => e.value === '+1').length") == 0
+    await _never_submitted(page)

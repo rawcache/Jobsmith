@@ -78,7 +78,7 @@ async def _alex(tmp_path) -> None:
     """The practice copy's made-up applicant, with the answers only Alex can confirm, confirmed."""
     await profile.ingest_document(DEMO_RESUME)
     for k, v in {"first_name": "Alex", "last_name": "Rivera", "email": "alex.rivera@example.com",
-                 "phone": "555-010-2030", "country": "United States", "needs_sponsorship": "No",
+                 "phone": "617-555-0123", "country": "United States", "needs_sponsorship": "No",
                  "work_authorized_us": "Yes"}.items():
         profile.set_answer(k, v, confirmed=True)
     profile.set_answer("enrollment_start", "Aug 2023", confirmed=True)

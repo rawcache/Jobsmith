@@ -25,7 +25,7 @@ async def test_latex_resume_becomes_facts_and_answer_bank():
     a = profile.answers()
     assert a["first_name"]["value"] == "Alex" and a["last_name"]["value"] == "Rivera"
     assert a["work_authorized_us"]["value"] == "Yes" and a["needs_sponsorship"]["value"] == "No"
-    assert a["gpa"]["value"] == "3.71" and a["graduation_year"]["value"] == "2027"
+    assert a["gpa"]["value"] == "3.62" and a["graduation_year"]["value"] == "2027"
     assert a["school"]["value"] == "Example Institute of Technology"
     assert a["location"]["value"] == "Boston, MA"
     assert a["major"]["value"] == "Computer Engineering" and a["degree"]["value"] == "Bachelor's"
@@ -55,7 +55,7 @@ def test_canon(label, key):
 
 def test_pick_option():
     gpa = ["Below 3.0", "3.0 - 3.49", "3.5 - 3.79", "3.8 - 4.0"]
-    assert classify.pick_option("3.71", gpa) == "3.5 - 3.79"
+    assert classify.pick_option("3.62", gpa) == "3.5 - 3.79"
     assert classify.pick_option("3.9", ["3.5+", "Below 3.5"]) == "3.5+"
     assert classify.pick_option("No", ["Yes, I will", "No, I will not"]) == "No, I will not"
     assert classify.pick_option("Decline to self-identify", ["Male", "I don't wish to answer"]) == "I don't wish to answer"
@@ -1460,3 +1460,33 @@ async def test_a_company_sharing_a_first_word_with_this_one_isnt_this_one():
     assert ask("Have you worked for Apple before?", "Apple Technologies")["answer"] == "Yes"     # Apple, on the resume
     assert ask("Have you worked for Apple Technologies before?", "Apple Technologies")["answer"] == "No"
     assert ask("Have you worked for Apple Technologies before?", "Apple")["answer"] == ""        # another company
+
+
+# --------------------------------------------------------------------------- phone extension and dialling code
+@pytest.mark.parametrize("label,key", [
+    ("Phone Extension", "phone_extension"), ("Extension", "phone_extension"), ("Phone Ext.", "phone_extension"),
+    ("Ext", "phone_extension"), ("Country Phone Code", "phone_country_code"), ("Phone Number", "phone"),
+    ("Office Ext", "phone_extension"), ("Phone number (ext. if any)", "phone"), ("Next steps", None),
+    ("External links", None), ("Is this your extension?", None),
+])
+def test_an_extension_box_is_never_the_phone(label, key):
+    assert classify.canon_for(label) == key
+
+
+def test_an_extension_is_left_blank_and_a_required_one_waits_for_you():
+    ans = {"phone": {"value": "617-555-0123", "confirmed": 1, "label": "Phone"}}
+    box = {"field": "phoneNumber--extension", "label": "Phone Extension", "qtype": "text", "options": [], "required": False}
+    r = draft.deterministic(box, ans)
+    assert r["answer"] == "" and r["confidence"] == 1.0 and not r["issues"]
+    r = draft.deterministic(dict(box, required=True), ans)
+    assert r["answer"] == "" and r["confidence"] == 0.0 and r["issues"]       # held, never "+1"
+    code = {"field": "countryPhoneCode", "label": "Country Phone Code", "qtype": "text", "options": [], "required": True}
+    assert draft.deterministic(code, ans)["answer"] == ""                      # the site's own "+1" stays
+
+
+def test_a_dialling_code_list_is_answered_from_your_country():
+    ans = {"country": {"value": "United States", "confirmed": 1, "label": "Country"}}
+    field = {"field": "countryPhoneCode", "label": "Country Phone Code", "qtype": "listbox",
+             "options": ["Canada (+1)", "United Kingdom (+44)", "United States of America (+1)"], "required": True}
+    r = draft.deterministic(field, ans)
+    assert r["answer"] == "United States of America (+1)", r                  # the option, never a typed "+1"

@@ -15,7 +15,7 @@ your own Chrome. Phase 1 item 7d waits on this.
 - Pick one internship posting and note its address. Use **Apply Manually**, not "Autofill with Resume" (that uploads
   your resume) or "Use My Last Application".
 - Workday won't let you leave a page until its required fields are filled, and it keeps a draft in your account. So
-  fill them with **made-up details only**: Alex Rivera, `alex.rivera@example.edu`, phone `555-010-2030`, address
+  fill them with **made-up details only**: Alex Rivera, `alex.rivera@example.edu`, phone `617-555-0123`, address
   `1 Example Street, Boston, MA 02115`, and "I don't wish to answer" (or the closest) for every voluntary or
   self-identification question. Nothing true about you goes in. Afterwards you can delete the draft under
   **Candidate Home**.

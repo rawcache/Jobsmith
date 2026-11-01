@@ -134,7 +134,7 @@
   }
 
   function inRange(options, value) {
-    // "3.71" against "3.5 - 3.79", "Below 3.0", "4.0 and above"
+    // "3.62" against "3.5 - 3.79", "Below 3.0", "4.0 and above"
     const x = parseFloat(String(value).replace(/[^0-9.]/g, "")); if (isNaN(x) || !/^\s*[\d.]+\s*$/.test(value)) return -1;
     return options.findIndex(o => {
       const n = (o.match(/\d+(\.\d+)?/g) || []).map(Number);
@@ -257,6 +257,21 @@
     return true;
   }
 
+  // A phone extension box ("Ext", "Extension", Workday's phoneNumber--extension, autocomplete tel-extension) takes
+  // digits and nothing else: never "+1", a whole number, or words. Same rule as base.is_extension_box.
+  const EXT_LABEL = /^\W*(?:[a-z]+\W+){0,2}ext(?:ension)?\b\W*$|^\W*(?:(?:tele)?phone\s+)?ext(?:ension|\.|\b)/i;
+  const EXT_WORDS = /(^|[^a-z])ext(ension)?([^a-z]|$)|[a-z]Ext(ension)?([^a-z]|$)/;
+  const isExtension = el => !Array.isArray(el) && !!el && el.tagName === "INPUT" &&
+    ((el.getAttribute("autocomplete") || "").toLowerCase().includes("tel-extension") ||
+     [el.id, el.name, el.getAttribute("data-automation-id")].some(t => t && (EXT_WORDS.test(t) || EXT_WORDS.test(t.toLowerCase()))) ||
+     // a label names the box when it is "Ext" in up to three words ("Office Ext") or starts with it; "Phone number
+     // (ext. if any)" is still the phone. Same rule as classify's phone_extension.
+     [el.getAttribute("aria-label"), labelFor(el)].some(t => t && EXT_LABEL.test(t.trim())));
+  const extensionRefusal = (id, value) => {
+    const v = String(value || "").trim();
+    return v && !/^\d{1,6}$/.test(v) && isExtension(els.get(id)) ? "a phone extension box takes digits only" : "";
+  };
+
   async function fillOne(id, a, jobId) {
     const target = els.get(id);
     if (!target) return false;
@@ -292,6 +307,7 @@
     if (target.getAttribute("role") === "combobox" || target.getAttribute("aria-autocomplete") === "list") return fillCombobox(target, value, a.pick || value);
     if (target.value && target.value.trim()) return true;   // never overwrite what you typed
     if (isLookup(target)) return fillLookup(target, [value, a.pick].filter(Boolean));
+    if (isExtension(target) && !/^\d{1,6}$/.test(value)) return false;   // never "+1" in an extension box
     setNative(target, value);
     return true;
   }
@@ -507,7 +523,7 @@
     for (const a of answers) {
       let ok = false;
       const f = fields.find(x => x.id === a.id);
-      const held = a.hold || fits(a.qkind, a.value);
+      const held = a.hold || fits(a.qkind, a.value) || extensionRefusal(a.id, a.value);
       if (held) { if (f && !f.filled) { missing.push(`${f.label}: ${held}`); flag(a.id, f); } continue; }   // never typed in
       if (a.file === "resume" && !resume) noPdf ||= !f?.filled;   // no resume PDF yet: skip the upload, fill the rest
       else try { ok = await fillOne(a.id, a, job_id); } catch (_) { ok = false; }

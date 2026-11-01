@@ -14,7 +14,7 @@ are saved from your own Chrome. Phase 1 item 7e waits on this.
   posting (`<something>.icims.com/jobs/…`). Pick one internship and note its address.
 - Don't use "Apply with LinkedIn", Indeed or a resume parse if offered; enter details by hand.
 - iCIMS won't let you leave a page until its required fields are filled, and it keeps your profile in your account.
-  So fill them with **made-up details only**: Alex Rivera, `alex.rivera@example.edu`, phone `555-010-2030`, address
+  So fill them with **made-up details only**: Alex Rivera, `alex.rivera@example.edu`, phone `617-555-0123`, address
   `1 Example Street, Boston, MA 02115`, and "I don't wish to answer" (or the closest) for every voluntary or
   self-identification question. Nothing true about you goes in. Afterwards you can withdraw the application draft
   and delete the profile from the candidate portal.

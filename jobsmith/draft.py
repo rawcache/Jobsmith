@@ -295,6 +295,8 @@ def _derived(canon: str, ans: dict, job: dict | None = None) -> tuple[str, bool]
         return "Employee Referral", True
     v = lambda k: ((ans.get(k) or {}).get("value") or "").strip()
     c = lambda k: bool((ans.get(k) or {}).get("confirmed"))
+    if canon == "phone_country_code":            # a list of countries with their codes: the country you live in
+        return _derived("country", ans, job)
     if canon == "state":
         st = v("state_province")
         if st:
@@ -449,6 +451,16 @@ def deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | Non
                 "rationale": "About your disability beyond your profile's answer: left for you"}
     if not canon or canon in ("resume", "cover_letter"):
         return None
+    if canon == "phone_extension":
+        # Your profile has no extension, and nothing but digits ever goes in one (a "+1" there made Workday's phone
+        # "x+1"): left blank, as you would
+        need = ["Asks for a phone extension, and your profile has none; fill it in yourself"] if field["required"] else []
+        return {"kind": "answer_bank", "canon": canon, "answer": "", "confidence": 0.0 if need else 1.0, "issues": need,
+                "rationale": "A phone extension: your profile has none, so it's left blank"}
+    if canon == "phone_country_code" and field["qtype"] not in ("select", "listbox", "radio"):
+        # A typed dialling code box: left as the site set it. A list of countries is answered from your country.
+        return {"kind": "answer_bank", "canon": canon, "answer": "", "confidence": 1.0, "issues": [],
+                "rationale": "A dialling code box: left as the site set it"}
     if canon == "high_school":
         # Your profile is about college and work; a high school's name or year would be a guess, AI's or ours
         return {"kind": "answer_bank", "canon": canon, "answer": "", "confidence": 0.0 if field["required"] else 1.0,
