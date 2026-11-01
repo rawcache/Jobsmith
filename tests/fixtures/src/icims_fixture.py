@@ -18,14 +18,23 @@ import re
 import sys
 from pathlib import Path
 
-NOT_TYPED = re.compile(r'\stype="(hidden|submit|button|reset|image|radio|checkbox)"', re.I)
+NOT_TYPED = re.compile(r'\stype="(submit|button|reset|image|radio|checkbox)"', re.I)
+# A hidden input can hold a token or a name the page filled in, so only these are kept: flags, small numbers and the
+# login's sign-in choices once blanked (hs-00000-google)
+HARMLESS_HIDDEN = re.compile(r"^(true|false|on|off|\d{1,4}|hs-00000-[a-z]+)$", re.I)
 
 
 def typed_values(page: str) -> list[str]:
-    """Values in boxes you type into. A radio button's or checkbox's value is its option ("Y"), and a hidden or
-    submit input's isn't yours either; a text box with a value means someone typed into it before it was saved."""
-    return [v for tag in re.findall(r"<input\b[^>]*>", page) if not NOT_TYPED.search(tag)
-            for v in re.findall(r'\svalue="([^"]+)"', tag)]
+    """Values that would be someone's: what's in a box you type into (a text box with a value was typed into before
+    it was saved), and any hidden value but a harmless one. A radio button's or checkbox's value is its option
+    ("Y"), and a button's its label."""
+    out = []
+    for tag in re.findall(r"<input\b[^>]*>", page):
+        if NOT_TYPED.search(tag):
+            continue
+        hidden = re.search(r'\stype="hidden"', tag, re.I)
+        out += [v for v in re.findall(r'\svalue="([^"]+)"', tag) if not (hidden and HARMLESS_HIDDEN.match(v))]
+    return out
 
 
 PAGES = {  # capture -> (fixture, which page it is, for the stand-in)

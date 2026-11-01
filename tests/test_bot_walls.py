@@ -64,8 +64,11 @@ async def test_a_chat_widgets_box_in_another_frame_doesnt_hide_a_bot_check(page)
 async def test_a_form_in_icims_frame_is_never_a_bot_check(page):
     await page.goto((FIXTURES / "icims_idemia_posting.html").resolve().as_uri())
     await page.frame(name="icims_content_iframe").locator("a.iCIMS_ApplyOnlineButton").click()
-    await page.frame(name="icims_content_iframe").wait_for_url("**/icims_idemia_email_frame.html")
-    assert await base.bot_wall(page) == ""
+    frame = page.frame(name="icims_content_iframe")
+    await frame.wait_for_url("**/icims_idemia_email_frame.html")
+    await frame.evaluate("document.body.insertAdjacentHTML('beforeend', '<p>Please verify you are human.</p>')")
+    assert base.BOT_WALL_RE.search(await frame.locator("body").inner_text())      # words a bot check uses...
+    assert await base.bot_wall(page) == ""                                       # ...under a form in iCIMS's frame
 
 
 @pytest.mark.parametrize("form", ["lever_palantir_form.html", "ashby_ramp_form.html", "greenhouse_figma_live.html"])
