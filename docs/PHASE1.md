@@ -249,16 +249,34 @@ then `ats.SUPPORTED` and the README.
 
 ## 8. Frames
 
-- [ ] Nested frames to depth 3 ([#15](https://github.com/rawcache/Jobsmith/issues/15)).
-- [ ] "Write with Jobsmith" buttons inside frames ([#16](https://github.com/rawcache/Jobsmith/issues/16)).
-- [ ] "Reload this page" when an unlisted frame holds an application
+- [x] Nested frames to depth 3 ([#15](https://github.com/rawcache/Jobsmith/issues/15)).
+      Evidence: [ea6b3ef](https://github.com/rawcache/Jobsmith/commit/ea6b3ef), [f0c246d](https://github.com/rawcache/Jobsmith/commit/f0c246d), [1a639f4](https://github.com/rawcache/Jobsmith/commit/1a639f4), [2ede126](https://github.com/rawcache/Jobsmith/commit/2ede126). The top page asks every frame up
+      to three deep whether it holds a form (through `window.frames`, which works across sites) and waits for every
+      answer, up to a second; a wrapper counts as reached only when nothing inside it went unanswered, and frames
+      past the limit count as unseen. `test_the_page_tells_the_popup_which_frames_it_couldnt_reach` (wrappers, 3
+      and 4 deep) and `test_the_page_waits_for_a_slow_frame_and_not_forever_for_a_silent_one` (#25, #27).
+- [x] "Write with Jobsmith" buttons inside frames ([#16](https://github.com/rawcache/Jobsmith/issues/16)).
+      Evidence: [ea6b3ef](https://github.com/rawcache/Jobsmith/commit/ea6b3ef). Open questions in a frame that holds a form get Write buttons; the panel stays on the
+      top page. `test_write_with_jobsmith_works_beside_a_question_in_a_job_sites_frame`.
+- [x] "Reload this page" when an unlisted frame holds an application
       ([#17](https://github.com/rawcache/Jobsmith/issues/17)).
+      Evidence: [ea6b3ef](https://github.com/rawcache/Jobsmith/commit/ea6b3ef). Judged from the frame's address, title, name or height, so a video or a map
+      doesn't trigger it. `test_popup_says_reload_when_the_real_application_is_in_another_sites_frame`
+      and the YouTube, Maps and Google Forms cases. [CI run](https://github.com/rawcache/Jobsmith/actions/runs/41264108329)
+      (Linux, macOS, Windows).
 
 ## 9. Canary, reporting and proof it works without AI
 
-- [ ] Weekly canary: a scheduled GitHub Actions job, weekly and on demand, opens one real public posting per
+- [x] Weekly canary: a scheduled GitHub Actions job, weekly and on demand, opens one real public posting per
       supported site, read-only with non-GET requests blocked, and checks Jobsmith still finds and classifies every
       field without submitting. No credentials in CI. A failure opens an issue labelled `canary`.
+      Evidence: [a67628a](https://github.com/rawcache/Jobsmith/commit/a67628a), [4cd8486](https://github.com/rawcache/Jobsmith/commit/4cd8486), [b6c520c](https://github.com/rawcache/Jobsmith/commit/b6c520c), [414f6d0](https://github.com/rawcache/Jobsmith/commit/414f6d0). `scripts/canary/canary.py` and
+      `.github/workflows/canary.yml` (Mondays and on demand; contents read, issues write, no secrets). It picks a
+      current posting from each site's public job list, opens it behind `jobsmith/readonly.py`, and fails on too few
+      fields, a field with no words of its own, an unknown kind, an email or upload read as the wrong kind, a missing
+      name, email or resume, or (Greenhouse) a new question kind in any section of its job API.
+      `tests/test_canary.py` runs it on the saved forms offline. [Live run](https://github.com/rawcache/Jobsmith/actions/runs/41264108840)
+      (Figma on Greenhouse, Palantir on Lever, Ramp on Ashby: all passed).
 - [ ] "Report this form" in the extension panel and on each application in the dashboard: saves the form's structure
       (labels and field types, no values) and opens a pre-filled GitHub issue for the user to review and post.
       Nothing is sent automatically.
