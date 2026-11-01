@@ -142,6 +142,10 @@
   password-reset and account codes are never typed; anything that doesn't match waits for you.
 
 ### Fixed
+- A phone extension box only ever gets digits, in autopilot and the extension: never "+1" or a whole phone number
+  (another tool's "+1" there turned a Workday number into "x+1"). Your profile has no extension, so the box is left
+  blank, and a required one waits for you. A list of dialling codes ("United States of America (+1)") is answered
+  from your country, and a typed dialling code box is left as the site set it.
 - An AI that's connected but can't be reached (offline, refused) no longer stops an application: Claude's and
   OpenAI's APIs now fail like Gemini's, so profile answers still go in and only what the AI would write waits for you.
 - The terminal app no longer says "Lost Jobsmith's engine… Retrying" and "Back in touch" over and over. The engine

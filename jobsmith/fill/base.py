@@ -165,8 +165,35 @@ def css_for(field: str) -> str:
     return f'[id="{field}"], [name="{field}"]'
 
 
+# A phone extension box takes digits and nothing else: never "+1", a whole phone number or words (Workday's
+# phoneNumber--extension once got "+1" from another autofill tool). Same rule as isExtension in content.js.
+_IS_EXTENSION_JS = r"""e => {
+  const words = /(^|[^a-z])ext(ension)?([^a-z]|$)|[a-z]Ext(ension)?([^a-z]|$)/;
+  if (e.tagName !== 'INPUT') return false;
+  if ((e.getAttribute('autocomplete') || '').toLowerCase().includes('tel-extension')) return true;
+  const label = e.id && document.querySelector(`label[for="${CSS.escape(e.id)}"]`);
+  const by = (e.getAttribute('aria-labelledby') || '').split(/\s+/).map(i => i && document.getElementById(i))
+    .filter(Boolean).map(n => n.innerText).join(' ');
+  // a label names the box when it is "Ext" in up to three words ("Office Ext") or starts with it; "Phone number
+  // (ext. if any)" is still the phone. Same rule as classify's phone_extension.
+  const named = /^\W*(?:[a-z]+\W+){0,2}ext(?:ension)?\b\W*$|^\W*(?:(?:tele)?phone\s+)?ext(?:ension|\.|\b)/i;
+  return [e.id, e.name, e.getAttribute('data-automation-id')].some(t => t && (words.test(t) || words.test(t.toLowerCase())))
+    || [e.getAttribute('aria-label'), label && label.innerText, by].some(t => t && named.test(t.trim()));
+}"""
+EXTENSION_DIGITS = re.compile(r"\d{1,6}")
+
+
+async def is_extension_box(loc) -> bool:
+    try:
+        return bool(await loc.evaluate(_IS_EXTENSION_JS))
+    except Exception:
+        return False
+
+
 async def fill_text(page: Page, selector: str, value: str) -> bool:
     loc = page.locator(selector).first
+    if value.strip() and not EXTENSION_DIGITS.fullmatch(value.strip()) and await is_extension_box(loc):
+        return False                                        # left for you, never typed
     await loc.scroll_into_view_if_needed(timeout=5000)
     await loc.fill(value, timeout=8000)
     return (await loc.input_value()).strip() == value.strip()
@@ -455,6 +482,8 @@ async def fill_field(page: Page, selector: str, qtype: str, value: str, file_pat
     if qtype == "select":
         return await fill_select(page, selector, value)
     loc = page.locator(selector).first
+    if value.strip() and not EXTENSION_DIGITS.fullmatch(value.strip()) and await is_extension_box(loc):
+        return False                                        # never "+1" or a phone number in an extension box
     role = await loc.get_attribute("role")
     if role == "combobox":
         return await fill_combobox(page, selector, value)

@@ -1103,3 +1103,44 @@ async def test_after_autofill_the_form_is_read_where_it_now_is(page, tmp_path):
                               files={"resume": str(tmp_path / "resume.pdf")}, log=lambda m: None, wait_for_user=None,
                               allow_submit=lambda: False)
     assert seen == [["Preferred name"]] and res["status"] == "review", (seen, res)
+
+
+async def test_nothing_but_digits_ever_goes_into_a_phone_extension_box(page):
+    """Workday's phone extension once got "+1" from another autofill tool, which made the number "x+1". No filler
+    types anything but digits into an extension box, whatever the answer; a phone box whose label only mentions
+    an extension is still the phone."""
+    from jobsmith.fill.base import fill_field
+    await page.set_content("""<form>
+      <label for="phoneNumber--phoneNumber">Phone Number</label><input id="phoneNumber--phoneNumber">
+      <label for="phoneNumber--extension">Phone Extension</label><input id="phoneNumber--extension">
+      <input name="phone_ext" aria-label="Ext."><input autocomplete="tel-extension" name="x1">
+      <label for="p2">Phone number (ext. if any)</label><input id="p2">
+      <label for="next">Next steps</label><input id="next"></form>""")
+    for sel in ('[id="phoneNumber--extension"]', '[name="phone_ext"]', '[name="x1"]'):
+        for bad in ("+1", "617-555-0123", "x23", "none"):
+            assert not await fill_field(page, sel, "text", bad), (sel, bad)
+            assert await page.input_value(sel) == "", (sel, bad)
+        assert await fill_field(page, sel, "text", "23")
+        assert await page.input_value(sel) == "23"
+    for sel in ('[id="phoneNumber--phoneNumber"]', '[id="p2"]'):
+        assert await fill_field(page, sel, "text", "617-555-0123")
+    assert await fill_field(page, '[id="next"]', "text", "+1 ready")
+
+
+@pytest.mark.parametrize("allowed", [False, True])
+async def test_workdays_review_submit_is_never_pressed_as_next(page, tmp_path, allowed):
+    """Workday's Review page puts Submit in the footer's Next slot (data-automation-id="pageFooterNextButton", seen
+    on NVIDIA's saved Review page). The page-by-page filler read it as Next and would have sent the application
+    without asking. It's the Submit: pressed only when allow_submit() says so."""
+    from jobsmith.fill import multistep
+    review = tmp_path / "review.html"
+    review.write_text('<h2>Review</h2><p>Alex Rivera</p><div data-automation-id="pageFooter"><button type="button" '
+                      'data-automation-id="pageFooterBackButton">Back</button><button type="button" '
+                      'data-automation-id="pageFooterNextButton" onclick="window.__sent = (window.__sent || 0) + 1">'
+                      'Submit</button></div>', encoding="utf-8")
+    asked = []
+    res = await multistep.run(page, review.as_uri(), answer=lambda f: {}, files={}, log=lambda m: None,
+                              wait_for_user=None, allow_submit=lambda: asked.append(1) or allowed)
+    assert asked == [1]
+    assert res["status"] == ("submitted_clicked" if allowed else "review"), res
+    assert await page.evaluate("window.__sent || 0") == (1 if allowed else 0)

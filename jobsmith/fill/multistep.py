@@ -84,6 +84,16 @@ async def submit_button(page: Page):
     return None
 
 
+async def is_submit(el) -> bool:
+    """Whether a button reads Submit (or Submit Application), whatever its id says."""
+    try:
+        tag = await el.evaluate("e => e.tagName")
+        txt = await el.inner_text() if tag == "BUTTON" else (await el.get_attribute("value") or "")
+        return bool(SUBMIT_TEXT.match(txt or ""))
+    except Exception:
+        return False
+
+
 async def page_errors(page: Page) -> list[str]:
     errs = []
     for sel in ('[role="alert"]', '[data-automation-id="errorMessage"]', '.error', '[class*="error"]'):
@@ -189,6 +199,10 @@ async def run(page: Page, url: str, *, answer: Callable, files: dict, log: Calla
 
         nxt = await _first_visible(view, NEXT_BUTTONS)
         sub = await submit_button(view)
+        if nxt and await is_submit(nxt):
+            # Workday's Review page: its footer "Next" button (pageFooterNextButton) reads Submit, and pressing it
+            # sends the application. It is the Submit, asked for like any other
+            sub, nxt = sub or nxt, None
         if sub and not nxt:
             if not issues and allow_submit():      # asked last: it counts the submission toward the caps
                 log("Review page reached and everything is trusted: submitting.")
