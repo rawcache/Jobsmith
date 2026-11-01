@@ -496,7 +496,7 @@ def deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | Non
         country = dialling_country(ans)
         # a list: the +1 choice for your country; a search box (no list yet): the country with its code, so the
         # filler picks only a +1 choice
-        out = dialling_option(country, field["options"]) if field["options"] else f"{country} (+1)" if country else ""
+        out = "" if not country else dialling_option(country, field["options"]) if field["options"] else f"{country} (+1)"
         why = ("Your phone number doesn't say its country code" if not country else
                "None of the choices is your phone number's code (+1)")
         return {"kind": "answer_bank", "canon": canon, "answer": out, "confidence": 1.0 if out else 0.0,

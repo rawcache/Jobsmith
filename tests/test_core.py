@@ -1533,3 +1533,16 @@ def test_an_optional_dialling_code_box_with_no_match_is_left_quietly():
     r = draft.deterministic({"field": "cc", "label": "Country Phone Code", "qtype": "select", "required": False,
                              "options": ["United Kingdom (+44)"]}, ans)
     assert r["answer"] == "" and r["issues"] == []
+
+
+@pytest.mark.parametrize("ans", [
+    {},                                                                                     # no profile
+    {"phone": {"value": "617-555-0123", "confirmed": 0}, "country": {"value": "United States", "confirmed": 1}},
+    {"phone": {"value": "+44 20 7946 0123", "confirmed": 1}, "country": {"value": "United States", "confirmed": 1}},
+    {"phone": {"value": "020 7946 0123", "confirmed": 1}, "country": {"value": "United Kingdom", "confirmed": 1}},
+])
+def test_a_bare_plus_one_is_never_picked_without_a_confirmed_north_american_number(ans):
+    for qtype in ("select", "listbox", "radio"):
+        r = draft.deterministic({"field": "cc", "label": "Country Phone Code", "qtype": qtype, "required": True,
+                                 "options": ["+1", "+44"]}, ans)
+        assert r["answer"] == "" and r["issues"] and r["confidence"] == 0.0, (qtype, r)
