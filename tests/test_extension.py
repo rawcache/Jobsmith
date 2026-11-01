@@ -1467,22 +1467,22 @@ async def test_the_page_waits_for_a_slow_frame_and_not_forever_for_a_silent_one(
     it on a slow machine), the answer comes as soon as every frame has spoken, and a frame that never answers is
     reported unreached after about a second, once."""
     import asyncio
-    import time
     pages = {"https://careers.acme.test/": _framed("https://apply.unlisted-ats.test/slow"),
              "https://careers.acme.test/both": _framed("https://apply.unlisted-ats.test/slow") +
              _framed("https://apply.unlisted-ats.test/silent"),
              "https://apply.unlisted-ats.test/slow": SLOW_FRAME, "https://apply.unlisted-ats.test/silent": b"<p>x</p>"}
     await page.route("**/*", lambda r: r.fulfill(status=200, content_type="text/html", body=pages.get(r.request.url, b"")))
     await page.add_init_script(_stub({"panelOpen": False}))
-    ask = "new Promise(res => { let n = 0; __listeners.forEach(f => f({type: 'info'}, {}, r => { n++; " \
-          "setTimeout(() => res({...r, replies: n}), 1300); })); })"      # still counting past the deadline
-    for url, bare, forms, within in (("https://careers.acme.test/", [], 1, (0.35, 0.95)),
-                                     ("https://careers.acme.test/both", ["apply.unlisted-ats.test"], 1, (0.95, 2.0))):
+    # timed inside the page, from the request to its reply (#27: a busy CI machine's wall clock counted its own
+    # slowness); held 1300 ms more to count any second reply past the deadline
+    ask = "new Promise(res => { let n = 0, ms; const t0 = performance.now(); __listeners.forEach(f => " \
+          "f({type: 'info'}, {}, r => { n++; ms = ms ?? performance.now() - t0; " \
+          "setTimeout(() => res({...r, replies: n, ms}), 1300); })); })"
+    for url, bare, forms, within in (("https://careers.acme.test/", [], 1, (400, 1000)),
+                                     ("https://careers.acme.test/both", ["apply.unlisted-ats.test"], 1, (1000, 1600))):
         await page.goto(url)
         await page.wait_for_load_state("load")
         await page.add_script_tag(path=str(EXT / "content.js"))
-        start = time.monotonic()
         info = await asyncio.wait_for(page.evaluate(ask), 10)            # never answering at all fails, not hangs
-        took = time.monotonic() - start - 1.3
         assert info["bare"] == bare and info["forms"] == forms and info["replies"] == 1, info
-        assert within[0] <= took <= within[1], (url, took)
+        assert within[0] <= info["ms"] < within[1], (url, info["ms"])
