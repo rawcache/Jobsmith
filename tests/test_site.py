@@ -127,8 +127,9 @@ async def test_the_install_tabs_show_each_systems_command(system, first):
 
 
 @browser
+@pytest.mark.parametrize("font", ["", WIDE])
 @pytest.mark.parametrize("width", [320, 390, 768, 1440])
-async def test_the_behaviour_page_fits_every_width_and_is_linked_from_home(width):
+async def test_the_behaviour_page_fits_every_width_and_is_linked_from_home(width, font):
     """"How Jobsmith behaves on job sites": no sideways scroll, the top bar one row, and the home page's footer links
     to it. It loads nothing from the web (it has no script)."""
     from playwright.async_api import async_playwright
@@ -139,6 +140,9 @@ async def test_the_behaviour_page_fits_every_width_and_is_linked_from_home(width
         page = await (await b.new_context(viewport={"width": width, "height": 900})).new_page()
         asked = []
         page.on("request", lambda r: asked.append(r.url) if r.url.startswith("http") else None)
+        if font:                                             # as on a machine without the system fonts it names
+            await page.add_init_script(f"addEventListener('DOMContentLoaded', () => document.documentElement"
+                                       f".style.setProperty('--font', {font!r}))")
         await page.goto((SITE_DIR / "behaviour.html").as_uri())
         got = await page.evaluate("""() => {
           const items = [...document.querySelectorAll('.bar .brand, .bar nav a, .bar .cta')]
@@ -146,8 +150,10 @@ async def test_the_behaviour_page_fits_every_width_and_is_linked_from_home(width
           const mid = r => (r.top + r.bottom) / 2;
           return {sideways: document.documentElement.scrollWidth - innerWidth,
                   oneRow: items.every(r => Math.abs(mid(r) - mid(items[0])) < 4),
+                  apart: items.every((r, i) => i === 0 || r.left >= items[i - 1].right),
                   inside: items.every(r => r.left >= 0 && r.right <= innerWidth),
                   title: document.title, h1: !!document.querySelector('main h1')}; }""")
         await b.close()
-    assert got == {"sideways": 0, "oneRow": True, "inside": True, "title": "How Jobsmith behaves", "h1": True}
+    assert got == {"sideways": 0, "oneRow": True, "apart": True, "inside": True, "title": "How Jobsmith behaves",
+                   "h1": True}
     assert asked == []
