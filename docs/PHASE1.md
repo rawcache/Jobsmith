@@ -277,9 +277,15 @@ then `ats.SUPPORTED` and the README.
       name, email or resume, or (Greenhouse) a new question kind in any section of its job API.
       `tests/test_canary.py` runs it on the saved forms offline. [Live run](https://github.com/rawcache/Jobsmith/actions/runs/41264108840)
       (Figma on Greenhouse, Palantir on Lever, Ramp on Ashby: all passed).
-- [ ] "Report this form" in the extension panel and on each application in the dashboard: saves the form's structure
+- [x] "Report this form" in the extension panel and on each application in the dashboard: saves the form's structure
       (labels and field types, no values) and opens a pre-filled GitHub issue for the user to review and post.
       Nothing is sent automatically.
+      Evidence: `jobsmith/formreport.py` builds the new-issue link (each question's words, kind, required, choices;
+      the site and the page's path without its query string; emails, phone numbers and long numbers masked; cut to
+      a length GitHub takes). The panel sends only those four things per field and background.js opens only a
+      new-issue link on this repo (`test_report_this_form_sends_the_questions_and_never_what_you_typed`); the
+      dashboard's Application tab links it from the saved questions (`/api/jobs/{id}/form-report`).
+      `tests/test_formreport.py`.
 - [ ] A page on the site, "How Jobsmith behaves on job sites": caps, AI-policy respect, posting traps ignored, never
       submitting without verified answers, sign-ins handed to you, read-only canaries, what data leaves your
       computer.

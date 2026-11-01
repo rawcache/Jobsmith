@@ -56,6 +56,7 @@ const reply = msg => {
                                                        : Object.assign({ id: f.id, value: ANSWERS[f.label] || "", kind: "standard" },
                                                                        (__opts.answers || {})[f.label] || {})) } };
   if (msg.type === "generate") return { ok: true, data: Object.assign({ text: "", based_on: [], error: null }, __opts.generate || {}) };
+  if (msg.type === "form-report") return { ok: true, data: { url: "https://github.com/rawcache/Jobsmith/issues/new?title=x" } };
   if (msg.type === "file") return __opts.resume ? { ok: true, name: __opts.resume, type: "application/pdf", b64: btoa("%PDF-1.4") }
                                                  : { ok: false, error: "No file for that yet." };
   return { ok: false, error: "not in this test" };
@@ -410,6 +411,23 @@ async def test_panel_shows_where_legal_answers_came_from_and_holds_worked_here_b
            "(you confirmed it)" in sources
     assert "worked for Figma" not in sources
     await _never_submitted(page)
+
+
+@browser
+async def test_report_this_form_sends_the_questions_and_never_what_you_typed(page):
+    """The panel's "Report this form": the engine gets each question, its kind, whether it's required and its choices,
+    from which it builds a GitHub issue link that background.js opens for you to read and post. Nothing typed."""
+    await _load(page, {"panelOpen": True}, fixture="greenhouse_figma_live.html")
+    await page.fill("#first_name", "Alex")
+    panel = "document.querySelector('#jobsmith-panel').shadowRoot"
+    await page.evaluate(f"{panel}.querySelector('.report').click()")
+    await page.wait_for_function(f"{panel}.querySelector('.note')?.innerText.includes('Opened a GitHub issue')")
+    [sent] = await page.evaluate("__calls.filter(c => c.type === 'form-report')")
+    assert "/figma/jobs/" in sent["body"]["url"] and len(sent["body"]["fields"]) > 5
+    assert all(set(f) == {"label", "qtype", "required", "options"} for f in sent["body"]["fields"])
+    assert "Alex" not in json.dumps(sent) and any(f["label"].startswith("First Name") for f in sent["body"]["fields"])
+    bg = (EXT / "background.js").read_text(encoding="utf-8")       # only ever opens a new issue on Jobsmith's repo
+    assert 'REPORT_TO = "https://github.com/rawcache/Jobsmith/issues/new?"' in bg and ".startsWith(REPORT_TO)" in bg
 
 
 RAMP_AUTH = "Are you currently based in the U.S., Canada, LATAM, and/or currently authorized to work in one of these locations?"

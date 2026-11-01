@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Added
+- "Report this form", in the extension's panel and on each application's Application tab in the dashboard: opens a
+  pre-filled GitHub issue with the form's questions, their kinds, whether each is required and its choices, for you
+  to read, add what went wrong, and post. Never anything you typed, the page's query string, or an email address or
+  phone number in a question's words. Nothing is sent by itself.
+- A weekly canary (GitHub Actions, read-only, no credentials) reads one live posting's form on each supported job
+  site and opens an issue labelled `canary` when Jobsmith no longer finds, labels or classifies its fields.
 - The extension reaches an application form inside a frame inside a frame (a company's own embed around a job
   site's form), up to three deep; "Write with Jobsmith" buttons appear beside open questions in a job site's frame
   too (the panel stays on the page itself); and when a page with its own short form also holds the real application
