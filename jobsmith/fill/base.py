@@ -91,7 +91,8 @@ SCAN_JS = r"""
       const isOpt = t => /^(yes|no)\W*$/i.test(t) || (group.length > 1 && opts.some(o => o && (t.startsWith(o) || o.startsWith(t))));
       if (!label) { let p = el.parentElement; for (let i = 0; i < 5 && p; i++, p = p.parentElement) {
         const t = clean((p.innerText || '').split('\n')[0]); if (t && group.every(x => p.contains(x)) && t.length > 2 && !isOpt(t)) { label = t; break; } } }
-      out.push({ field: el.name ? `[name="${el.name}"]` : key, label: label || opts[0], value: group.some(x => x.checked) ? 'set' : '',
+      out.push({ field: el.name ? `[name="${el.name}"]` : key, label: label || opts[0],
+                 ...(!label && group.every(unworded) ? { unworded: true } : {}), value: group.some(x => x.checked) ? 'set' : '',
                  qtype: group.length > 1 ? (type === 'radio' ? 'radio' : 'multiselect') : 'checkbox',
                  required: group.some(x => x.required), options: group.length > 1 ? opts : [], description: '', group: groupFor(el) });
       continue;
@@ -130,7 +131,8 @@ SCAN_JS = r"""
     const key = el.id ? byId(el.id) : (auto ? `[data-automation-id="${auto}"]` : null);
     if (!key) continue;
     const txt = clean(el.innerText);
-    out.push({ field: key, label: labelFor(el), qtype: 'listbox', value: /^select/i.test(txt) ? '' : txt,
+    out.push({ field: key, label: labelFor(el), ...(unworded(el) ? { unworded: true } : {}), qtype: 'listbox',
+               value: /^select/i.test(txt) ? '' : txt,
                required: el.getAttribute('aria-required') === 'true' || /\*/.test(labelFor(el)), options: [], description: '', group: groupFor(el) });
   }
   return out;

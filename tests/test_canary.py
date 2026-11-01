@@ -105,9 +105,16 @@ async def test_a_box_whose_label_matches_its_id_is_labelled(browser):
     deep = lambda box: f"<div><div><div><div><div>{box}</div></div></div></div></div>"
     await page.set_content("<form>" + "".join(deep(b) for b in (
         '<label for="Email">Email</label><input id="Email">', '<input id="123abc">', '<input name="q_9">',
-        '<input name="city" placeholder="Your city">')) + "</form>")
+        '<input name="city" placeholder="Your city">',
+        '<input type="checkbox" name="mystery">',                                   # a lone box, no words
+        '<input type="radio" name="pick" value="a"><input type="radio" name="pick" value="b">',
+        '<button type="button" aria-haspopup="listbox" id="dd">Select One</button>',
+        '<label for="agree">agree</label><input type="checkbox" id="agree">',        # words that match its id
+        '<fieldset><legend>Size</legend><label><input type="radio" name="size"> S</label>'
+        '<label><input type="radio" name="size"> M</label></fieldset>')) + "</form>")
     raw = {f["field"]: f for f in await page.evaluate(base.SCAN_JS)}
-    assert [k for k, f in raw.items() if f.get("unworded")] == ['[id="123abc"]', '[name="q_9"]'], raw
+    assert sorted(k for k, f in raw.items() if f.get("unworded")) == sorted(
+        ['[id="123abc"]', '[name="q_9"]', '[name="mystery"]', '[name="pick"]', '#dd']), raw
     await page.close()
 
 
