@@ -1,0 +1,50 @@
+name: canary
+# Weekly, and on demand: does Jobsmith still read each supported job site's live form? One current public posting
+# per site, opened headless and read-only (only GETs leave the browser), nothing typed or submitted, no sign-in, no
+# credentials, no AI: scripts/canary/canary.py. A failure opens an issue labelled `canary` (or adds to the open one).
+on:
+  schedule:
+    - cron: "17 9 * * 1"        # Mondays, 09:17 UTC
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write                 # only to report a failure
+jobs:
+  canary:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with: { persist-credentials: false }
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+      - run: uv sync
+      - run: uv run playwright install chromium
+      - name: Read each site's live form
+        shell: bash
+        run: uv run python scripts/canary/canary.py --out canary.json | tee canary.md
+      - name: Summary
+        if: always()
+        shell: bash
+        run: cat canary.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+      - name: Report a failure
+        if: failure()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          {
+            echo "The weekly canary couldn't read a supported job site's form the way autopilot does."
+            echo
+            cat canary.md 2>/dev/null || echo "(no report: the canary didn't finish)"
+            echo
+            echo "Run: $RUN_URL"
+          } > body.md
+          gh label create canary --color FBCA04 \
+            --description "The weekly canary found a job site Jobsmith no longer reads" 2>/dev/null || true
+          open=$(gh issue list --label canary --state open --json number --jq '.[0].number')
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --body-file body.md
+          else
+            gh issue create --title "Canary: a job site's form no longer reads" --label canary --body-file body.md
+          fi
