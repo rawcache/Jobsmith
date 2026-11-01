@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Added
+- "How Jobsmith behaves on job sites", a page on the website: its limits, the answers it will and won't send, what
+  it hands to you, how it's tested on live sites, and what leaves your computer.
+- README: what works without AI, proven on every CI run by `tests/test_no_ai.py` (the practice copy's autopilot with
+  every AI provider blocked).
 - "Report this form", in the extension's panel and on each application's Application tab in the dashboard: opens a
   pre-filled GitHub issue with the form's questions, their kinds, whether each is required and its choices, for you
   to read, add what went wrong, and post. Never anything you typed, the page's query string, or an email address or
@@ -131,7 +135,15 @@
 - Each match says whether it clears your fit bar and why, with what counts for it and against it. Matches under the
   bar show "Under your fit bar" and autopilot skips them; pick one yourself and it still applies.
 
+### Changed
+- Emailed codes: Jobsmith types only the code a job site emails to verify an application right after Jobsmith pressed
+  its Submit, from your connected inbox, from that application's job site, within 15 minutes, naming the company or
+  role. It used to take any recent code that mentioned the company (or Greenhouse). Sign-in, two-step,
+  password-reset and account codes are never typed; anything that doesn't match waits for you.
+
 ### Fixed
+- An AI that's connected but can't be reached (offline, refused) no longer stops an application: Claude's and
+  OpenAI's APIs now fail like Gemini's, so profile answers still go in and only what the AI would write waits for you.
 - The terminal app no longer says "Lost Jobsmith's engine… Retrying" and "Back in touch" over and over. The engine
   was fine: every ten minutes it checked your AI, and while Gemini made it wait out a rate limit, no status reply
   came back in time. The check now runs in the background and pages get its last answer at once. A missed reply
