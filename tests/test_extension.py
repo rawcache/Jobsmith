@@ -1455,3 +1455,33 @@ async def test_the_page_tells_the_popup_which_frames_it_couldnt_reach(page, page
     await page.add_script_tag(path=str(EXT / "content.js"))
     info = await page.evaluate("new Promise(res => __listeners.forEach(f => f({type: 'info'}, {}, res)))")
     assert (sorted(info["bare"]), sorted(info["bareApps"])) == (sorted(bare), sorted(apps)), info
+
+
+SLOW_FRAME = (b"<p>Application</p><script>addEventListener('message', e => { if (e.data && e.data.jobsmith === 'who') "
+              b"setTimeout(() => e.source.postMessage({jobsmith: 'here', application: true}, '*'), 400); });</script>")
+
+
+@browser
+async def test_the_page_waits_for_a_slow_frame_and_not_forever_for_a_silent_one(page):
+    """#25: a frame that takes 400 ms to say it holds a form still counts as reached (a fixed quarter second missed
+    it on a slow machine), the answer comes as soon as every frame has spoken, and a frame that never answers is
+    reported unreached after about a second, once."""
+    import time
+    pages = {"https://careers.acme.test/": _framed("https://apply.unlisted-ats.test/slow"),
+             "https://careers.acme.test/both": _framed("https://apply.unlisted-ats.test/slow") +
+             _framed("https://apply.unlisted-ats.test/silent"),
+             "https://apply.unlisted-ats.test/slow": SLOW_FRAME, "https://apply.unlisted-ats.test/silent": b"<p>x</p>"}
+    await page.route("**/*", lambda r: r.fulfill(status=200, content_type="text/html", body=pages.get(r.request.url, b"")))
+    await page.add_init_script(_stub({"panelOpen": False}))
+    ask = "new Promise(res => { let n = 0; __listeners.forEach(f => f({type: 'info'}, {}, r => { n++; " \
+          "setTimeout(() => res({...r, replies: n}), 300); })); })"
+    for url, bare, forms, within in (("https://careers.acme.test/", [], 1, (0.35, 0.95)),
+                                     ("https://careers.acme.test/both", ["apply.unlisted-ats.test"], 1, (0.95, 2.0))):
+        await page.goto(url)
+        await page.wait_for_load_state("load")
+        await page.add_script_tag(path=str(EXT / "content.js"))
+        start = time.monotonic()
+        info = await page.evaluate(ask)
+        took = time.monotonic() - start - 0.3
+        assert info["bare"] == bare and info["forms"] == forms and info["replies"] == 1, info
+        assert within[0] <= took <= within[1], (url, took)
