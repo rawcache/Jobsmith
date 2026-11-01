@@ -34,6 +34,7 @@ def test_a_blank_form_with_choices_builds(_build):
     '<p>Call (617) 555-0142</p>',
     '<input type="hidden" name="csrf" value="f3a9c2d1e8b7">',                     # a token
     '<input type="hidden" name="applicant" value="Jane Doe">',                    # a name the page filled in
+    '<input type="hidden" name="req" value="12345">',                            # a number long enough to be an id
 ])
 def test_anything_typed_or_personal_is_refused(_build, body):
     with pytest.raises(SystemExit):
@@ -44,3 +45,13 @@ def test_a_key_left_in_an_icims_page_is_refused():
     with pytest.raises(SystemExit):
         icims_fixture.build('<html><body><div data-key="94fee806-5cac-4582-9738-384a0f4ea6f9"></div></body></html>',
                             "email", "")
+
+
+@pytest.mark.parametrize("state", ['<input type="hidden" name="state" value="hqFo2SBvS1Bv">',
+                                   '<input type="hidden" value="hqFo2SBvS1Bv" name="state">'])
+def test_icims_login_state_is_blanked_whichever_way_round(state):
+    """iCIMS's login carries a one-time state token; the builder empties it, then the login builds."""
+    page = icims_fixture.build(f'<html><body><form>{state}<input type="hidden" name="connection" '
+                               'value="hs-11800-google"><input type="hidden" name="is-brave" value="false">'
+                               '</form></body></html>', "login", "")
+    assert "hqFo" not in page and "11800" not in page and "hs-00000-google" in page
