@@ -330,6 +330,7 @@ def release(job_id: str) -> bool:
     """The confirmation page showed. True when autopilot was the one that submitted it."""
     was = job_id in _submitting
     _submitting.discard(job_id)
+    _clicked_at.pop(job_id, None)         # that Submit is over (sent, or the click failed): no code waits on it
     return was
 
 
@@ -338,6 +339,7 @@ def abandon(job_id: str, why: str) -> bool:
     the tab closed, the run stopped or failed. The site may have taken it, so it keeps counting toward the caps,
     on disk so a restart doesn't forget it; the application waits under Needs you saying so, and autopilot never
     sends it again. True when it recorded one."""
+    _clicked_at.pop(job_id, None)
     if job_id not in _submitting:
         return False
     run_id = db.x("INSERT INTO runs(job_id, kind, status, log, started_at, finished_at) VALUES(?,?,?,?,?,?)",

@@ -25,18 +25,26 @@ def _mail(clicked: float, **kw) -> dict:
 def test_the_code_greenhouse_sends_for_this_application_is_used():
     now = time.time()
     assert outcomes.application_code([_mail(now)], JOB, now) == ("kD8sQw2Z", [])
-    role = _mail(now, subject="Your security code", body="Your code for the Software Engineering Intern application: 4829135")
-    assert outcomes.application_code([role], JOB, now)[0] == "4829135"            # names the role, not the company
     own = dict(JOB, ats="unknown", url="https://careers.acme-robotics.com/apply/7")
     mine = _mail(now, **{"from": "Acme Careers <jobs@mail.acme-robotics.com>"})
     assert outcomes.application_code([mine], own, now)[0] == "kD8sQw2Z"            # the application page's own site
+    role = _mail(now, **{"from": "Careers <jobs@mail.acme-robotics.com>"}, subject="Your security code",
+                 body="Your code for the Software Engineering Intern application: 4829135")
+    assert outcomes.application_code([role], own, now)[0] == "4829135"            # the role, from the employer itself
 
 
 @pytest.mark.parametrize("change, why", [
     ({"from": "Acme Robotics <no-reply@acme-robotics-careers.net>"}, "not Acme Robotics job site"),
     ({"from": "Greenhouse <no-reply@greenhouse-mail.io.evil.test>"}, "not Acme Robotics job site"),
-    ({"when_after": 16 * 60}, "not within 15 minutes of Submit"),
-    ({"when_after": -10 * 60}, "not within 15 minutes of Submit"),
+    ({"when_after": 16 * 60}, "not within 15 minutes after Submit"),
+    ({"when_after": -10 * 60}, "not within 15 minutes after Submit"),
+    ({"when_after": -30}, "not within 15 minutes after Submit"),                  # an earlier try's code
+    ({"subject": "Acme Robotics candidate account verification code",
+      "body": "Use this code to access your candidate account: 482913"}, "sign-in or account code"),
+    ({"subject": "Your Acme Robotics code", "body": "Your code is 482913."}, "doesn't say it's for an application"),
+    ({"subject": "Security code for your application",
+      "body": "Northwind Labs: copy this code into your Software Engineering Intern application: Zq81mKp3"},
+     "doesn't name Acme Robotics"),                     # same job site, same title, another employer
     ({"subject": "Your sign-in code for Acme Robotics"}, "sign-in or account code"),
     ({"subject": "Acme Robotics: your two-step verification code"}, "sign-in or account code"),
     ({"subject": "Reset your password: code for Acme Robotics"}, "sign-in or account code"),
@@ -106,6 +114,15 @@ async def test_the_runner_leaves_any_other_code_for_you(page, monkeypatch, chang
     now = time.time()
     typed, read, _ = await _watch(page, monkeypatch, [_mail(now, when=now + after, **change)])
     assert typed == [] and read                                       # looked, found nothing it may use
+
+
+def test_a_submit_that_failed_or_finished_leaves_no_click_behind():
+    jid = sources.add_job_url(JOB["url"], JOB["company"], JOB["title"])
+    for end in (lambda j: guardrails.release(j), lambda j: guardrails.abandon(j, "the tab closed")):
+        guardrails.claim(jid)
+        assert guardrails.submitted_at(jid)
+        end(jid)
+        assert guardrails.submitted_at(jid) is None             # a Submit you press next isn't Jobsmith's
 
 
 async def test_the_runner_never_reads_email_for_a_submit_it_didnt_press(page, monkeypatch):

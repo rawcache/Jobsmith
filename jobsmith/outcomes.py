@@ -245,7 +245,9 @@ SENDERS = {"greenhouse": ("greenhouse.io", "greenhouse-mail.io"), "lever": ("lev
 NOT_APPLICATION = re.compile(
     r"\b(sign(ing)?[ -]?(in|on)|log(ging)?[ -]?(in|on)|login|two[ -]?(factor|step)|2fa|mfa|multi[ -]?factor|"
     r"password|reset|create (an |a new |your )?account|new account|account (creation|activation|registration|setup)|"
-    r"activate your account|verify your (email|account)|confirm your (email|account))\b", re.I)
+    r"activate your account|verify your (email|account)|confirm your (email|account)|accounts?|access (code|your))\b",
+    re.I)
+APPLICATION = re.compile(r"\b(appl(y|ying|ied|ication|ications)|submission)\b", re.I)
 _SECOND_LEVEL = {"co", "com", "ac", "org", "net", "gov", "edu"}
 
 
@@ -272,15 +274,22 @@ def code_refusal(msg: dict, job: dict, clicked: float) -> str | None:
     sender, allowed = _from_domain(msg.get("from", "")), job_site_domains(job)
     if not any(sender == d or sender.endswith("." + d) for d in allowed):
         return f"from {sender or 'an unknown sender'}, not {job.get('company') or 'the'} job site"
-    if not clicked - 60 <= msg.get("when", 0) <= clicked + CODE_WINDOW:
-        return "not within 15 minutes of Submit"
+    if not clicked <= msg.get("when", 0) <= clicked + CODE_WINDOW:      # sent after the click, not an earlier try's
+        return "not within 15 minutes after Submit"
     text = f"{msg.get('subject', '')}\n{msg.get('body', '')[:3000]}"
     if NOT_APPLICATION.search(text):
         return "reads as a sign-in or account code"
+    if not APPLICATION.search(text):
+        return "doesn't say it's for an application"
     hay, company, role = _norm(text), _norm(job.get("company") or ""), _norm(job.get("title") or "")
-    if not ((len(company) >= 3 and company in hay) or (len(role) >= 6 and role in hay)):
-        return f"doesn't name {job.get('company') or 'the company'} or the role"
-    return None
+    if len(company) >= 3 and company in hay:
+        return None
+    # The role alone only from the employer's own site: through a job site's shared mail (Greenhouse's), another
+    # company's email for the same title would match
+    shared = any(sender == d or sender.endswith("." + d) for d in SENDERS.get(job.get("ats") or "", ()))
+    if len(role) >= 6 and role in hay and not shared:
+        return None
+    return f"doesn't name {job.get('company') or 'the company'}" + ("" if shared else " or the role")
 
 
 def application_code(messages: list[dict], job: dict, clicked: float | None) -> tuple[str | None, list[str]]:
