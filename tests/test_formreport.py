@@ -60,6 +60,10 @@ def test_the_engine_builds_the_link_for_the_panel_and_for_a_saved_application():
     _, title, body = _issue(c.get(f"/api/jobs/{jid}/form-report").json()["url"])
     assert title == "Form report: job-boards.greenhouse.io" and "LinkedIn Profile" in body and "(1 field;" in body
     assert c.get("/api/jobs/nope/form-report").status_code == 404
+    # the dashboard's link: built when clicked, so questions read since the page opened are in it
+    db.x("UPDATE jobs SET questions=? WHERE id=?", (json.dumps([{"label": "Portfolio", "qtype": "text"}]), jid))
+    r = c.get(f"/api/jobs/{jid}/form-report?go=1", follow_redirects=False)
+    assert r.status_code == 303 and "Portfolio" in _issue(r.headers["location"])[2]
 
 
 def test_contact_details_written_into_the_pages_path_are_masked_even_encoded():

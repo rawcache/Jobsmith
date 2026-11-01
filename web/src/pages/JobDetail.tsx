@@ -171,15 +171,12 @@ function FirstRun({ id, company, a, hold, onDone }: { id: string; company: strin
 }
 
 /** The cover letter, as employers will get it: read it, edit it, open the PDF that gets attached. */
-/** "Report this form": a pre-filled GitHub issue with the form's questions (never your answers) to read and post. */
-function FormReport({ id, questions }: { id: string; questions: number }) {
-  const [url, setUrl] = useState("");
-  // again when the form's questions are read (autopilot reads them after this page opens)
-  useEffect(() => { api.get<{ url: string }>(`/api/jobs/${id}/form-report`).then(r => setUrl(r.url)).catch(() => {}); }, [id, questions]);
-  if (!url) return null;
+/** "Report this form": a pre-filled GitHub issue with the form's questions (never your answers) to read and post. The
+ *  engine builds it when you click, from the questions as they are then. */
+function FormReport({ id }: { id: string }) {
   return (
-    <p className="small muted">Jobsmith read this form wrong? <a href={url} target="_blank" rel="noreferrer">Report this form</a>.
-      It opens a GitHub issue with the questions only, for you to check and post.</p>);
+    <p className="small muted">Jobsmith read this form wrong? <a href={`/api/jobs/${id}/form-report?go=1`} target="_blank"
+      rel="noreferrer">Report this form</a>. It opens a GitHub issue with the questions only, for you to check and post.</p>);
 }
 
 function CoverLetter({ id, d, busy, onChange }: { id: string; d?: Draft; busy: boolean; onChange: () => void }) {
@@ -381,7 +378,7 @@ export default function JobPage({ id, embedded = false }: { id: string; embedded
           </section>
 
           <CoverLetter id={id} d={cover} busy={!!r.busy} onChange={load} />
-          <FormReport id={id} questions={job.questions?.length ?? 0} />
+          <FormReport id={id} />
           </>}
         </div>
 
