@@ -230,6 +230,10 @@ async def fill_text(page: Page, selector: str, value: str) -> bool:
 
 def _best_option(texts: list[str], value: str) -> int | None:
     from ..classify import pick_option
+    if m := re.fullmatch(r"(.*?)\s*\(\+1\)\s*", value.strip()):      # a dialling code: exactly +1, never "+12"
+        from ..draft import dialling_option
+        pick = dialling_option(m.group(1), texts)
+        return texts.index(pick) if pick else None
     clean = [t for t in texts if t and t.lower() not in ("no options", "loading...")]
     if not clean:
         return None

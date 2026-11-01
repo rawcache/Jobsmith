@@ -21,8 +21,9 @@
   online", and hands you iCIMS's email step ("Enter Your Information", whose Next finds your account or starts one)
   and its login page. The extension fills nothing on either.
 - Workday, signed in: autopilot fills the application page by page (My Information, My Experience, Application
-  Questions, Voluntary Disclosures) and stops at Review, proven on NVIDIA's real pages saved and emptied. It picks
-  Workday's dropdowns and search boxes from their lists, reads a dropdown's question when it sits beside the box,
+  Questions, Voluntary Disclosures) and stops at Review, tested on NVIDIA's real pages saved and emptied. Workday's
+  lists were closed when those pages were saved, so the open lists in the tests are a stand-in; how they look on a
+  live Workday form is still to be checked. It picks Workday's dropdowns and search boxes from their lists, reads a dropdown's question when it sits beside the box,
   attaches your resume, and fills education years. The extension fills the same dropdowns and search boxes. A new
   Profile answer, "Phone type", answers Workday's Phone Device Type.
 - Workday: Jobsmith hands you the sign-in choice page (Sign in with Google, LinkedIn or email), which has no password
@@ -147,6 +148,9 @@
   password-reset and account codes are never typed; anything that doesn't match waits for you.
 
 ### Fixed
+- A phone's country code is picked only when the choice carries exactly your number's code and your country's own
+  name: never "United States (+12)", never "United States Minor Outlying Islands (+1)".
+- The extension picks a site's own wording for "Decline to self-identify" ("I do not wish to answer.").
 - Workday's Review page puts Submit where Next goes; the page-by-page filler would have pressed it as Next without
   asking. A Next button that reads Submit is now the Submit, pressed only when autopilot may submit.
 - A required Workday radio question (marked required on its group, not each choice) was read as optional, so an

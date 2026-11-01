@@ -210,11 +210,28 @@
     });
   }
 
+  // as classify.DECLINE: "Decline to self-identify" is "I do not wish to answer."
+  const DECLINE = /decline|prefer not|don.?t wish|do not wish|choose not|not to (answer|disclose|say)|rather not|wish not/i;
+  // "United States (+1)": only a choice with exactly that code whose name is that country's (as draft.dialling_option)
+  function dialling(options, value) {
+    const m = value.match(/^(.*?)\s*\(\+(\d+)\)\s*$/); if (!m) return null;
+    const code = new RegExp(`\\+\\s*${m[2]}(?!\\d)`), bare = new RegExp(`^\\W*\\+\\s*${m[2]}\\W*$`);
+    const withCode = options.map((o, k) => [o, k]).filter(([o]) => code.test(o));
+    const b = withCode.find(([o]) => bare.test(o.trim())); if (b) return b[1];
+    // the country's own name first ("United States of America (+1)", not "United States Minor Outlying Islands")
+    const US = ["united states", "united states of america", "usa", "us"], name = t => clean(t.replace(/\(?\+\s*\d+\)?|[^\w\s]/g, " ")).toLowerCase();
+    const alias = US.includes(name(m[1])) ? US : [name(m[1])];
+    const exact = withCode.filter(([o]) => alias.includes(name(o)));
+    return exact.length === 1 ? exact[0][1] : -1;
+  }
+
   function best(options, value) {
+    const d = dialling(options, value || ""); if (d !== null) return d;
     const v = norm(value); if (!v) return -1;
     const r = inRange(options, value); if (r >= 0) return r;
     const o = options.map(norm);
     let i = o.indexOf(v); if (i >= 0) return i;
+    if (DECLINE.test(value)) { i = options.findIndex(x => DECLINE.test(x)); if (i >= 0) return i; }
     // "United States" picks "United States +1", not a longer name that starts the same way
     const starts = o.map((x, k) => [x, k]).filter(([x]) => x.startsWith(v)).sort((a, b) => a[0].length - b[0].length);
     if (starts.length) return starts[0][1];
