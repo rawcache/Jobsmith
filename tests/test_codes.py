@@ -84,9 +84,10 @@ def test_the_newest_matching_email_wins_and_others_are_named():
     assert code == "kD8sQw2Z" and len(refused) == 1 and "Northwind" in refused[0]
 
 
-async def _watch(page, monkeypatch, inbox: list[dict], click: bool = True, prompt_page: str = "mock_code.html"):
+async def _watch(page, monkeypatch, inbox: list[dict], click: bool = True, prompt_page: str = "mock_code.html",
+                 job: dict = JOB):
     """The live tab after Submit on the saved code form, with the inbox stood in for: which codes were typed."""
-    jid = sources.add_job_url(JOB["url"], JOB["company"], JOB["title"])
+    jid = sources.add_job_url(job["url"], job["company"], job["title"])
     typed, read = [], []
     monkeypatch.setattr(outcomes, "email_ready", lambda: True)
     monkeypatch.setattr(outcomes, "_recent", lambda since: read.append(since) or inbox)
@@ -96,13 +97,12 @@ async def _watch(page, monkeypatch, inbox: list[dict], click: bool = True, promp
         typed.append(code)
         return {"ok": True}
     monkeypatch.setattr(runner, "live_code", live_code)
-    await page.goto((FIXTURES / prompt_page).resolve().as_uri())
+    await page.goto(prompt_page if "://" in prompt_page else (FIXTURES / prompt_page).resolve().as_uri())
     if click:
         guardrails.claim(jid)
     await page.click("#submit")
     run = runner.Run(jid, "fill")
-    job = {**JOB, "id": jid}
-    await runner._watch(jid, page, FIXTURES, run, job, time.time() + 3)
+    await runner._watch(jid, page, FIXTURES, run, {**job, "id": jid}, time.time() + 3)
     guardrails.release(jid)
     guardrails._clicked_at.pop(jid, None)
     return typed, read, run
@@ -149,4 +149,22 @@ async def test_the_runner_never_reads_email_for_a_submit_it_didnt_press(page, mo
 ])
 def test_the_page_asking_for_the_code_is_checked_the_same_way(prompt, title, ok):
     assert outcomes.sign_in_wording(prompt, title) is not ok
+
+
+@pytest.mark.parametrize("asks, title, used", [
+    ("To sign in, enter the 8-character code.", "Software Engineering Intern", False),
+    ("To verify your Acme Robotics account, enter the 8-character code.", "Account Executive Intern", False),
+    ("To submit your Account Executive Intern application, enter the 8-character code.", "Account Executive Intern",
+     True),
+])
+async def test_the_runner_checks_what_the_page_asks_for(page, monkeypatch, tmp_path, asks, title, used):
+    """A page asking for a sign-in or account code: no email is read and nothing is typed, even with this
+    application's code in the inbox. A role with "Account" in it is still an application."""
+    html = (FIXTURES / "mock_code.html").read_text(encoding="utf-8").replace(
+        "To submit your application, enter the 8-character code to confirm you're a human.", asks)
+    (tmp_path / "code.html").write_text(html, encoding="utf-8")
+    job = dict(JOB, title=title)
+    mail = _mail(time.time(), subject=f"Security code for your {title} application to Acme Robotics")
+    typed, read, _ = await _watch(page, monkeypatch, [mail], prompt_page=(tmp_path / "code.html").as_uri(), job=job)
+    assert (typed == ["kD8sQw2Z"]) is used and bool(read) is used
 
