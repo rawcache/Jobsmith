@@ -252,8 +252,8 @@ then `ats.SUPPORTED` and the README.
 - [x] Nested frames to depth 3 ([#15](https://github.com/rawcache/Jobsmith/issues/15)).
       Evidence: [ea6b3ef](https://github.com/rawcache/Jobsmith/commit/ea6b3ef), [f0c246d](https://github.com/rawcache/Jobsmith/commit/f0c246d), [1a639f4](https://github.com/rawcache/Jobsmith/commit/1a639f4), [2ede126](https://github.com/rawcache/Jobsmith/commit/2ede126). The top page asks every frame up
       to three deep whether it holds a form (through `window.frames`, which works across sites) and waits for every
-      answer, up to a second; a wrapper counts as reached only when nothing inside it went unanswered, and frames
-      past the limit count as unseen. `test_the_page_tells_the_popup_which_frames_it_couldnt_reach` (wrappers, 3
+      answer, up to a second; a wrapper counts as reached when a form inside it answered, or when nothing inside it
+      went unanswered, and frames past the limit count as unseen. `test_the_page_tells_the_popup_which_frames_it_couldnt_reach` (wrappers, 3
       and 4 deep) and `test_the_page_waits_for_a_slow_frame_and_not_forever_for_a_silent_one` (#25, #27).
 - [x] "Write with Jobsmith" buttons inside frames ([#16](https://github.com/rawcache/Jobsmith/issues/16)).
       Evidence: [ea6b3ef](https://github.com/rawcache/Jobsmith/commit/ea6b3ef). Open questions in a frame that holds a form get Write buttons; the panel stays on the
