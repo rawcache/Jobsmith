@@ -430,6 +430,31 @@ async def test_report_this_form_sends_the_questions_and_never_what_you_typed(pag
     assert 'REPORT_TO = "https://github.com/rawcache/Jobsmith/issues/new?"' in bg and ".startsWith(REPORT_TO)" in bg
 
 
+@browser
+async def test_report_this_form_includes_a_form_in_a_frame_two_deep(page):
+    """A company page wrapping a job site's form, two frames down: the report holds the form's questions, told by
+    Jobsmith's script in that frame, still without what's typed."""
+    posting = b'<script type="application/ld+json">{"@type": "JobPosting", "title": "Intern"}</script><h1>Intern</h1>'
+    pages = {"https://careers.acme.test/": posting + _framed("https://embed.acme.test/wrap"),
+             "https://embed.acme.test/wrap": _framed("https://apply.unlisted-ats.test/form"),
+             "https://apply.unlisted-ats.test/form": APPLY_FORM}
+    await page.route("**/*", lambda r: r.fulfill(status=200, content_type="text/html", body=pages.get(r.request.url, b"")))
+    await page.add_init_script(_stub({"panelOpen": True}))         # every frame gets the stand-in chrome
+    await page.goto("https://careers.acme.test/")
+    await page.wait_for_load_state("load")
+    form = next(f for f in page.frames if f.url.endswith("/form"))
+    await form.fill("#fn", "Alex")
+    for f in page.frames:                                          # Jobsmith's script in every frame, as allFrames
+        await f.add_script_tag(path=str(EXT / "content.js"))
+    panel = "document.querySelector('#jobsmith-panel').shadowRoot"
+    await page.wait_for_function("document.querySelector('#jobsmith-panel')?.shadowRoot?.querySelector('.report')")
+    await page.evaluate(f"{panel}.querySelector('.report').click()")
+    await page.wait_for_function(f"{panel}.querySelector('.note')?.innerText.includes('Opened a GitHub issue')")
+    [sent] = await page.evaluate("__calls.filter(c => c.type === 'form-report')")
+    assert [f["label"] for f in sent["body"]["fields"]] == ["First Name", "Last Name", "Email", "Phone"], sent
+    assert "Alex" not in json.dumps(sent)
+
+
 RAMP_AUTH = "Are you currently based in the U.S., Canada, LATAM, and/or currently authorized to work in one of these locations?"
 RAMP_REACT = ("Have you built and deployed production-level applications using React, TypeScript (or JavaScript), and other "
               "modern front-end technologies?")

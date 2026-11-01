@@ -7,7 +7,7 @@ tracking or account ids), and never an email address, phone number or long numbe
 from __future__ import annotations
 
 import re
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 REPO = "https://github.com/rawcache/Jobsmith"
 MAX_URL = 7500                  # GitHub refuses longer new-issue links; the field list is cut to fit
@@ -31,7 +31,7 @@ def scrub(text: str, limit: int = 160) -> str:
 def page_of(url: str) -> tuple[str, str]:
     """The site and the page's path, no query string or fragment."""
     u = urlsplit(url or "")
-    return (u.hostname or "", scrub(u.path, 200))
+    return (u.hostname or "", scrub(unquote(u.path), 200))     # decoded first: alex%40example.com is an email
 
 
 def body(url: str, fields: list[dict], site: str = "", note: str = "", total: int | None = None) -> str:
