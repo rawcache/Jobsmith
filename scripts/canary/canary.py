@@ -15,7 +15,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import re
 import sys
 import urllib.request
 from dataclasses import asdict, dataclass, field
@@ -77,11 +76,9 @@ def check_fields(fields: list[dict]) -> list[str]:
     if len(shown) < MIN_FIELDS:
         problems.append(f"found {len(shown)} fields, expected at least {MIN_FIELDS}")
     for f in shown:
-        label = (f.get("label") or "").strip()
-        # with no words of its own, a box is read by its name or id ("q_123"): as good as no label
-        own = set(re.findall(r'name="([^"]+)"|#([\w-]+)', f.get("field") or "")[0]) - {""} \
-            if re.search(r'name="[^"]+"|#[\w-]+', f.get("field") or "") else set()
-        if not label or label in own:
+        # with no words of its own, a box is read by its name or id ("q_123"): as good as no label (the scan
+        # says so: `unworded`)
+        if not (f.get("label") or "").strip() or f.get("unworded"):
             problems.append(f"a {f.get('qtype')} field ({f.get('field', '')[:60]}) has no label")
         if f.get("qtype") not in QTYPES:
             problems.append(f"\"{f.get('label', '')[:60]}\" is of a kind Jobsmith doesn't know: {f.get('qtype')}")
@@ -108,10 +105,17 @@ def check_greenhouse_api(data: dict) -> list[str]:
     problems = []
     if not isinstance(data, dict) or not isinstance(data.get("questions"), list):
         return ["Greenhouse's job API gave no questions list"]
-    for q in data["questions"]:
+    # every section normalize_greenhouse reads: an unknown kind in any of them would quietly become a text box
+    asked = list(data["questions"]) + list(data.get("location_questions") or []) + \
+        [q for block in data.get("compliance") or [] for q in (block.get("questions") or [])]
+    for q in asked:
         for f in (q.get("fields") or []) if isinstance(q, dict) else []:
             if f.get("type") not in jobdetail.GH_TYPES:
                 problems.append(f"Greenhouse question \"{str(q.get('label'))[:60]}\" is of a new kind: {f.get('type')}")
+    demo = data.get("demographic_questions") or {}
+    for q in (demo.get("questions") if isinstance(demo, dict) else None) or []:
+        if q.get("type") not in ("multi_value_single_select", "multi_value_multi_select"):
+            problems.append(f"Greenhouse question \"{str(q.get('label'))[:60]}\" is of a new kind: {q.get('type')}")
     return problems + [f"in Greenhouse's job API: {p}" for p in check_fields(jobdetail.normalize_greenhouse(data))]
 
 
