@@ -34,7 +34,8 @@ SCAN_JS = r"""
     const w = document.createTreeWalker(box, NodeFilter.SHOW_TEXT); let out = '';   // the box's words, not the control's
     while (w.nextNode()) if (!el.contains(w.currentNode)) out += ' ' + w.currentNode.textContent;
     return out; };
-  const labelFor = el => {
+  // The words a page gives a box: its label, ARIA name, legend or a label nearby ('' when it has none)
+  const ownLabel = el => {
     if (el.id) { const l = document.querySelector(`label[for="${CSS.escape(el.id)}"]`); if (l) return clean(l.innerText); }
     if (el.getAttribute('aria-labelledby')) {
       const t = el.getAttribute('aria-labelledby').split(/\s+/).map(i => document.getElementById(i)).filter(Boolean)
@@ -47,8 +48,11 @@ SCAN_JS = r"""
       const l = p.querySelector('label, legend, .application-label, [class*="label"]');
       if (l && !l.contains(el)) return clean(l.innerText);
     }
-    return clean(el.placeholder || el.name || el.id);
+    return '';
   };
+  // ...or, with none, its placeholder, then its name or id (a box read by "q_123" has no words: `unworded` below)
+  const labelFor = el => ownLabel(el) || clean(el.placeholder || el.name || el.id);
+  const unworded = el => !ownLabel(el) && !clean(el.placeholder || '');
   // the section each field sits in ("Employment", "Education"), from the nearest heading above it
   const heads = [...document.querySelectorAll('h1, h2, h3, h4, legend, [role="heading"]')].filter(h => clean(h.innerText));
   const groupFor = el => { let g = ''; for (const h of heads) { if (h.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) g = clean(h.innerText); else break; } return g.slice(0, 60); };
@@ -97,7 +101,7 @@ SCAN_JS = r"""
     const comboValue = () => { const c = el.closest('[class*=control]'); let t = c ? c.innerText : '';
       if (!c && el.parentElement) { const sv = el.parentElement.querySelector('[class*="single-value"], [class*="singleValue"]'); t = sv ? sv.innerText : ''; }
       t = clean(t); return /^select\b/i.test(t) ? '' : t; };
-    out.push({ field: key, label: labelFor(el), value: type === 'file' ? (el.files && el.files.length ? 'file' : '') : (el.value || (role === 'combobox' ? comboValue() : '')),
+    out.push({ field: key, label: labelFor(el), ...(unworded(el) ? { unworded: true } : {}), value: type === 'file' ? (el.files && el.files.length ? 'file' : '') : (el.value || (role === 'combobox' ? comboValue() : '')),
       qtype: type === 'file' ? 'file' : el.tagName === 'SELECT' ? 'select' : el.tagName === 'TEXTAREA' ? 'textarea' : role === 'combobox' ? 'select' : 'text',
       required: el.required || el.getAttribute('aria-required') === 'true' || starred(el),
       options: el.tagName === 'SELECT' ? [...el.options].map(o => clean(o.text)).filter(t => t && !/^select|^--|^please/i.test(t)) : [],

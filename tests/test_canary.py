@@ -56,7 +56,8 @@ async def test_the_canary_passes_on_the_saved_copy_of_each_sites_form(site, brow
 @pytest.mark.parametrize("fields, problem", [
     ([{"field": "#a", "label": "Email", "qtype": "text"}], "found 1 fields"),
     ([{"field": f"#f{i}", "label": "", "qtype": "text"} for i in range(6)], "has no label"),
-    ([{"field": f'[name="q_{i}"]', "label": f"q_{i}", "qtype": "text"} for i in range(6)], "has no label"),
+    ([{"field": f'[id="{i}abc"]', "label": f"{i}abc", "qtype": "text", "unworded": True} for i in range(6)],
+     "has no label"),
     ([{"field": "#n", "label": "Full name", "qtype": "text"}, {"field": "#e", "label": "Email", "qtype": "text"},
       {"field": "#r", "label": "Resume", "qtype": "file"}, {"field": "#w", "label": "Why us?", "qtype": "textarea"},
       {"field": "#x", "label": "Start date", "qtype": "datepicker"}], "of a kind Jobsmith doesn't know"),
@@ -83,10 +84,31 @@ def test_greenhouses_saved_job_api_passes_and_a_new_question_kind_fails():
     import json
     data = json.loads((FIXTURES / "greenhouse_job.json").read_text(encoding="utf-8"))
     assert canary.check_greenhouse_api(data) == []
+    for where in (lambda d: d["questions"][0]["fields"][0],
+                  lambda d: (d.setdefault("location_questions", []).append({"label": "Where?", "fields": [{"name": "w"}]})
+                             or d["location_questions"][-1]["fields"][0]),
+                  lambda d: (d.setdefault("compliance", []).append({"questions": [{"label": "EEO", "fields": [{"name": "e"}]}]})
+                             or d["compliance"][-1]["questions"][0]["fields"][0])):
+        changed = copy.deepcopy(data)
+        where(changed)["type"] = "input_rich_text"
+        assert any("new kind: input_rich_text" in p for p in canary.check_greenhouse_api(changed))
     changed = copy.deepcopy(data)
-    changed["questions"][0]["fields"][0]["type"] = "input_rich_text"
-    assert any("new kind: input_rich_text" in p for p in canary.check_greenhouse_api(changed))
+    changed["demographic_questions"] = {"questions": [{"label": "Gender", "type": "free_text", "answer_options": []}]}
+    assert any("new kind: free_text" in p for p in canary.check_greenhouse_api(changed))
     assert canary.check_greenhouse_api({"title": "x"}) == ["Greenhouse's job API gave no questions list"]
+
+
+async def test_a_box_whose_label_matches_its_id_is_labelled(browser):
+    """<label for="Email">Email</label>: the words happen to match the id, and they are still the page's words."""
+    from jobsmith.fill import base
+    page = await browser.new_page()
+    deep = lambda box: f"<div><div><div><div><div>{box}</div></div></div></div></div>"
+    await page.set_content("<form>" + "".join(deep(b) for b in (
+        '<label for="Email">Email</label><input id="Email">', '<input id="123abc">', '<input name="q_9">',
+        '<input name="city" placeholder="Your city">')) + "</form>")
+    raw = {f["field"]: f for f in await page.evaluate(base.SCAN_JS)}
+    assert [k for k, f in raw.items() if f.get("unworded")] == ['[id="123abc"]', '[name="q_9"]'], raw
+    await page.close()
 
 
 def test_the_canary_catches_broken_classification(monkeypatch):
