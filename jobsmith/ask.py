@@ -69,13 +69,15 @@ def window(text: str, now: float | None = None) -> tuple[float | None, float | N
             return now - n * UNIT[word], None, f"in the past {n} {word}{'s' if n != 1 else ''}" if n != 1 else f"in the past {word}"
     if re.search(r"\btoday\b|\bthis morning\b|\btonight\b|\bso far\b", t):
         return midnight, None, "today"
+    # days from the calendar, not by subtracting 24 hours: the days the clocks change last 23 or 25 hours (#30, #32)
+    day = lambda back: dt.datetime.combine(local.date() - dt.timedelta(days=back), dt.time()).timestamp()
     if re.search(r"\byesterday\b", t):
-        return midnight - 86400, midnight, "yesterday"
-    monday = midnight - local.weekday() * 86400
+        return day(1), midnight, "yesterday"
+    monday = day(local.weekday())
     if re.search(r"\bthis week\b", t):
         return monday, None, "this week"
     if re.search(r"\blast week\b", t):
-        return monday - 7 * 86400, monday, "last week"
+        return day(local.weekday() + 7), monday, "last week"
     if re.search(r"\bthis month\b", t):
         return local.replace(day=1, hour=0, minute=0, second=0, microsecond=0).timestamp(), None, "this month"
     if re.search(r"\b(recently|lately)\b", t):
