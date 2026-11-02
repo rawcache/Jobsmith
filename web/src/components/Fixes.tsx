@@ -42,18 +42,22 @@ export default function Fixes({ onChange, onCount, limit = 6 }: { onChange?: () 
     <div className="fixes">
       {said && <p className="small ok-text fix-said" role="status">{said}</p>}
       <ul className="fix-rows">{shown.map(f => <FixRow key={f.id} f={f} onDone={done} v={drafts[f.id] ?? f.value ?? ""}
-        setV={t => setDrafts(x => ({ ...x, [f.id]: t }))} />)}</ul>
+        setV={t => setDrafts(x => ({ ...x, [f.id]: t }))} clear={sent => setDrafts(x => {
+          if (x[f.id] !== sent) return x;           // typed on while it was saving: kept
+          const { [f.id]: _, ...rest } = x; return rest;
+        })} />)}</ul>
       {d.fixes.length > shown.length && <p className="small muted">{d.fixes.length - shown.length} more in <a href="#/tracker">Applications</a>.</p>}
     </div>
   );
 }
 
-function FixRow({ f, onDone, v, setV }: { f: Fix; onDone: (r: Answered) => void; v: string; setV: (t: string) => void }) {
+function FixRow({ f, onDone, v, setV, clear }: { f: Fix; onDone: (r: Answered) => void; v: string; setV: (t: string) => void;
+                                                clear: (sent: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const send = async (value: string) => {
     setBusy(true); setErr("");
-    try { onDone(await api.post<Answered>("/api/fixes/answer", { id: f.id, value })); setV(""); }
+    try { onDone(await api.post<Answered>("/api/fixes/answer", { id: f.id, value })); clear(value); }
     catch (e) { setErr((e as Error).message); }
     setBusy(false);
   };
