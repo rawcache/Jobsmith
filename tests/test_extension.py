@@ -52,10 +52,13 @@ const ANSWERS = {"First Name": "Alex", "Last Name": "Rivera", "Email": "alex.riv
 const reply = msg => {
   if (msg.type === "ping") return { ok: true, data: { ai: "Gemini", ai_ok: true, resume: __opts.resume || null } };
   if (msg.type === "answers") return { ok: true, data: { job_id: "j1", resume: __opts.resume || null, error: null,
-    answers: msg.body.fields.map(f => f.type === "file" ? { id: f.id, file: "resume", kind: "file" }
+    answers: msg.body.fields.map((f, i, all) => f.type === "file" ? { id: f.id, file: "resume", kind: "file" }
                                                        : Object.assign({ id: f.id, value: ANSWERS[f.label] || "", kind: "standard" },
                                                                        (__opts.answers || {})[f.label] || {},
-                                                                       (__opts.byName || {})[f.name] || {})) } };
+                                                                       (__opts.byName || {})[f.name] || {},
+                                                                       // byNth: {label: [answer for the 1st box, the 2nd...]}
+                                                                       ((__opts.byNth || {})[f.label] || [])[
+                                                                         all.slice(0, i).filter(x => x.label === f.label).length] || {})) } };
   if (msg.type === "generate") return { ok: true, data: Object.assign({ text: "", based_on: [], error: null }, __opts.generate || {}) };
   if (msg.type === "form-report") return { ok: true, data: { url: "https://github.com/rawcache/Jobsmith/issues/new?title=x" } };
   if (msg.type === "file") return __opts.resume ? { ok: true, name: __opts.resume, type: "application/pdf", b64: btoa("%PDF-1.4") }
@@ -1924,15 +1927,16 @@ async def test_a_removed_box_never_passes_its_answer_to_a_box_still_there(page):
 
 
 PHONE = '<label>Phone <input {}></label>'
+A1, A2 = "617-555-0101", "617-555-0102"      # the 1st and 2nd Phone box's answers, told apart
 
 
 @browser
 @pytest.mark.parametrize("before, after, typed", [
-    # the same question drawn again as often as before: each answer goes back, in order
-    ([""] * 2, [""] * 2, ["617-555-0123"] * 2),
-    (['name="phone"'] * 2, ['name="phone"'] * 2, ["617-555-0123"] * 2),
-    # one of two replaced: the new box takes the place of the one that went
-    (["", 'id="kept"'], ["", ""], ["617-555-0123"] * 2),
+    # the same question drawn again as often as before: each answer goes back to its own place
+    ([""] * 2, [""] * 2, [A1, A2]),
+    (['name="phone"'] * 2, ['name="phone"'] * 2, [A1, A2]),
+    # one of two replaced, and the one kept moved first: it keeps its own answer, the new box takes the other's
+    (['name="phone"', 'name="phone" id="kept"'], ['name="phone"'] * 2, [A2, A1]),
     # fewer or more boxes for a question than before: which is which can't be told, so none is typed in
     ([""] * 2, [""], [""]),
     (['name="phone"'] * 2, ['name="phone"'], [""]),
@@ -1945,7 +1949,8 @@ async def test_boxes_drawn_again_are_matched_only_when_sure(page, before, after,
     redraw = f"""window.__redraw = () => {{ const kept = document.getElementById('kept');
       document.getElementById('boxes').innerHTML = {json.dumps(new)};
       if (kept) document.querySelector('#boxes .new').replaceWith(kept); }};"""
-    await _redrawn(page, redraw, boxes="".join(PHONE.format(b) for b in before), byName={})
+    await _redrawn(page, redraw, boxes="".join(PHONE.format(b) for b in before),
+                   byNth={"Phone": [{"value": A1}, {"value": A2}]})
     boxes = page.locator("#boxes input")
     assert [await boxes.nth(i).input_value() for i in range(await boxes.count())] == typed
     await _never_submitted(page)
