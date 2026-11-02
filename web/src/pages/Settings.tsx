@@ -118,6 +118,11 @@ export default function Settings({ focus }: { focus?: string }) {
               const v = e.target.value === "" ? null : Number(e.target.value);
               if (v !== (s.ai_daily_budget ?? null)) save({ ai_daily_budget: v });
             }} /></label></div>
+        <div className="set-row"><div><strong>Let AI write optional essays</strong>
+          <p>Off: an optional essay box you have no saved answer for is left blank. On: AI writes it, counted in your
+            daily budget, and it's still left blank when there's no AI left or the answer isn't sure enough to send.
+            Never holds an application either way.</p></div>
+          <Switch on={!!s.ai_optional_essays} label="Let AI write optional essays" onChange={v => save({ ai_optional_essays: v })} /></div>
       </section>
 
       <SavedAnswers />
