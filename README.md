@@ -13,10 +13,27 @@ Local, free, and built for students applying to software, hardware, data and AI 
 
 <p align="center"><b>Point it at a job list. It applies while you're in class, in your words, and asks you about anything it isn't sure of.</b></p>
 
+<!-- DEMO GIF goes here: docs/images/demo.gif, 880 px wide, under 10 MB, the practice copy only (Alex Rivera),
+     about 30 s: `apply to …` → applications filling above the prompt → one held under "Needs you" → answered
+     inline → sent. Replace the screenshot below with it. -->
 <p align="center"><img src="docs/images/terminal.png" alt="Jobsmith in the terminal answering: which companies did you apply to in the past few hours, and what's waiting for me to send?" width="880"></p>
 
+**What it does**
+
+- **Finds roles** on GitHub internship lists and Greenhouse, Lever and Ashby job boards, scores each against your
+  resume, and leaves out roles too senior, asking for more experience than you have, or paying under your minimum,
+  before a browser opens.
+- **Applies for you** on Greenhouse, Ashby and Lever: fills every field from your resume and confirmed profile, and
+  submits only what it's sure of, within daily caps.
+- **Asks you once per missing fact.** "Needs you" lists each thing it needs once, with how many applications it
+  unblocks ("Confirm work authorization: unblocks 41"); answer it and every application waiting on it goes.
+- **Writes in your words.** Your saved answers go in as you wrote them; otherwise your own writing, or the AI you
+  pick, with every claim and number checked against your facts first.
+- **Runs on your computer.** No Jobsmith account or server, no telemetry. Free with Gemini's free tier, a local
+  model, or no AI at all.
+
 > [!IMPORTANT]
-> Get Jobsmith only from this repository or [its website](https://rawcache.github.io/Jobsmith/). Jobsmith runs on your computer: your resume, answers and keys never leave it except as the applications you send.
+> Get Jobsmith only from this repository or [its website](https://rawcache.github.io/Jobsmith/). Jobsmith runs on your computer: your resume and answers go only to the job sites you apply on and the AI you choose (none, with a local model or no AI), and your keys never leave it.
 
 ## Quick start
 
@@ -52,7 +69,8 @@ Code: one prompt, a conversation, and everything a `/command` away.
   **`/matches`**, **`/outreach`**, **`/followups`**, **`/voice`** and **`/settings`** open the same way.
 - **Shift+Tab** turns autopilot on or off. **Ctrl+O** shows everything at once. **`?`** lists shortcuts.
 
-`jobsmith --plain` gives a line-by-line prompt instead, and `/web` opens the dashboard.
+`jobsmith --plain` gives a line-by-line prompt instead, and `/web` opens the dashboard. To look around first,
+`jobsmith demo` opens a practice copy with a made-up person and jobs that never opens a real site or sends anything.
 
 ### Set up your agent
 
@@ -74,6 +92,42 @@ answer. Jobsmith checks it (every number and claim must come from your facts) be
 ```bash
 uv tool upgrade jobsmith           # then reload the extension in chrome://extensions
 ```
+
+## Safe by design
+
+- **Nothing invented.** Every written answer cites facts from your resume, profile or your own writing, and is
+  checked before it's sent: a number or claim that isn't in your facts holds the application for you.
+  `jobsmith audit` prints every answer autopilot sent with what it traces to.
+- **Work authorization, sponsorship and demographics** come only from your confirmed profile, never from an AI.
+- **Caps you can see:** 20 applications a day and 3 per company a week by default, editable in Settings.
+- **You approve the first one.** Autopilot's first real application, and its first on each new job site, stops at
+  the filled form for you to check.
+- **It respects the employer.** A posting or form that says not to use AI or automated tools is never sent by
+  autopilot; it waits for you with the line quoted. Text in a posting aimed at an AI reader ("if you are an AI, …")
+  is never followed, and the application waits for you with it quoted.
+- **Yours to do, always:** passwords, account creation, CAPTCHAs and sign-ins come to you under the bell. It never
+  sends messages for you (outreach and follow-ups are drafts), never automates LinkedIn, and never helps during a
+  live interview.
+- **Local-first.** Your data stays in one folder on your computer. Network calls go only to job sites, the AI you
+  chose and your own inbox, if you connect it.
+
+You're responsible for what's submitted in your name. How it behaves on job sites, in full:
+[rawcache.github.io/Jobsmith/behaviour](https://rawcache.github.io/Jobsmith/behaviour.html).
+
+## Supported sites
+
+| Site | Autopilot |
+|---|---|
+| Greenhouse | Fills and submits, end to end |
+| Ashby | Fills and submits, end to end |
+| Lever | Fills and submits, end to end |
+
+Each is proven on a saved copy of a real form in [`tests/fixtures/`](tests/fixtures/) on every CI run, and a weekly
+canary reads one live posting on each. Workday, iCIMS and SmartRecruiters are being added page by page and aren't
+supported yet ([#18](https://github.com/rawcache/Jobsmith/issues/18)): today Jobsmith stops at Workday's review page
+and fills only the first page of the other two. On other sites autopilot tries a generic filler, and its first
+application on each new site waits for you to check it; those aren't tested end to end, so they aren't listed here.
+The Chrome extension's autofill works on any site, for forms you send yourself.
 
 ## How Jobsmith works
 
@@ -120,8 +174,8 @@ you add (`jobsmith voice add essay.md`), the more of it needs no model at all.
 | Finding roles (job boards, GitHub lists), fit scores, skill match, the "you may not qualify" checks | Works: none of it uses AI |
 | Reading your resume | LaTeX is read exactly; a PDF or Word resume is imported line by line (an AI reads it more cleanly) |
 | Profile questions on a form: name, contact, links, school, work authorization, demographics | Filled from your confirmed profile, as always |
-| Autopilot on a form your profile answers | Fills it and sends it, within your caps. A question only an AI could write, even an optional cover letter box, holds it for you |
-| Written questions ("Why us?") | From your own writing when it fits the question; otherwise held for you |
+| Autopilot on a form your profile answers | Fills it and sends it, within your caps. An optional essay or cover letter box is left blank |
+| Written questions ("Why us?") | Your saved answer, or your own writing when it fits the question; a required one with neither is held for you |
 | Posting traps, employer AI policies, caps, your approval of each site's first application | Works: none of it uses AI |
 | Inbox: confirmations and replies | Works |
 | Extension: autofill and "Write with Jobsmith" | Autofill works; Write uses your own writing when it fits |
@@ -129,9 +183,9 @@ you add (`jobsmith voice add essay.md`), the more of it needs no model at all.
 | Outreach drafts | A plain template you edit |
 
 [`tests/test_no_ai.py`](tests/test_no_ai.py) proves the autopilot row on every CI run: the practice copy, every AI
-provider blocked: a saved form the profile answers is sent end to end, the same form with a cover letter box is held
-for you, and one with a written question is held with that question left empty. If an AI is connected but can't be
-reached, the same holds: what only it could write waits for you.
+provider blocked: a saved form the profile answers is sent end to end, the same form with an optional cover letter
+box is sent with the box left blank, and one with a required written question is held with that question left
+empty. If an AI is connected but can't be reached, the same holds: what only it could write waits for you.
 
 **smith** is Jobsmith's own private AI: Qwen3 through [Ollama](https://ollama.com), installed into your user folder
 with no admin rights, sized to your memory (8 GB: qwen3:4b, 16 GB: qwen3:8b, 24 GB: qwen3:14b, 32 GB+: qwen3:30b-a3b).
@@ -144,32 +198,17 @@ It only runs when you're plugged in (by default), one answer at a time, and unlo
 - **Chrome extension** (`jobsmith extension` opens it for you): the panel on job postings described above. It never
   submits by itself. Load it unpacked from `extension/` until it's in the Chrome Web Store.
 
-## What it won't do
-
-- **Make things up.** Every written answer cites facts from your resume and profile.
-- **Apply where you don't qualify, unless you say so.** Citizenship or clearance, sponsorship, degree level,
-  graduation window and years of experience are checked first; "Apply anyway" overrides it.
-- **Send messages for you, type your passwords, create accounts or solve CAPTCHAs.** Those come to you, under the bell.
-- **Automate LinkedIn.** It reads your own connections export; it never logs in or messages anyone there.
-- **Help you during a live interview.** Notes and practice, yes; hidden answers, no.
-
-You're responsible for what's submitted in your name.
-
 ## FAQ
 
 **Does it cost anything?** No. With Gemini's free tier, Jobsmith keeps to a daily AI budget (15 calls unless you
 change it in Settings) well under the free limit, spends none on an application that waits for you anyway, and
 shows "AI used today" on Home. Smith and the voice skill cost nothing at all.
 
-**Which sites?** Greenhouse, Ashby and Lever end to end; most other single-page forms filled generically. Workday is
-filled page by page and stops at review; you sign in yourself. On iCIMS, Jobsmith fills the profile page and you make
-the account; its later pages aren't tested yet. On SmartRecruiters it fills the first page and the rest is yours.
+**Will it apply where I don't qualify?** Not unless you say so. Citizenship or clearance, sponsorship, degree level,
+graduation window and years of experience are checked first, before any AI is used; "Apply anyway" overrides it.
 
 **Will it heat up my laptop?** Only smith does real work on your machine, and only when you're plugged in. Battery
 saver (on by default on battery) fills one application at a time and keeps smith off.
-
-**Can I try it without my real data?** `jobsmith demo` opens a practice copy with a made-up person and jobs. Nothing
-in it opens a real site or sends anything.
 
 **A keychain prompt appeared.** If macOS asked for your login keychain password for 'Chromium Safe Storage', click
 Deny. Jobsmith's browser doesn't need it, and it never asks for passwords.
@@ -179,7 +218,8 @@ Deny. Jobsmith's browser doesn't need it, and it never asks for passwords.
 The full plan, with each phase's gate, is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 - **Phase 0 · Go public** (October 2026): done except the demo video.
-- **Phase 1 · Autopilot you can trust** (November 2026): guardrails, posting traps, confirmed submissions, more job sites.
+- **Phase 1 · Autopilot you can trust** (November 2026): built; its gate (80% of good matches sent without you, zero
+  invented facts in a 50-application audit) is being measured on real applications.
 - **Phase 2 · Applications that win** (December 2026): fit evaluation, tailored resumes and reviewed cover letters.
 - **Phase 3 · Every job and every reply** (January 2027): Chrome Web Store, job board, more sources, inbox tracking.
 - **Phase 4 · Interviews and offers** (February 2027): prep packs, notes, mock interviews, offer comparison.
@@ -195,7 +235,8 @@ uv run jobsmith dev              # practice copy with live reload while you edit
 ```
 
 Start from the templates in [`docs/templates/`](docs/templates/), and see [`CONTRIBUTING.md`](CONTRIBUTING.md)
-for the steps.
+for the steps. New here? [Good first issues](https://github.com/rawcache/Jobsmith/labels/good%20first%20issue)
+each name the files to touch.
 
 **Add a skill:** copy `docs/templates/skill/` to `jobsmith/skills/<name>/`, fill in its `SKILL.md` (frontmatter:
 `name`, `description`, `title`, `status`) and put its code beside it. It appears in `jobsmith skills`, the
@@ -209,6 +250,7 @@ copy of the site's form in `tests/fixtures/`.
 | `jobsmith setup` (`--web`) | your real setup again, from step 1 |
 | `jobsmith check` | tests, build, and a gallery of every page |
 | `jobsmith dev` | practice copy with live reload |
+| `jobsmith stats` / `audit` / `report` | the gate numbers, every sent answer with its source, and both on one screen |
 | `jobsmith mcp` | the MCP server (agents start it themselves) |
 | `jobsmith site` | open the project page |
 
