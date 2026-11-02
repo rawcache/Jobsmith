@@ -1774,21 +1774,25 @@ async def test_autofill_answers_each_copy_of_a_component_on_its_own(page):
 
 
 @browser
-@pytest.mark.parametrize("inside", ["<slot></slot>", '<span aria-hidden="true">✓</span> <slot></slot>',
-                                    '<span class="material-icons">send</span><slot></slot>'],
-                         ids=["words only", "beside an icon", "beside an icon font's word"])
-async def test_the_submit_watcher_sees_a_submit_whose_words_are_slotted_in(page, inside):
-    """A component's own <button> around words the page slots in (<x-button><span>Submit</span></x-button>),
-    alone or beside an icon of the button's own: clicking the words is pressing that button, so it's noticed."""
+@pytest.mark.parametrize("inside, slotted, sends", [
+    ("<slot></slot>", "<span>Submit</span>", True),
+    ('<span aria-hidden="true">✓</span> <slot></slot>', "<span>Submit</span>", True),
+    ('<span class="material-icons">send</span><slot></slot>', "<span>Submit</span>", True),   # an icon font's word
+    ('<slot name="icon"></slot>Submit', '<span slot="icon">check</span>', True),            # a slotted icon
+    ('<slot name="icon"></slot>Next', '<span slot="icon">check</span>', False),
+], ids=["slotted words", "beside an icon", "beside an icon font's word", "own words, slotted icon", "next"])
+async def test_the_submit_watcher_sees_a_submit_whose_words_are_slotted_in(page, inside, slotted, sends):
+    """A component's own <button> with the page's words slotted into it, or its own words beside a slotted icon:
+    whichever of the words it shows says Submit, pressing it is noticed; a Next beside an icon isn't."""
     await _on_smartrecruiters(page)
-    await page.evaluate("""inside => {
+    await page.evaluate("""([inside, slotted]) => {
       const host = document.createElement('x-button'); host.id = 'slotted-submit';
       host.attachShadow({ mode: 'open' }).innerHTML = `<button type="button">${inside}</button>`;
-      host.innerHTML = '<span>Submit</span>';
-      document.body.appendChild(host); }""", inside)
-    await page.click("#slotted-submit span")
+      host.innerHTML = slotted;
+      document.body.appendChild(host); }""", [inside, slotted])
+    await page.click("#slotted-submit")
     noted = json.loads(await page.evaluate("sessionStorage.getItem('jobsmith-submit')") or "null")
-    assert noted and noted["url"] == SR_URL
+    assert (noted and noted["url"] == SR_URL) if sends else noted is None
 
 
 @browser
