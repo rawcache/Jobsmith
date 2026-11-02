@@ -1019,7 +1019,25 @@ def test_out_of_gemini_quota_routes_to_smith(monkeypatch):
     b = llm.make_backend("gemini_api", {"gemini_api_key": "k"})
     assert isinstance(b, llm.OllamaLocal)
     r = llm.gemini_reset()
-    assert 0 < r - time.time() <= 86400
+    assert 0 < r - time.time() <= 25 * 3600          # the day clocks fall back lasts 25 hours (#30)
+
+
+@pytest.mark.parametrize("now, day_hours", [
+    ("2026-11-01T00:30:00-07:00", 25),        # clocks fall back at 2:00: the Pacific day lasts 25 hours
+    ("2026-03-08T00:30:00-08:00", 23),        # clocks spring forward: 23 hours
+    ("2026-06-15T12:00:00-07:00", 24),
+])
+def test_gemini_day_runs_from_pacific_midnight_to_midnight_whatever_the_clocks_do(now, day_hours):
+    """Gemini's free day starts and ends at midnight Pacific, so on the days the clocks change it isn't 24 hours
+    long, and the calls counted toward it are the calendar day's (#30)."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from jobsmith import llm
+    t = datetime.fromisoformat(now).timestamp()
+    start, reset = llm._gemini_day(t)
+    assert reset - start == day_hours * 3600
+    assert start <= t < reset and llm.gemini_reset(t) == reset
+    assert datetime.fromtimestamp(start, ZoneInfo("America/Los_Angeles")).strftime("%H:%M") == "00:00"
 
 
 def test_linkedin_archive_fills_the_profile():
