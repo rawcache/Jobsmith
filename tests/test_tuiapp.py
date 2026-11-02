@@ -353,7 +353,9 @@ def test_losing_the_engine_shows_on_one_status_line_and_logs_only_a_long_outage(
     from jobsmith import tuiapp
     from jobsmith.tuiapp import Jobsmith
     db.conn()
-    monkeypatch.setattr(tuiapp, "DOWN_LOG_AFTER", 2.5)
+    # Each step waits until it shows (#33: a fixed 1.7 s missed a slow poll on Windows). A blip lasts as long as
+    # seeing it takes, a poll or two (1.5 s each); logging waits for 6 s, so a slow runner can't log a blip.
+    monkeypatch.setattr(tuiapp, "DOWN_LOG_AFTER", 6.0)
     def refuse(request):
         raise httpx.ConnectError("refused", request=request)
     # The engine gone, refused at once: a real closed port takes Windows about 2 s to refuse (it retries the
@@ -368,19 +370,18 @@ def test_losing_the_engine_shows_on_one_status_line_and_logs_only_a_long_outage(
             status = lambda: str(app.query_one("#status", Static).render())
             for _ in range(3):                                   # three short blips: the log stays quiet
                 app.http = nowhere
-                await pilot.pause(1.7)
-                assert "reconnecting to the engine…" in status()
+                assert await _until(pilot, lambda: "reconnecting to the engine…" in status())
                 app.http = real
-                await pilot.pause(1.7)
-                assert "reconnecting" not in status()
+                assert await _until(pilot, lambda: "reconnecting" not in status())
             assert "engine" not in _texts(app)
             app.http = nowhere                                   # a long one: said once, then once more when back
-            await pilot.pause(5)
+            assert await _until(pilot, lambda: "Can't reach Jobsmith's engine" in _texts(app), timeout=30)
+            await pilot.pause(2)                                 # still away: not said again
             assert _texts(app).count("Can't reach Jobsmith's engine") == 1
             app.http = real
-            await pilot.pause(2)
+            assert await _until(pilot, lambda: "Back in touch with the engine" in _texts(app))
+            assert await _until(pilot, lambda: "reconnecting" not in status())
             assert _texts(app).count("Back in touch with the engine") == 1
-            assert "reconnecting" not in status()
     asyncio.run(go())
 
 
