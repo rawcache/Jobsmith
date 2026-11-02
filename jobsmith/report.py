@@ -4,42 +4,80 @@ What it shows: the gate numbers (`jobsmith stats`), the audit of every submitted
 with no answer text, only whether each one traces), the five fixes waiting on you (Needs you), today's AI use
 against your budget, and the job sites where applications stopped with an error.
 
-Read-only: nothing is changed, sent or called. It prints counts, company names, question labels, error messages
-and why applications are held (which can quote a few words of a draft), never a whole answer. Look it over before
-you paste it anywhere."""
+Read-only: nothing is changed or sent, and no AI or other address is asked anything. It prints counts, company
+names, question labels, error messages and why applications are held, with anything quoted and any of your
+profile's answers taken out ("…"). Look it over before you paste it anywhere."""
 from __future__ import annotations
 
+import re
 import time
 from collections import Counter
 
-from . import audit, db, fixes, llm, stats
+from . import audit, db, fixes, llm, profile, stats
 
 TOP_FIXES = 5
 
 
-def _short(s: str, n: int = 90) -> str:
-    s = " ".join((s or "").split())
+_QUOTED = re.compile(r"(['\"\u2018\u201c])[^'\"\u2019\u201d]{1,300}(['\"\u2019\u201d])")
+_BACKENDS = {"gemini_api": "Gemini (API)", "anthropic_api": "Claude (API)", "openai_api": "ChatGPT (API)",
+             "ollama": "smith on this computer", "claude_cli": "Claude (subscription)",
+             "auto": "auto (the first one that answers)"}
+
+
+def _private() -> list[str]:
+    """Your profile's answers, longest first: taken out of anything the report quotes."""
+    vals = {(r.get("value") or "").strip() for r in profile.answers().values()}
+    return sorted((v for v in vals if len(v) >= 3 and v.lower() not in ("yes", "no")), key=len, reverse=True)
+
+
+def _clean(s: str, private: list[str], n: int = 90) -> str:
+    """A reason or label safe to paste: anything in quotes (a draft's words, an answer) and any of your profile's
+    answers become "…", then it's cut to one line."""
+    s = _QUOTED.sub(lambda m: f"{m.group(1)}…{m.group(2)}", " ".join((s or "").split()))
+    for v in private:
+        s = re.sub(rf"(?<!\w){re.escape(v)}(?!\w)", "…", s, flags=re.I)
     return s if len(s) <= n else s[:n - 3] + "..."
 
 
-def _site_errors(since: float) -> list[dict]:
+def _midnight(now: float) -> float:
+    lt = time.localtime(now)
+    return time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1))
+
+
+def _site_errors(since: float, private: list[str]) -> list[dict]:
     """Applications that stopped with an error since `since`, by job site, with the most common reason."""
     rows = db.q("""SELECT ats, COALESCE(NULLIF(error, ''), hold_reason, '') why FROM jobs
                    WHERE status='error' AND updated_at>=?""", (since,))
     by_site: dict[str, Counter] = {}
     for r in rows:
-        by_site.setdefault(r["ats"] or "unknown", Counter())[stats._first_sentence(r["why"]) or "no message"] += 1
+        why = _clean(stats._first_sentence(r["why"]), private) or "no message"
+        by_site.setdefault(r["ats"] or "unknown", Counter())[why] += 1
     out = [{"site": site, "count": sum(c.values()), "reasons": c.most_common(2)} for site, c in by_site.items()]
     return sorted(out, key=lambda s: (-s["count"], s["site"]))
 
 
-def _audit() -> dict:
-    """Every submitted application, checked: how many answers, and which don't trace to anything you gave."""
+def _audit(private: list[str]) -> dict:
+    """Every submitted application, checked: how many answers, which don't trace to anything you gave, and how
+    sure the check is (none recorded proves nothing; drafts may differ from what the form got)."""
     audit._ensure()
     total = db.q1("SELECT COUNT(*) n FROM audit_submissions")["n"]
     subs = audit.sample(total) if total else []
-    bad = [{"company": s["company"], "label": f["label"]} for s in subs for f in s["fields"] if not f["traces"]]
-    return {"submissions": total, "answers": sum(len(s["fields"]) for s in subs), "untraced": bad}
+    bad = [{"company": s["company"], "label": _clean(f["label"], private)}
+           for s in subs for f in s["fields"] if not f["traces"]]
+    return {"submissions": total, "answers": sum(len(s["fields"]) for s in subs), "untraced": bad,
+            "no_answers": sum(1 for s in subs if not s["fields"]),
+            "from_drafts": sum(1 for s in subs if s["fields"] and s.get("basis") == "drafted")}
+
+
+def _ai_today(now: float) -> dict:
+    """llm.ai_today() without asking which AI is live (with "auto" that can call smith on this computer): today's
+    calls against your budget, and the calls a free limit refused, from the usage log alone."""
+    start = _midnight(now)
+    budget, used = llm.ai_budget(), llm.ai_used_today()
+    n = lambda where: db.q1(f"SELECT COUNT(*) n FROM usage WHERE at>=? AND {where}", (start,))["n"]
+    out = f"Today's AI budget is used ({budget} calls)." if budget is not None and used >= budget else None
+    return {"calls": used, "budget": budget, "smith_calls": n("backend='ollama' AND ok=1"),
+            "refused": n("ok=0 AND COALESCE(error, '') LIKE 'quota:%'"), "out": out}
 
 
 def compute(days: int = 30, now: float | None = None) -> dict:
@@ -47,24 +85,23 @@ def compute(days: int = 30, now: float | None = None) -> dict:
     from . import __version__
     s = db.get_settings()
     fx = fixes.compute()
-    try:
-        backend = llm.label(llm.backend())
-    except Exception as e:                                # no AI set up is something to report, not a crash
-        backend = f"not set up ({e.__class__.__name__})"
+    private = _private()
+    kind = s.get("llm_backend") or ""
+    backend = _BACKENDS.get(kind, kind or "not set")     # from Settings: naming it never asks the AI anything
     return {
         "version": __version__, "at": now, "autonomy": s.get("autonomy"), "ai_backend": backend,
         "stats": stats.compute(days=days, now=now),
-        "today": stats.compute(days=1, now=now),
-        "audit": _audit(),
+        "today": stats.compute(days=(now - _midnight(now)) / stats.DAY, now=now),
+        "audit": _audit(private),
         "held": fx["held"],
-        "fixes": [{"title": f["title"], "unblocks": f["unblocks"], "ready_after": f["ready_after"]}
+        "fixes": [{"title": _clean(f["title"], private), "unblocks": f["unblocks"], "ready_after": f["ready_after"]}
                   for f in fx["fixes"][:TOP_FIXES]],
         "more_fixes": max(0, len(fx["fixes"]) - TOP_FIXES),
         "own_problems": len(fx["applications"]),
-        "own_reasons": Counter(_short(a["own"][0]) for a in fx["applications"] if a["own"])
+        "own_reasons": Counter(_clean(a["own"][0], private) for a in fx["applications"] if a["own"])
                        .most_common(3),
-        "ai_today": llm.ai_today(),
-        "site_errors": _site_errors(now - days * stats.DAY),
+        "ai_today": _ai_today(now),
+        "site_errors": _site_errors(now - days * stats.DAY, private),
     }
 
 
@@ -80,15 +117,20 @@ def render(d: dict) -> str:
                  f"{pct(st['good_without_you_pct'])} (goal 80%)")
     lines.append(f"  submitted {st['submitted']} (autopilot {st['by_autopilot']}, you {st['by_you']}), "
                  f"confirmed {st['confirmed']} ({pct(st['confirmed_pct'])})")
-    lines.append(f"  today: submitted {today['submitted']}, confirmed {today['confirmed']}")
+    lines.append(f"  today since midnight: submitted {today['submitted']}, confirmed {today['confirmed']}")
 
     lines += ["", f"Audit, every submitted application"]
     if not a["submissions"]:
         lines.append("  nothing submitted yet")
     else:
-        ok = "all trace to what you gave Jobsmith" if not a["untraced"] else \
-            f"{len(a['untraced'])} DON'T TRACE to anything you gave Jobsmith"
+        ok = f"{len(a['untraced'])} DON'T TRACE to anything you gave Jobsmith" if a["untraced"] else \
+            "none recorded, so nothing is proven" if not a["answers"] else "all trace to what you gave Jobsmith"
         lines.append(f"  {a['submissions']} applications, {a['answers']} answers: {ok}")
+        if a["answers"] and a["no_answers"]:
+            lines.append(f"    {a['no_answers']} with no answers recorded: not checked")
+        if a["from_drafts"]:
+            lines.append(f"    {a['from_drafts']} checked from drafts: Jobsmith didn't fill those forms, so what "
+                         "was sent may differ")
         lines += [f"    ✗ {b['company']}: {b['label']}" for b in a["untraced"][:3]]
         if len(a["untraced"]) > 3:
             lines.append(f"    and {len(a['untraced']) - 3} more (jobsmith audit)")
@@ -112,6 +154,8 @@ def render(d: dict) -> str:
               + (f", {st['ai']['failed']} failed" if st["ai"]["failed"] else "")]
     if ai["out"]:
         lines.append(f"  {ai['out']}")
+    if ai["refused"]:
+        lines.append(f"  {ai['refused']} refused today by a free limit")
 
     lines += ["", f"Site errors, last {st['days']} days"]
     if not d["site_errors"]:
