@@ -33,7 +33,7 @@ Local, free, and built for students applying to software, hardware, data and AI 
   model, or no AI at all.
 
 > [!IMPORTANT]
-> Get Jobsmith only from this repository or [its website](https://rawcache.github.io/Jobsmith/). Jobsmith runs on your computer: your resume and answers go only to the job sites you apply on and the AI you choose (none, with a local model or no AI), and your keys never leave it.
+> Get Jobsmith only from this repository or [its website](https://rawcache.github.io/Jobsmith/). Jobsmith runs on your computer: your resume and answers go only to the job sites you apply on and the AI you choose (none, with a local model or no AI), and your keys are kept on your computer and sent only to the AI each one is for.
 
 ## Quick start
 
@@ -97,7 +97,8 @@ uv tool upgrade jobsmith           # then reload the extension in chrome://exten
 
 - **Nothing invented.** Every written answer cites facts from your resume, profile or your own writing, and is
   checked before it's sent: a number or claim that isn't in your facts holds the application for you.
-  `jobsmith audit` prints every answer autopilot sent with what it traces to.
+  `jobsmith audit` checks up to 50 sent applications at random (`-n` for more), printing each answer with what it
+  traces to.
 - **Work authorization, sponsorship and demographics** come only from your confirmed profile, never from an AI.
 - **Caps you can see:** 20 applications a day and 3 per company a week by default, editable in Settings.
 - **You approve the first one.** Autopilot's first real application, and its first on each new job site, stops at
