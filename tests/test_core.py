@@ -1040,6 +1040,21 @@ def test_gemini_day_runs_from_pacific_midnight_to_midnight_whatever_the_clocks_d
     assert datetime.fromtimestamp(start, ZoneInfo("America/Los_Angeles")).strftime("%H:%M") == "00:00"
 
 
+@pytest.mark.parametrize("day, midnight", [("2026-11-01", "2026-11-01T00:00:00-07:00"),   # a 25-hour day
+                                           ("2026-03-08", "2026-03-08T00:00:00-08:00")])  # a 23-hour day
+def test_gemini_calls_count_from_pacific_midnight_on_the_days_clocks_change(monkeypatch, day, midnight):
+    """A call a second before midnight Pacific is yesterday's; one at midnight and after is today's, and another AI's
+    calls never count. On the days the clocks change, "24 hours before the next reset" is an hour off (#30)."""
+    from datetime import datetime
+    from jobsmith import llm
+    m = datetime.fromisoformat(midnight).timestamp()
+    for at, backend in ((m - 1, "gemini_api"), (m, "gemini_api"), (m + 60, "gemini_api"), (m + 120, "ollama"),
+                        (m + 22 * 3600, "gemini_api")):
+        db.x("INSERT INTO usage(purpose, backend, at) VALUES('answers', ?, ?)", (backend, at))
+    monkeypatch.setattr(llm.time, "time", lambda: m + 22.5 * 3600)          # late that day, Pacific
+    assert llm.gemini_used_today() == 3, day
+
+
 def test_linkedin_archive_fills_the_profile():
     import io
     import zipfile
