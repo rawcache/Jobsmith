@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { Icon, poll } from "../ui";
 
@@ -15,36 +15,45 @@ type Answered = FixesData & { freed: string[]; started: string[]; note: string }
 export default function Fixes({ onChange, onCount, limit = 6 }: { onChange?: () => void; onCount?: (n: number) => void; limit?: number }) {
   const [d, setD] = useState<FixesData | null>(null);
   const [said, setSaid] = useState("");
+  // what you've typed, by fix: kept here, so a refresh that moves or hides a row never loses it
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const seq = useRef(0);       // only the newest answer is shown: a refresh sent before your answer landed is dropped
   const show = (r: FixesData) => { setD(r); onCount?.(r.fixes.length); };
   // kept fresh while you look: autopilot holds new applications as it works
   useEffect(() => {
-    const get = () => { api.get<FixesData>("/api/fixes").then(show).catch(() => {}); };
+    const get = () => {
+      const mine = ++seq.current;
+      api.get<FixesData>("/api/fixes").then(r => { if (mine === seq.current) show(r); }).catch(() => {});
+    };
     get(); const t = poll(get, 15000); return () => t.stop();
   }, []);
   if (!d || d.fixes.length === 0) return null;
   const done = (r: Answered) => {
+    seq.current++;
     show(r);
     const n = r.freed.length, s = r.started.length;
     setSaid(r.note || (n === 0 ? "Saved. Nothing else was waiting on just that." :
       `Saved. ${n} application${n === 1 ? " has" : "s have"} nothing left${s ? `: ${s} going out now` : ""}.`));
     onChange?.();
   };
+  // the first few, and any you've started typing in wherever a refresh put it
+  const shown = d.fixes.filter((f, i) => i < limit || (drafts[f.id] ?? "") !== "");
   return (
     <div className="fixes">
       {said && <p className="small ok-text fix-said" role="status">{said}</p>}
-      <ul className="fix-rows">{d.fixes.slice(0, limit).map(f => <FixRow key={f.id} f={f} onDone={done} />)}</ul>
-      {d.fixes.length > limit && <p className="small muted">{d.fixes.length - limit} more in <a href="#/tracker">Applications</a>.</p>}
+      <ul className="fix-rows">{shown.map(f => <FixRow key={f.id} f={f} onDone={done} v={drafts[f.id] ?? f.value ?? ""}
+        setV={t => setDrafts(x => ({ ...x, [f.id]: t }))} />)}</ul>
+      {d.fixes.length > shown.length && <p className="small muted">{d.fixes.length - shown.length} more in <a href="#/tracker">Applications</a>.</p>}
     </div>
   );
 }
 
-function FixRow({ f, onDone }: { f: Fix; onDone: (r: Answered) => void }) {
-  const [v, setV] = useState(f.value || "");
+function FixRow({ f, onDone, v, setV }: { f: Fix; onDone: (r: Answered) => void; v: string; setV: (t: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const send = async (value: string) => {
     setBusy(true); setErr("");
-    try { onDone(await api.post<Answered>("/api/fixes/answer", { id: f.id, value })); }
+    try { onDone(await api.post<Answered>("/api/fixes/answer", { id: f.id, value })); setV(""); }
     catch (e) { setErr((e as Error).message); }
     setBusy(false);
   };
