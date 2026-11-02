@@ -314,6 +314,36 @@ async def test_with_the_switch_on_a_reused_answer_copilot_wouldnt_send_is_left_b
     assert extra["kind"] == "left_blank" and draft.readiness(jid)["ready"], extra
 
 
+async def test_with_the_switch_on_a_reused_answer_too_long_for_this_box_is_left_blank(fake_llm, monkeypatch):
+    """An answer you approved on another form, reused here, is checked against this box's own limit."""
+    from jobsmith import learn
+    _alex()
+    db.set_settings({"ai_optional_essays": True, "research_enabled": False})
+    monkeypatch.setattr(learn, "reusable_answer", lambda *a: {"answer": "I like small teams. " * 20, "support": 5,
+                                                              "from": "Globex: Additional information"})
+    jid = _job("Acme", FIRST, WORK_AUTH, dict(EXTRA, label="Additional information (20 words max)"))
+    fake_llm(lambda s, p: {"answers": []})
+    await draft.draft_job(jid, hold_first=True)
+    extra = next(d for d in draft.drafts_for(jid) if d["field"] == "q_extra")
+    assert extra["kind"] == "left_blank" and draft.readiness(jid)["ready"], extra
+
+
+async def test_with_the_switch_on_a_kept_answer_that_doesnt_fit_its_question_is_left_blank(fake_llm):
+    """Your writing, kept from an earlier pass, is still checked against its question: a "why us" that never names
+    this company leaves the optional box blank."""
+    _alex()
+    db.set_settings({"ai_optional_essays": True, "research_enabled": False})
+    why = dict(WHY_US, required=False)
+    jid = _job("Acme", FIRST, WORK_AUTH, why)
+    fact = profile.add_fact("experience", "Built tools for small teams", subject="Northwind")
+    draft.save_results(jid, [why], {"q_why": {"kind": "voice", "answer": "I love building tools for small teams.",
+                                              "confidence": 0.85, "issues": [], "fact_ids": [fact]}})
+    ai = fake_llm(lambda s, p: {"answers": []})
+    await draft.draft_job(jid, hold_first=True)
+    d = next(d for d in draft.drafts_for(jid) if d["field"] == "q_why")
+    assert d["kind"] == "left_blank" and ai.prompts == [] and draft.readiness(jid)["ready"], d
+
+
 async def test_with_the_switch_on_a_required_essay_and_a_failed_saved_answer_still_hold(fake_llm):
     """Only optional boxes are left blank. A required essay AI couldn't write well, and your saved answer that
     fails a check, still hold the application for you."""

@@ -958,11 +958,8 @@ async def answer_fields(job: dict, fields: list[dict], skip_locked: bool = True,
             results[f["field"]] = mine
             continue
         if keep_written and prev and prev["kind"] in AI_MADE and (prev["answer"] or "").strip():
-            if f["field"] in optional:
-                if prev["kind"] == "voice":          # your writing, kept from before it was checked like your own
-                    prev = dict(prev, issues=list(prev.get("issues") or []) + essays.checks(f, prev["answer"], job))
-                if why := _unsure(prev, f, job, ans):
-                    results[f["field"]] = _optional_blank(f, why)
+            if f["field"] in optional and (why := _unsure(prev, f, job, ans)):
+                results[f["field"]] = _optional_blank(f, why)
             continue  # written already: kept, not paid for again
         if f["qtype"] == "file":  # cover letter upload -> generate text, attached as a file when filling
             if "cover" in (f["label"] + f["field"]).lower():
@@ -995,8 +992,6 @@ async def answer_fields(job: dict, fields: list[dict], skip_locked: bool = True,
         if f["qtype"] in ("textarea", "text") and not f["options"] and not (r.get("answer") or "").strip() and \
                 (use_ai or r.get("kind") != "pending"):
             mine = voice.compose(job, f)
-            if mine and f["field"] in optional:      # your writing, checked like your saved answers before it goes
-                mine = dict(mine, issues=list(mine.get("issues") or []) + essays.checks(f, mine["answer"], job))
             if mine:
                 results[f["field"]] = mine
     by_field = {f["field"]: f for f in fields}
@@ -1010,12 +1005,17 @@ async def answer_fields(job: dict, fields: list[dict], skip_locked: bool = True,
 
 
 def _unsure(r: dict, field: dict, job: dict, ans: dict) -> str | None:
-    """Why an answer to an optional essay can't be sent as it is, or None: it's left blank rather than held. Asks
-    the same question readiness does (`_blocker`), so whatever would hold the application blanks the box instead."""
+    """Why an answer to an optional essay can't be sent as it is, or None: it's left blank rather than held. Every
+    answer gets this box's checks, whenever it was written: your writing or an answer you approved elsewhere is
+    checked like your saved answers (numbers, this box's limit), and each fits the question (`_checked`). Then the
+    same question readiness asks (`_blocker`), so whatever would hold the application blanks the box instead."""
     if r.get("kind") == "left_blank":
         return None
     if not (r.get("answer") or "").strip():
         return "AI couldn't write it"
+    if r.get("kind") in ("voice", "learned"):
+        r = dict(r, issues=list(r.get("issues") or []) + essays.checks(field, r["answer"], job))
+    r = _checked(field, r, job)
     if r.get("issues") or r.get("held"):
         return "the answer didn't pass the checks"
     d = dict(r, field=field["field"], label=field.get("label", ""), qtype=field.get("qtype", "textarea"),
