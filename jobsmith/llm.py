@@ -400,18 +400,25 @@ async def ollama_models(timeout: float = 2.0) -> list[str]:
 _quota_hit: dict[str, float] = {}      # backend -> time until which it's out of quota
 
 
-def gemini_reset(now: float | None = None) -> float:
-    from datetime import datetime, timedelta
+def _gemini_day(now: float | None = None) -> tuple[float, float]:
+    """When Gemini's free day (Pacific time) began and when it resets. Taken from the calendar, not by adding 24
+    hours: the days the clocks change last 23 or 25 hours (#30)."""
+    from datetime import datetime
     from zoneinfo import ZoneInfo
     pt = ZoneInfo("America/Los_Angeles")
-    d = datetime.fromtimestamp(now or time.time(), pt)
-    nxt = (d + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    return nxt.timestamp()
+    d = datetime.fromtimestamp(now or time.time(), pt).date()
+    start = datetime(d.year, d.month, d.day, tzinfo=pt)
+    nxt = datetime.fromordinal(d.toordinal() + 1).replace(tzinfo=pt)
+    return start.timestamp(), nxt.timestamp()
+
+
+def gemini_reset(now: float | None = None) -> float:
+    return _gemini_day(now)[1]
 
 
 def gemini_used_today() -> int:
     from . import db
-    start = gemini_reset() - 86400
+    start = _gemini_day()[0]
     return (db.q1("SELECT COUNT(*) n FROM usage WHERE backend='gemini_api' AND at>=?", (start,)) or {"n": 0})["n"]
 
 
