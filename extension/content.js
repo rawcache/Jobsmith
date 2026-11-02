@@ -710,11 +710,11 @@
     if (!b) return;
     // a shadow root's <button> doesn't count the words slotted into it as its own text: those too
     const slotted = [...b.querySelectorAll("slot")].flatMap(s => s.assignedNodes({ flatten: true })).map(n => n.textContent).join(" ");
-    // what it says: the words the page slotted into it (a component's label; its own text is then an icon, even an
-    // icon font's "send"), else its own words, else its value (<input type=submit>). Never its value over the
-    // words shown ("Next" with value=submit)
-    const t = [slotted, b.innerText, b.value].find(x => /\p{L}/u.test(x || "")) || "";
-    if (/^(submit|submit application|apply|send application|finish)/i.test(t.trim()))
+    // what it shows: the words slotted into it and its own words, either of which can be an icon (even an icon
+    // font's "send" or "check") beside the label, so either may say Submit. Its value counts only when it shows no
+    // words (<input type=submit>), never over the words shown ("Next" with value=submit)
+    const shown = [slotted, b.innerText].filter(x => /\p{L}/u.test(x || ""));
+    if ((shown.length ? shown : [b.value || ""]).some(t => /^(submit|submit application|apply|send application|finish)/i.test(t.trim())))
       sessionStorage.setItem("jobsmith-submit", JSON.stringify({ url: location.href, title: pageTitle(), at: Date.now() }));
   }, true);
   async function checkThanks() {
