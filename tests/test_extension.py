@@ -1774,8 +1774,9 @@ async def test_autofill_answers_each_copy_of_a_component_on_its_own(page):
 
 
 @browser
-@pytest.mark.parametrize("inside", ["<slot></slot>", '<span aria-hidden="true">✓</span> <slot></slot>'],
-                         ids=["words only", "beside an icon"])
+@pytest.mark.parametrize("inside", ["<slot></slot>", '<span aria-hidden="true">✓</span> <slot></slot>',
+                                    '<span class="material-icons">send</span><slot></slot>'],
+                         ids=["words only", "beside an icon", "beside an icon font's word"])
 async def test_the_submit_watcher_sees_a_submit_whose_words_are_slotted_in(page, inside):
     """A component's own <button> around words the page slots in (<x-button><span>Submit</span></x-button>),
     alone or beside an icon of the button's own: clicking the words is pressing that button, so it's noticed."""
@@ -1798,3 +1799,7 @@ async def test_the_submit_watcher_goes_by_the_words_shown_not_a_buttons_value(pa
       b.value = 'submit'; b.textContent = 'Next'; document.body.appendChild(b); }""")
     await page.click("#next-btn")
     assert await page.evaluate("sessionStorage.getItem('jobsmith-submit')") is None
+    await page.evaluate("""() => { const i = document.createElement('input'); i.type = 'submit'; i.id = 'send-it';
+      i.value = 'Submit'; i.addEventListener('click', e => e.preventDefault()); document.body.appendChild(i); }""")
+    await page.click("#send-it")                                       # a Submit whose words are its value
+    assert json.loads(await page.evaluate("sessionStorage.getItem('jobsmith-submit')"))["url"] == SR_URL
