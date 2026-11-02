@@ -18,7 +18,7 @@ from . import audit, db, fixes, llm, profile, stats
 TOP_FIXES = 5
 
 
-_QUOTED = re.compile(r"(['\"\u2018\u201c])[^'\"\u2019\u201d]{1,300}(['\"\u2019\u201d])")
+_QUOTES = "'\"\u2018\u2019\u201c\u201d`"
 _BACKENDS = {"gemini_api": "Gemini (API)", "anthropic_api": "Claude (API)", "openai_api": "ChatGPT (API)",
              "ollama": "smith on this computer", "claude_cli": "Claude (subscription)",
              "auto": "auto (the first one that answers)"}
@@ -30,10 +30,17 @@ def _private() -> list[str]:
     return sorted((v for v in vals if len(v) >= 3 and v.lower() not in ("yes", "no")), key=len, reverse=True)
 
 
-def _clean(s: str, private: list[str], n: int = 90) -> str:
-    """A reason or label safe to paste: anything in quotes (a draft's words, an answer) and any of your profile's
-    answers become "…", then it's cut to one line."""
-    s = _QUOTED.sub(lambda m: f"{m.group(1)}…{m.group(2)}", " ".join((s or "").split()))
+def _clean(s: str, private: list[str], n: int = 90, quotes: bool = True) -> str:
+    """A reason or label safe to paste: everything from the first quote mark to the last (a draft's words or an
+    answer, whatever is inside) and any of your profile's answers become "…", and only then is it cut to one
+    line, so a cut never leaves half a quote or half an answer behind. quotes=False for a form's own words (a
+    question's label, "What's your…"), where only your answers are taken out."""
+    s = " ".join((s or "").split())
+    # an apostrophe between two letters (can't, Alex's) is a word's, not a quote's
+    word = lambda i: s[i] in "'\u2019" and 0 < i < len(s) - 1 and s[i - 1].isalpha() and s[i + 1].isalpha()
+    marks = [i for i, c in enumerate(s) if c in _QUOTES and not word(i)] if quotes else []
+    if marks:
+        s = s[:marks[0]] + "…" + (s[marks[-1] + 1:] if len(marks) > 1 else "")
     for v in private:
         s = re.sub(rf"(?<!\w){re.escape(v)}(?!\w)", "…", s, flags=re.I)
     return s if len(s) <= n else s[:n - 3] + "..."
@@ -50,7 +57,7 @@ def _site_errors(since: float, private: list[str]) -> list[dict]:
                    WHERE status='error' AND updated_at>=?""", (since,))
     by_site: dict[str, Counter] = {}
     for r in rows:
-        why = _clean(stats._first_sentence(r["why"]), private) or "no message"
+        why = stats._first_sentence(_clean(r["why"], private, 10**6)) or "no message"
         by_site.setdefault(r["ats"] or "unknown", Counter())[why] += 1
     out = [{"site": site, "count": sum(c.values()), "reasons": c.most_common(2)} for site, c in by_site.items()]
     return sorted(out, key=lambda s: (-s["count"], s["site"]))
@@ -62,7 +69,7 @@ def _audit(private: list[str]) -> dict:
     audit._ensure()
     total = db.q1("SELECT COUNT(*) n FROM audit_submissions")["n"]
     subs = audit.sample(total) if total else []
-    bad = [{"company": s["company"], "label": _clean(f["label"], private)}
+    bad = [{"company": s["company"], "label": _clean(f["label"], private, quotes=False)}
            for s in subs for f in s["fields"] if not f["traces"]]
     return {"submissions": total, "answers": sum(len(s["fields"]) for s in subs), "untraced": bad,
             "no_answers": sum(1 for s in subs if not s["fields"]),
@@ -73,11 +80,19 @@ def _ai_today(now: float) -> dict:
     """llm.ai_today() without asking which AI is live (with "auto" that can call smith on this computer): today's
     calls against your budget, and the calls a free limit refused, from the usage log alone."""
     start = _midnight(now)
-    budget, used = llm.ai_budget(), llm.ai_used_today()
-    n = lambda where: db.q1(f"SELECT COUNT(*) n FROM usage WHERE at>=? AND {where}", (start,))["n"]
+    n = lambda where: db.q1(f"SELECT COUNT(*) n FROM usage WHERE at BETWEEN ? AND ? AND {where}", (start, now))["n"]
+    budget = llm.ai_budget()
+    used = n("backend NOT IN ('ollama') AND (ok=1 OR COALESCE(error, '') NOT LIKE 'quota:%')")   # as ai_used_today
     out = f"Today's AI budget is used ({budget} calls)." if budget is not None and used >= budget else None
     return {"calls": used, "budget": budget, "smith_calls": n("backend='ollama' AND ok=1"),
             "refused": n("ok=0 AND COALESCE(error, '') LIKE 'quota:%'"), "out": out}
+
+
+def _stats(days: float, now: float, private: list[str]) -> dict:
+    """`jobsmith stats`, with its held reasons cleaned like every other reason here."""
+    d = stats.compute(days=days, now=now)
+    d["held_reasons"] = [(_clean(why, private), n) for why, n in d["held_reasons"]]
+    return d
 
 
 def compute(days: int = 30, now: float | None = None) -> dict:
@@ -90,11 +105,11 @@ def compute(days: int = 30, now: float | None = None) -> dict:
     backend = _BACKENDS.get(kind, kind or "not set")     # from Settings: naming it never asks the AI anything
     return {
         "version": __version__, "at": now, "autonomy": s.get("autonomy"), "ai_backend": backend,
-        "stats": stats.compute(days=days, now=now),
-        "today": stats.compute(days=(now - _midnight(now)) / stats.DAY, now=now),
+        "stats": _stats(days, now, private),
+        "today": _stats((now - _midnight(now)) / stats.DAY, now, private),
         "audit": _audit(private),
         "held": fx["held"],
-        "fixes": [{"title": _clean(f["title"], private), "unblocks": f["unblocks"], "ready_after": f["ready_after"]}
+        "fixes": [{"title": _clean(f["title"], private, quotes=False), "unblocks": f["unblocks"], "ready_after": f["ready_after"]}
                   for f in fx["fixes"][:TOP_FIXES]],
         "more_fixes": max(0, len(fx["fixes"]) - TOP_FIXES),
         "own_problems": len(fx["applications"]),
