@@ -15,5 +15,17 @@ button:disabled { opacity: .6; cursor: default; }
 .result { margin: 10px 0 0; font-size: 13px; }
 .result.warn { color: var(--warn); }
 pre { background: rgba(127,127,127,.12); padding: 6px 10px; border-radius: 6px; }
+h2 { font-size: 13px; margin: 16px 0 0; padding-top: 12px; border-top: 1px solid var(--line); }
+#fixes { list-style: none; margin: 6px 0 0; padding: 0; }
+.fix { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.fix:last-child { border-bottom: 0; }
+.fix-h { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; font-size: 13px; }
+.count { flex: none; color: var(--accent); font-size: 12px; font-variant-numeric: tabular-nums; }
+.fix input, .fix textarea { width: 100%; font: inherit; font-size: 13px; margin-top: 6px; padding: 6px 8px; border-radius: 6px;
+  border: 1px solid var(--line); background: transparent; color: var(--fg); }
+.fix button { margin-top: 6px; padding: 5px 10px; font-size: 13px; }
+.choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.choices button { width: auto; }
+.result.bad { color: var(--warn); }
 footer { padding: 10px 14px; border-top: 1px solid var(--line); font-size: 13px; }
 a { color: var(--fg); text-decoration: underline; text-underline-offset: 2px; }

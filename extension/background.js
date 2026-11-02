@@ -52,6 +52,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     if (msg.type === "context") return reply(await call("/api/ext/context", { method: "POST", body: JSON.stringify(msg.body) }));
     if (msg.type === "generate") return reply(await call("/api/ext/generate", { method: "POST", body: JSON.stringify(msg.body) }));
     if (msg.type === "submitted") return reply(await call("/api/ext/submitted", { method: "POST", body: JSON.stringify(msg.body) }));
+    if (msg.type === "fixes") return reply(await call("/api/fixes"));
+    if (msg.type === "fix") return reply(await call("/api/fixes/answer", { method: "POST", body: JSON.stringify(msg.body) }));
     if (msg.type === "cover") return reply(await call(`/api/jobs/${encodeURIComponent(msg.job_id)}/cover-letter`, { method: "POST" }));
     if (msg.type === "form-report") {      // a pre-filled issue the user reads and posts; nothing is sent from here
       const r = await call("/api/ext/form-report", { method: "POST", body: JSON.stringify(msg.body) });

@@ -60,6 +60,8 @@ const reply = msg => {
                                                                        ((__opts.byNth || {})[f.label] || [])[
                                                                          all.slice(0, i).filter(x => x.label === f.label).length] || {})) } };
   if (msg.type === "generate") return { ok: true, data: Object.assign({ text: "", based_on: [], error: null }, __opts.generate || {}) };
+  if (msg.type === "fixes") return __opts.fixes ? { ok: true, data: __opts.fixes } : { ok: false, error: "not in this test" };
+  if (msg.type === "fix") return __opts.fixAnswer ? { ok: true, data: __opts.fixAnswer } : { ok: false, error: "Type an answer first." };
   if (msg.type === "form-report") return { ok: true, data: { url: "https://github.com/rawcache/Jobsmith/issues/new?title=x" } };
   if (msg.type === "file") return __opts.resume ? { ok: true, name: __opts.resume, type: "application/pdf", b64: btoa("%PDF-1.4") }
                                                  : { ok: false, error: "No file for that yet." };
@@ -879,6 +881,79 @@ async def test_popup_marks_itself_ready_only_once_it_has_checked_the_page(page):
     await page.evaluate("__letTabAnswer()")
     await page.wait_for_selector("body[data-ready]", timeout=10000)
     assert await page.evaluate("__calls.filter(c => c.tab).map(c => c.tab.type)") == ["info", "open"]
+
+
+def _fix(id, kind, title, unblocks, **kw):
+    return {"id": id, "kind": kind, "title": title, "detail": "", "value": "", "unblocks": unblocks, "ready_after": 0,
+            "jobs": [f"j{i}" for i in range(unblocks)], **kw}
+
+
+FIXES = {"held": 56, "applications": [], "fixes": [
+    _fix("resume_pdf", "resume_pdf", "Add your resume as a PDF", 56),
+    _fix("profile:work_auth", "profile", "Confirm work authorization", 41, choices=["Yes", "No"]),
+    _fix("essay:why_company", "essay", "Why do you want to join <img src=x onerror=window.__xss=1>?", 12),
+    _fix("question:abc", "question", "Years with Kubernetes", 3)]}
+
+
+async def _popup_fixes(page, **opts):
+    await page.add_init_script(_stub({}, fixes=FIXES, **opts))
+    await page.goto((EXT / "popup.html").resolve().as_uri())
+    await page.wait_for_selector("#needs:not([hidden])")
+
+
+@browser
+async def test_popup_lists_what_held_applications_need_once_each(page):
+    """The popup's Needs you: each fix once, with how many applications it unblocks, the resume PDF first; three at
+    most, the rest counted. Titles from job sites are shown as text, never run as markup."""
+    await _popup_fixes(page)
+    rows = page.locator("#fixes .fix")
+    assert await rows.count() == 3
+    heads = [await rows.nth(i).locator(".fix-h").inner_text() for i in range(3)]
+    assert heads[0].split("\n") == ["Add your resume as a PDF", "blocks every application"]
+    assert heads[1].split("\n") == ["Confirm work authorization", "unblocks 41"]
+    assert "<img src=x" in heads[2] and await page.evaluate("window.__xss") is None
+    assert await page.inner_text("#needs-more") == "1 more in the dashboard."
+    await rows.nth(0).locator("button").click()
+    assert await page.evaluate("__calls.find(c => c.type === 'open')") == {"type": "open", "path": "/#/"}
+
+
+@browser
+async def test_popup_answer_goes_to_every_application_waiting_on_it(page):
+    """Answering a fix in the popup sends just that answer (the engine re-checks every held application and starts
+    the complete ones within your limits), says what happened, and shows what's left."""
+    left = {**FIXES, "fixes": [FIXES["fixes"][0], FIXES["fixes"][3]]}
+    await _popup_fixes(page, fixAnswer={**left, "freed": ["j1", "j2"], "started": ["j1"], "note": ""})
+    await page.locator("#fixes .fix").nth(1).get_by_role("button", name="Yes").click()
+    await page.wait_for_selector("#needs-said:not([hidden])")
+    assert await page.evaluate("__calls.find(c => c.type === 'fix')") == {
+        "type": "fix", "body": {"id": "profile:work_auth", "value": "Yes"}}
+    assert await page.inner_text("#needs-said") == "Saved. 2 applications have nothing left: 1 going out now."
+    assert await page.locator("#fixes .fix").count() == 2 and await page.is_hidden("#needs-more")
+
+
+@browser
+async def test_popup_saves_your_own_words_and_says_when_it_cant(page):
+    """An essay is typed in your words and sent as typed; Save waits for an answer; an engine refusal is shown."""
+    await _popup_fixes(page)
+    essay = page.locator("#fixes .fix").nth(2)
+    save = essay.get_by_role("button", name="Save your answer")
+    assert await save.is_disabled()
+    words = "I've used {company}'s tools for years.\n  Still do."
+    await essay.locator("textarea").fill(words)
+    await save.click()
+    await page.wait_for_selector("#needs-said:not([hidden])")
+    assert await page.evaluate("__calls.find(c => c.type === 'fix').body") == {"id": "essay:why_company", "value": words}
+    assert await page.inner_text("#needs-said") == "Type an answer first."
+    assert await page.locator("#fixes .fix").count() == 3          # nothing changed
+
+
+@browser
+async def test_popup_shows_no_needs_you_when_nothing_waits(page):
+    await page.add_init_script(_stub({}, fixes={"held": 0, "fixes": [], "applications": []}))
+    await page.goto((EXT / "popup.html").resolve().as_uri())
+    await page.wait_for_selector("body[data-ready]")
+    await page.wait_for_function("__calls.some(c => c.type === 'fixes')")
+    assert await page.is_hidden("#needs")
 
 
 @browser
