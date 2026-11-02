@@ -28,6 +28,7 @@ export default function Home() {
   const [d, setD] = useState<HomeData | null>(null);
   const [busy, setBusy] = useState("");
   const [note, setNote] = useState("");
+  const [fixes, setFixes] = useState(0);
   const load = () => api.get<HomeData>("/api/home").then(setD).catch(() => {});
   useEffect(() => { load(); const t = poll(load, 5000); return () => t.stop(); }, []);
   const on = autopilotOn(status);
@@ -120,8 +121,8 @@ export default function Home() {
         <section className="card flush">
           <div className="card-h"><h2>Needs you</h2>{d.review.length > 0 && <span className="badge warn">{d.review.length}</span>}
             {d.review.length > 0 && <a href="#/tracker">View all</a>}</div>
-          {d.review.length > 0 && <Fixes onChange={() => { load(); refresh(); }} />}
-          {d.review.length === 0 ? <p className="empty">Nothing is waiting on you.</p> : (
+          <Fixes onChange={() => { load(); refresh(); }} onCount={setFixes} />
+          {d.review.length === 0 ? (fixes === 0 && <p className="empty">Nothing is waiting on you.</p>) : (
             <ul className="lrows">{d.review.slice(0, 6).map(j => (
               <li key={j.id}><a href={`#/matches/${j.id}`}>
                 <Logo name={j.company} size={28} />

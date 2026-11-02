@@ -114,7 +114,10 @@ export default function Settings({ focus }: { focus?: string }) {
             {status?.ai_today && <> Today: {status.ai_today.calls} call{status.ai_today.calls === 1 ? "" : "s"}.</>}{" "}
             <a href="#/stats">Every call</a></p></div>
           <label className="field tight">Calls a day<input type="number" min={0} placeholder={s.llm_backend === "gemini_api" ? "15" : "No limit"}
-            value={s.ai_daily_budget ?? ""} onChange={e => save({ ai_daily_budget: e.target.value === "" ? null : Number(e.target.value) })} /></label></div>
+            defaultValue={s.ai_daily_budget ?? ""} onBlur={e => {
+              const v = e.target.value === "" ? null : Number(e.target.value);
+              if (v !== (s.ai_daily_budget ?? null)) save({ ai_daily_budget: v });
+            }} /></label></div>
       </section>
 
       <SavedAnswers />
@@ -203,13 +206,19 @@ function ExtensionCard() {
 function SavedAnswers() {
   const [d, setD] = useState<{ kinds: Record<string, string>; saved: Record<string, string> } | null>(null);
   const [said, setSaid] = useState("");
+  const [err, setErr] = useState("");
   useEffect(() => { api.get<typeof d>("/api/essays").then(setD).catch(() => {}); }, []);
   if (!d) return null;
   const put = async (kind: string, text: string) => {
-    const r = await api.put<{ saved: Record<string, string>; recheck: { freed: string[] } }>(`/api/essays/${kind}`, { text });
-    setD({ ...d, saved: r.saved });
-    const n = r.recheck.freed.length;
-    setSaid(n ? `Saved. ${n} held application${n === 1 ? "" : "s"} can go now.` : "Saved.");
+    setSaid(""); setErr("");
+    try {
+      const r = await api.put<{ saved: Record<string, string>; recheck: { freed: string[] } }>(`/api/essays/${kind}`, { text });
+      setD({ ...d, saved: r.saved });
+      const n = r.recheck.freed.length;
+      setSaid(n ? `Saved. ${n} held application${n === 1 ? "" : "s"} can go now.` : "Saved.");
+    } catch (e) {
+      setErr(`Not saved: ${(e as Error).message}. Your text is still here; click outside the box to try again.`);
+    }
   };
   return (
     <section className="card" id="saved-answers">
@@ -217,6 +226,7 @@ function SavedAnswers() {
       <p className="small muted">Written once, used on every form that asks, exactly as you wrote them and marked as
         yours. <code>{"{company}"}</code> and <code>{"{role}"}</code> are filled in for each application. An optional
         essay box you have no answer for is left blank, and never holds an application. {said && <span className="ok-text">{said}</span>}</p>
+      {err && <p className="small bad-text" role="alert">{err}</p>}
       {Object.entries(d.kinds).map(([kind, q]) => (
         <label key={kind} className="field">{q.replace("{company}", "<company>")}
           <textarea rows={kind === "cover_letter" ? 6 : 3} defaultValue={d.saved[kind] ?? ""}
