@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Added
+- `jobsmith report`: one screen to send the maintainer each day while the Phase 1 gate is measured: the gate
+  numbers, the audit of every submitted application (whether each answer traces, never the answer), the five
+  fixes waiting on you, AI used today and the job sites where applications stopped with an error. Read-only;
+  `--json` and `--practice` work as for `stats` and `audit`.
 - "How Jobsmith behaves on job sites", a page on the website: its limits, the answers it will and won't send, what
   it hands to you, how it's tested on live sites, and what leaves your computer.
 - README: what works without AI, proven on every CI run by `tests/test_no_ai.py` (the practice copy's autopilot with

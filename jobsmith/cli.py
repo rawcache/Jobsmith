@@ -22,7 +22,7 @@ def main() -> None:
         from . import __version__
         print(f"jobsmith {__version__}")
         return
-    if argv and argv[0] in ("mcp", "skills", "voice", "site", "stats", "audit"):
+    if argv and argv[0] in ("mcp", "skills", "voice", "site", "stats", "audit", "report"):
         from . import clicmds
         clicmds.main(argv)
         return
