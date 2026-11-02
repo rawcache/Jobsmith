@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import time
 from collections import Counter
+from collections.abc import Callable
 
 from . import audit, db, outcomes
 
@@ -36,7 +37,7 @@ def _first_sentence(s: str) -> str:
     return s[:90]
 
 
-def compute(days: float = 30, now: float | None = None, clean=None) -> dict:
+def compute(days: float = 30, now: float | None = None, clean: Callable[[str], str] | None = None) -> dict:
     """clean: applied to each hold reason before it's shortened (`jobsmith report` takes your answers out)."""
     audit._ensure()
     outcomes._ensure()
