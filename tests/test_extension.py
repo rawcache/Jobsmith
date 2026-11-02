@@ -1861,19 +1861,27 @@ document.getElementById("r").addEventListener("change", () => { window.__changes
   const busy = document.getElementById("busy"); busy.hidden = false;
   setTimeout(() => {          // the read draws the boxes again: new elements, the two Cities in the other order,
     const box = (n, l) => `<label>${l} <input name="${n}" id="${n}"></label>`;   // and Notes gone
-    document.getElementById("boxes").innerHTML = (window.__dropHome ? "" : box("work_city", "City") + box("home_city", "City"))
+    if (window.__redraw) window.__redraw();
+    else document.getElementById("boxes").innerHTML = (window.__dropHome ? "" : box("work_city", "City") + box("home_city", "City"))
       + (window.__dropHome ? box("work_city", "City") : "");
     busy.hidden = true; }, 400); }, 500); });
 </script>"""
 
 
-async def _redrawn(page, before: str = ""):
-    await page.route("https://**/*", lambda r: r.fulfill(status=200, content_type="text/html", body=REDRAWN)
+REDRAWN_BOXES = REDRAWN[REDRAWN.index('<div id="boxes">'):REDRAWN.index('</div></form>')]
+
+
+async def _redrawn(page, before: str = "", boxes: str = "", **opts):
+    """Load the form (its boxes swapped for `boxes` if given), press Fill, wait till it's done. Every test here also
+    checks the form was never sent."""
+    html = REDRAWN.replace(REDRAWN_BOXES, f'<div id="boxes">{boxes}') if boxes else REDRAWN
+    await page.route("https://**/*", lambda r: r.fulfill(status=200, content_type="text/html", body=html)
                      if r.request.url == REDRAWN_URL else r.abort())
-    await page.add_init_script(before + _stub({"panelOpen": True}, resume="resume.pdf", byName={
-        "home_city": {"value": "Boston"}, "work_city": {"value": "Denver"}, "notes": {"value": "Hi"},
-        "email": {"value": "alex.rivera@example.com"}}))
+    opts = opts or {"byName": {"home_city": {"value": "Boston"}, "work_city": {"value": "Denver"},
+                               "notes": {"value": "Hi"}, "email": {"value": "alex.rivera@example.com"}}}
+    await page.add_init_script(before + _stub({"panelOpen": True}, resume="resume.pdf", **opts))
     await page.goto(REDRAWN_URL)
+    await _watch_for_submits(page)
     await page.add_script_tag(path=str(EXT / "content.js"))
     await page.wait_for_function("document.querySelector('#jobsmith-panel')?.shadowRoot?.querySelector('.wrap')")
     await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
@@ -1889,6 +1897,7 @@ async def test_boxes_a_resume_read_draws_again_get_their_own_answers(page):
     await _redrawn(page)
     assert await page.input_value("#home_city") == "Boston" and await page.input_value("#work_city") == "Denver"
     assert await page.evaluate("window.__changes") == 1
+    await _never_submitted(page)
 
 
 @browser
@@ -1898,6 +1907,48 @@ async def test_an_answer_whose_box_a_resume_read_removed_goes_nowhere_else(page)
     await _redrawn(page, "window.__dropHome = true;")
     assert await page.input_value("#work_city") == "Denver"
     assert await page.locator("#home_city").count() == 0
+    await _never_submitted(page)
+
+
+@browser
+async def test_a_removed_box_never_passes_its_answer_to_a_box_still_there(page):
+    """City and Country share the name "value" (some forms name every box that), and the read takes City away
+    and leaves Country as it was. City's answer goes nowhere: Country is its own question."""
+    await _redrawn(page, "window.__redraw = () => document.getElementById('city').closest('label').remove();",
+                   boxes='<label>City <input name="value" id="city"></label>'
+                         '<label>Country <input name="value" id="country"></label>',
+                   answers={"City": {"value": "Boston"}})
+    assert await page.locator("#city").count() == 0
+    assert await page.input_value("#country") == ""
+    await _never_submitted(page)
+
+
+PHONE = '<label>Phone <input {}></label>'
+
+
+@browser
+@pytest.mark.parametrize("before, after, typed", [
+    # the same question drawn again as often as before: each answer goes back, in order
+    ([""] * 2, [""] * 2, ["617-555-0123"] * 2),
+    (['name="phone"'] * 2, ['name="phone"'] * 2, ["617-555-0123"] * 2),
+    # one of two replaced: the new box takes the place of the one that went
+    (["", 'id="kept"'], ["", ""], ["617-555-0123"] * 2),
+    # fewer or more boxes for a question than before: which is which can't be told, so none is typed in
+    ([""] * 2, [""], [""]),
+    (['name="phone"'] * 2, ['name="phone"'], [""]),
+    (['name="phone"'], ['name="phone"'] * 2, ["", ""]),
+], ids=["unnamed", "named", "one-replaced", "unnamed-fewer", "named-fewer", "named-more"])
+async def test_boxes_drawn_again_are_matched_only_when_sure(page, before, after, typed):
+    """The read draws a question's boxes again with no telling them apart but their order. Answers go back only
+    when there are as many as before; otherwise the boxes are left for you."""
+    new = "".join(PHONE.format(a + ' class="new"') for a in after)
+    redraw = f"""window.__redraw = () => {{ const kept = document.getElementById('kept');
+      document.getElementById('boxes').innerHTML = {json.dumps(new)};
+      if (kept) document.querySelector('#boxes .new').replaceWith(kept); }};"""
+    await _redrawn(page, redraw, boxes="".join(PHONE.format(b) for b in before), byName={})
+    boxes = page.locator("#boxes input")
+    assert [await boxes.nth(i).input_value() for i in range(await boxes.count())] == typed
+    await _never_submitted(page)
 
 
 @browser
