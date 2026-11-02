@@ -89,7 +89,19 @@ TWIN_COMPONENTS = """<form>
 <fieldset><legend>Over 18?</legend><label><input type="radio" name="yn" value="Y"> Yes</label>
 <label><input type="radio" name="yn" value="N"> No</label></fieldset></template></x-field>
 <x-field id="last"><template shadowrootmode="open"><label for="box">Last name</label><input id="box">
-<fieldset><legend>Willing to relocate?</legend><label><input type="radio" name="yn" value="Y"> Yes</label>
-<label><input type="radio" name="yn" value="N"> No</label></fieldset></template></x-field>
+<fieldset><legend>Willing to relocate?</legend><input type="radio" id="y" name="yn" value="Y"><label for="y">Yes</label>
+<input type="radio" id="n" name="yn" value="N"><label for="n">No</label></fieldset></template></x-field>
+<x-field id="third"><template shadowrootmode="open"><label for="box">Preferred name</label><input id="box">
+<fieldset><legend>Open to nights?</legend><input type="radio" id="y" name="yn" value="Y"><label for="y">Yes</label>
+<input type="radio" id="n" name="yn" value="N"><label for="n">No</label></fieldset></template></x-field>
 <x-field><template shadowrootmode="open"><label for="box">City</label><input id="box"></template></x-field>
+</form>"""
+
+# Unnamed components three deep: counting copies breadth first ("Alpha, Beta, Gamma") would name the wrong one
+NESTED_COMPONENTS = """<form>
+<x-wrap><template shadowrootmode="open"><x-field><template shadowrootmode="open"><label for="box">Alpha</label>
+<input id="box"><x-field><template shadowrootmode="open"><label for="box">Gamma</label><input id="box"></template>
+</x-field></template></x-field></template></x-wrap>
+<x-wrap><template shadowrootmode="open"><x-field><template shadowrootmode="open"><label for="box">Beta</label>
+<input id="box"></template></x-field></template></x-wrap>
 </form>"""
