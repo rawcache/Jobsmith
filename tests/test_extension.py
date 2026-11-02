@@ -1788,3 +1788,13 @@ async def test_the_submit_watcher_sees_a_submit_whose_words_are_slotted_in(page,
     await page.click("#slotted-submit span")
     noted = json.loads(await page.evaluate("sessionStorage.getItem('jobsmith-submit')") or "null")
     assert noted and noted["url"] == SR_URL
+
+
+@browser
+async def test_the_submit_watcher_goes_by_the_words_shown_not_a_buttons_value(page):
+    """<button value="submit">Next</button> says Next: pressing it isn't sending the application."""
+    await _on_smartrecruiters(page)
+    await page.evaluate("""() => { const b = document.createElement('button'); b.type = 'button'; b.id = 'next-btn';
+      b.value = 'submit'; b.textContent = 'Next'; document.body.appendChild(b); }""")
+    await page.click("#next-btn")
+    assert await page.evaluate("sessionStorage.getItem('jobsmith-submit')") is None
