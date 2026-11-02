@@ -236,14 +236,38 @@ then `ats.SUPPORTED` and the README.
       restricted") in place of the form, and getting past it is not ours to do, so the form is to be saved from the
       maintainer's own Chrome ([docs/guides/save-smartrecruiters-form.md](guides/save-smartrecruiters-form.md)).
       Meanwhile autopilot treats that page as a stop and hands it to the user (`tests/test_bot_walls.py`).
-- [ ] d. Workday: page by page, stopping at review; the sign-in and account step is handed to the user. Public
+- [x] d. Workday: page by page, stopping at review; the sign-in and account step is handed to the user. Public
       pages captured read-only; a short guide for the maintainer to save the signed-in steps, which are then
       sanitized.
-      Status (2026-10-31): public pages saved read-only from NVIDIA's internship posting up to sign-in
-      (`tests/fixtures/workday_nvidia_*.html`); Jobsmith now hands Workday's sign-in choice page to the user (it has no
-      password box), presses Apply Manually when there's no resume, never reads a password box and never fills
-      Workday's honeypot. Waiting on the signed-in pages
-      ([docs/guides/save-workday-pages.md](guides/save-workday-pages.md)).
+      Evidence: [50082e0](https://github.com/rawcache/Jobsmith/commit/50082e0),
+      [f124473](https://github.com/rawcache/Jobsmith/commit/f124473),
+      [b8ae7d1](https://github.com/rawcache/Jobsmith/commit/b8ae7d1),
+      [aba31b4](https://github.com/rawcache/Jobsmith/commit/aba31b4),
+      [f675d87](https://github.com/rawcache/Jobsmith/commit/f675d87),
+      [7783f4a](https://github.com/rawcache/Jobsmith/commit/7783f4a). Public pages saved read-only from NVIDIA's
+      internship posting up to sign-in; the sign-in choice page is handed to the user, Apply Manually is pressed when
+      there's no resume, no password box is read and Workday's honeypot is never filled. The five signed-in pages of
+      NVIDIA's posting (My Information, My Experience, Application Questions, Voluntary Disclosures, Review) were
+      saved by the maintainer ([docs/guides/save-workday-pages.md](guides/save-workday-pages.md)) and emptied by
+      `tests/fixtures/src/workday_fixture.py --signed-in`: every value replaced with Alex Rivera's or blanked, another
+      extension's markup gone, Workday's ids blanked (`tests/fixtures/workday_nvidia_{my_information,my_experience,
+      application_questions,voluntary_disclosures,review}.html`). Autopilot:
+      `test_workday_signed_in_page_by_page_to_review_and_never_submits` (each page filled, stops at Review, Submit
+      never pressed), `test_workdays_signed_in_pages_are_read_by_their_own_words`,
+      `test_workdays_phone_code_search_picks_only_your_numbers_code`,
+      `test_workdays_review_submit_is_never_pressed_as_next`. Extension, submit watcher on:
+      `test_autofill_fills_workdays_my_information_page_and_never_moves_on`,
+      `test_autofill_reads_workdays_application_questions_by_their_words`,
+      `test_autofill_answers_workdays_voluntary_questions_from_your_decline_and_never_a_wrong_code`,
+      `test_autofill_never_picks_a_phone_code_that_isnt_your_numbers`,
+      `test_the_submit_watcher_sees_your_submit_on_workdays_review_page`. Builders:
+      `test_a_signed_in_workday_page_is_emptied_and_another_tools_markup_goes`,
+      `test_a_review_answer_the_builder_doesnt_know_stops_it`.
+      [CI run](https://github.com/rawcache/Jobsmith/actions/runs/41280460214) (Linux, macOS, Windows). Known gaps:
+      Workday's lists were closed when saved, so the open lists are a stand-in
+      ([#29](https://github.com/rawcache/Jobsmith/issues/29)); a page showing errors after Next wasn't saved
+      ([#28](https://github.com/rawcache/Jobsmith/issues/28)). Workday stays out of `ats.SUPPORTED`: it stops at
+      Review.
 - [ ] e. iCIMS: page by page, including multi-step forms in frames.
       Status (2026-10-31): public pages saved read-only from IDEMIA's internship posting up to sign-in
       (`tests/fixtures/icims_idemia_*.html`). iCIMS draws the application in its page's `icims_content_iframe`
