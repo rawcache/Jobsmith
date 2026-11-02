@@ -5,6 +5,8 @@
                    later reply from the company
     Good matches   jobs autopilot picked for itself at or above your fit bar. The share it sent without you is the
                    Phase 1 gate (80%); every one it held, hit a limit on, failed or skipped counts against it.
+    AI calls       every call to an AI in the period, by why it was made, with the tokens it used and how many
+                   failed (a free limit, an outage); smith on this computer is counted apart.
 
 Everything is read from your own data folder. Nothing is sent anywhere."""
 from __future__ import annotations
@@ -76,6 +78,9 @@ def compute(days: int = 30, now: float | None = None) -> dict:
         else:
             buckets["not_yet"] += 1             # still drafting, or waiting for room under a limit
     pct = lambda a, b: round(100 * a / b) if b else None
+    ai = db.q("""SELECT purpose, COUNT(*) calls, SUM(ok=0) failed, SUM(input_tokens + output_tokens) tokens,
+                         SUM(backend='smith') smith
+                  FROM usage WHERE at BETWEEN ? AND ? GROUP BY purpose ORDER BY calls DESC, purpose""", (since, now))
     return {
         "days": days, "since": since, "until": now,
         "submitted": len(subs),
@@ -89,6 +94,8 @@ def compute(days: int = 30, now: float | None = None) -> dict:
         "good_outcomes": {k: buckets[k] for k in ("without_you", "unconfirmed", "you_sent", "held", "failed",
                                                    "skipped", "not_yet")},
         "held_reasons": held_why.most_common(5),
+        "ai": {"calls": sum(r["calls"] for r in ai), "failed": sum(r["failed"] for r in ai),
+               "smith": sum(r["smith"] for r in ai), "by_reason": ai},
     }
 
 
@@ -114,4 +121,9 @@ def render(d: dict) -> str:
     if d["held_reasons"]:
         lines += ["", "Why autopilot held them:"]
         lines += [f"  {n} × {why}" for why, n in d["held_reasons"]]
+    a = d["ai"]
+    extra = [f"{a['failed']} failed"] * bool(a["failed"]) + [f"{a['smith']} by smith on this computer"] * bool(a["smith"])
+    lines += ["", f"AI calls           {a['calls']:>4}   {', '.join(extra)}".rstrip()]
+    lines += [f"  {r['purpose']:<16} {r['calls']:>4}   {r['tokens'] or 0:,} tokens"
+              + (f", {r['failed']} failed" if r["failed"] else "") for r in a["by_reason"]]
     return "\n".join(lines)

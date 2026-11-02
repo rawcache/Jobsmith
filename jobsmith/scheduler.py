@@ -42,9 +42,12 @@ def notify(title: str, message: str) -> None:
 
 def pick_new_jobs(limit: int) -> list[str]:
     s = db.get_settings()
-    rows = db.q("""SELECT id, company, ats, fit_score FROM jobs WHERE active=1 AND status IN ('new','fetched','drafted')
+    from . import llm
+    # Out of AI for today: drafted ones still waiting for it would take every slot and get nowhere, so they wait
+    waiting_ai = "AND id NOT IN (SELECT job_id FROM drafts WHERE kind='pending')" if llm.out_of_ai() else ""
+    rows = db.q(f"""SELECT id, company, ats, fit_score FROM jobs WHERE active=1 AND status IN ('new','fetched','drafted')
                    AND verdict IS NULL AND COALESCE(fit_score,0) >= ? AND eligibility NOT LIKE '%"ok": false%'
-                   AND id NOT IN (SELECT job_id FROM runs WHERE kind='submit')
+                   AND id NOT IN (SELECT job_id FROM runs WHERE kind='submit') {waiting_ai}
                    ORDER BY status='drafted' DESC, fit_score DESC, date_posted DESC LIMIT 400""", (s.get("min_fit_score") or 40,))
     # Network hiccups ("too slow", "couldn't reach") get two more tries, an hour apart.
     rows += db.q("""SELECT j.id, j.company, j.ats, j.fit_score FROM jobs j WHERE j.active=1 AND j.status='error'
@@ -101,10 +104,13 @@ async def run_once(reason: str = "scheduled") -> dict:
     new = sum(r.get("added", 0) for r in results)
     room = min(int(s.get("auto_max_per_run") or 10), commands._remaining_today())
     picked = pick_new_jobs(room)
-    # Autopilot may have been switched off while the lists were syncing: then only look, don't start.
-    from . import llm
-    waiting_ai = llm.gemini_limited() and not llm._local_ok() and db.get_setting("llm_backend") in ("gemini_api", "auto")
-    go = (reason == "manual" or enabled(db.get_settings())) and not power.paused() and not waiting_ai
+    # Autopilot may have been switched off while the lists were syncing: then only look, don't start. Without a
+    # resume PDF nothing is started: every application attaches it. Out of AI (today's budget or a free limit), the
+    # ones that need none still go; the rest wait, and that's said once here, not once per application.
+    from . import llm, profile
+    no_pdf = runner.applies_on_own() and profile.attachment_file() is None
+    out = llm.out_of_ai()
+    go = (reason == "manual" or enabled(db.get_settings())) and not power.paused() and not no_pdf
     started = commands.queue(picked) if go else []
     from . import outcomes
     if outcomes.email_ready():
@@ -113,8 +119,10 @@ async def run_once(reason: str = "scheduled") -> dict:
             notify("Jobsmith: replies", f"{o['new_outcomes']} new replies from companies (see Jobs).")
     summary = (f"Synced {len(results)} list{'s' if len(results) != 1 else ''} ({new} new postings). "
                + (f"Started {len(started)} application{'s' if len(started) != 1 else ''}." if go else
-                  "Waiting for Gemini's free limit to reset before applying." if waiting_ai else
-                  "Paused: on battery." if power.paused() else "Autopilot is off, so nothing was started."))
+                  "Add your resume as a PDF (Profile): every application waits for it." if no_pdf and not power.paused()
+                  and (reason == "manual" or enabled(db.get_settings())) else
+                  "Paused: on battery." if power.paused() else "Autopilot is off, so nothing was started.")
+               + (f" {out} Applications that need AI wait for it." if go and out else ""))
     state.update(last_run=time.time(), last_summary=summary)
     commands._ensure_table()
     db.x("INSERT INTO commands(text, result, created_at) VALUES(?,?,?)",

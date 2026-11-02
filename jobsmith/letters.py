@@ -82,7 +82,7 @@ async def write_cover(job_id: str) -> str:
         return cover_text(job_id)
     f = {"field": "cover_letter", "label": "Cover letter", "qtype": "textarea", "required": False, "options": [],
          "description": "Cover letter, under 250 words.", "section": "main"}
-    results, err = await draft.answer_fields(job, [f], skip_locked=False)
+    results, err = await draft.answer_fields(job, [f], skip_locked=False, blank_optional=False)
     if err:
         raise RuntimeError(err)
     draft.save_results(job_id, [f], results)

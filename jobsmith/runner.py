@@ -659,8 +659,9 @@ async def do_scan(job: dict, run: Run) -> list[dict]:
         await page.close()
 
 
-async def prepare(job_id: str, research: bool | None = None) -> None:
-    """fetch -> (scan) -> research -> draft"""
+async def prepare(job_id: str, research: bool | None = None, hold_first: bool = False) -> None:
+    """fetch -> (scan) -> research -> draft. hold_first (autopilot): what needs no AI first, and no AI at all for an
+    application that waits for you anyway (draft.draft_job)."""
     from .fill.base import BotWall
     run = Run(job_id, "draft")
     try:
@@ -673,6 +674,13 @@ async def prepare(job_id: str, research: bool | None = None) -> None:
             except jobdetail.BoardNotFound as e:
                 run.log(f"{e}; reading the form in the browser instead")
                 scan_needed = True
+        if hold_first:           # a role you may not qualify for is skipped by autopilot: decided before any AI
+            from . import eligibility
+            el = eligibility.check(job)
+            if not el["ok"]:
+                run.log("You may not qualify (" + "; ".join(el["reasons"]) + "), so no AI was spent on it")
+                run.done()
+                return
         if scan_needed and not job["questions"] and not is_multistep(job["ats"]):
             run.log("Opening the application form to read its questions…")
             async with _sem():
@@ -685,8 +693,11 @@ async def prepare(job_id: str, research: bool | None = None) -> None:
                     run.log(f"Scan failed ({e}); drafting common questions instead")
         from . import llm
         run.log(f"Researching with {llm.label(llm.backend('research'))}; writing with {llm.label(llm.backend('write'))}…")
-        res = await draft.draft_job(job_id, research=research, log=run.log)
-        run.log(f"Drafted {res['drafted']} fields" + (f" (AI error: {res['error']})" if res["error"] else ""))
+        res = await draft.draft_job(job_id, research=research, log=run.log, hold_first=hold_first)
+        if res.get("held"):
+            run.done("waiting_user")
+            return
+        run.log(f"Drafted {res['drafted']} fields" + (f" (AI: {res['error']})" if res["error"] else ""))
         run.done()
     except Exception as e:
         run.log("ERROR " + "".join(traceback.format_exception_only(type(e), e)).strip())
@@ -1029,7 +1040,9 @@ async def autopilot(job_ids: list[str], force: bool = False, submit: bool | None
             capped = guardrails.cap_reason(db.q1("SELECT id, company, title FROM jobs WHERE id=?", (jid,)) or {"id": jid})
             if capped:          # left as it is: autopilot picks it up again once there's room
                 return
-        await prepare(jid)
+        if autonomous and not force and profile.attachment_file() is None:
+            return              # every application attaches it: autopilot starts (and pays for) none until it's there
+        await prepare(jid, hold_first=autonomous)
         full = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,)))
         el = eligibility.check(full)
         db.x("UPDATE jobs SET eligibility=? WHERE id=?", (db.enc(el), jid))
@@ -1039,6 +1052,8 @@ async def autopilot(job_ids: list[str], force: bool = False, submit: bool | None
             return
         job = db.q1("SELECT status, ats FROM jobs WHERE id=?", (jid,))
         if job["status"] == "drafted" and can_fill(job["ats"]):
+            if draft.readiness(jid)["only_ai"]:
+                return          # waiting for AI (today's budget or a free limit): drafted, picked up when there's room
             await fill(jid, submit=autonomous)
     await asyncio.gather(*(one(j) for j in job_ids))
 

@@ -50,6 +50,14 @@ def fresh_db(tmp_path):
     runner.LIVE.clear()
 
 
+def resume_pdf(folder) -> None:
+    """A resume PDF to attach (autopilot starts nothing without one)."""
+    pdf = Path(folder) / "resume.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    db.x("INSERT INTO documents(kind, filename, path, text, is_primary, created_at) VALUES('resume','resume.pdf',?,'',1,?)",
+         (str(pdf), db.now()))
+
+
 def trust(*sites: str) -> None:
     """Autopilot's first submission on these sites was approved earlier, so it sends on its own now."""
     for s in sites:

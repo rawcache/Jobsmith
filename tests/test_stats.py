@@ -173,11 +173,13 @@ async def test_the_confirmation_email_is_logged_when_the_inbox_is_connected(monk
     assert audit.for_job(old)[0]["confirmations"] == []
 
 
-async def test_autopilot_logs_every_job_it_considers_and_whether_it_cleared_the_bar(monkeypatch):
+async def test_autopilot_logs_every_job_it_considers_and_whether_it_cleared_the_bar(monkeypatch, tmp_path):
+    from conftest import resume_pdf
+    resume_pdf(tmp_path)
     db.set_settings({"min_fit_score": 50, "max_applications_per_day": 0})
     low, high = _job("Low", 1, fit=30), _job("High", 2, fit=70)
 
-    async def fake_prepare(j, research=None):
+    async def fake_prepare(j, research=None, **kw):
         pass
     monkeypatch.setattr(runner, "prepare", fake_prepare)
     await runner.autopilot([low, high])
@@ -267,3 +269,26 @@ def test_the_commands_print_plain_words_and_audit_fails_on_an_untraced_answer(ca
     else:
         raise AssertionError("audit should exit 1 when an answer doesn't trace")
     assert "1 that doesn't trace" in capsys.readouterr().out
+
+
+def test_stats_count_every_ai_call_by_why_it_was_made_failed_ones_too():
+    """A run that spends the free tier shows up: each call in the period by reason, its tokens, and how many failed.
+    Calls outside the period aren't counted."""
+    now = time.time()
+    jid = _job("Acme", 1)
+    rows = [(jid, "answers", "gemini_api", 900, 100, 1, None, now - 60),
+            (jid, "answers", "gemini_api", 0, 0, 0, "quota: Gemini's free limit for today is used", now - 30),
+            (jid, "research", "gemini_api", 1500, 300, 1, None, now - 90),
+            (None, "connection check", "smith", 10, 2, 1, None, now - 10),
+            (jid, "answers", "gemini_api", 500, 50, 1, None, now - 40 * DAY)]       # outside the period
+    for r in rows:
+        db.x("""INSERT INTO usage(job_id, purpose, backend, input_tokens, output_tokens, ok, error, at)
+                VALUES(?,?,?,?,?,?,?,?)""", r)
+    d = stats.compute(days=30, now=now)
+    assert d["ai"]["calls"] == 4 and d["ai"]["failed"] == 1 and d["ai"]["smith"] == 1
+    assert [(r["purpose"], r["calls"], r["tokens"], r["failed"]) for r in d["ai"]["by_reason"]] == [
+        ("answers", 2, 1000, 1), ("connection check", 1, 12, 0), ("research", 1, 1800, 0)]
+    text = stats.render(d)
+    assert "AI calls              4   1 failed, 1 by smith on this computer" in text
+    assert "  answers             2   1,000 tokens, 1 failed" in text
+    assert "AI calls              0" in stats.render(stats.compute(days=7, now=now - 20 * DAY))

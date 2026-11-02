@@ -147,10 +147,12 @@ async def test_the_practice_copys_autopilot_runs_end_to_end_with_every_ai_blocke
     assert sub["untraced"] == 0 and {f["source"] for f in sub["fields"] if f["answer"]} <= {"profile", "resume", "file"}, sub
     assert not [d for d in draft.drafts_for(plain) if d["kind"] in ("generated", "agent") and draft.final_value(d)]
 
-    # the same form with an optional cover letter box only an AI (or Alex) could write: held for Alex, never sent
-    # with the box quietly left empty
-    assert not audit.for_job(letter)
-    assert [b.split(":")[0] for b in draft.readiness(letter)["blockers"]] == ["Cover Letter"]
+    # the same form with an optional cover letter box, and no saved cover letter: the box is left blank (an optional
+    # essay never holds an application) and the rest goes, all from the profile
+    [sent_letter] = audit.for_job(letter)
+    assert sent_letter["sent_by"] == "autopilot" and sent_letter["untraced"] == 0
+    box = next(d for d in draft.drafts_for(letter) if "cover" in d["field"].lower())
+    assert box["kind"] == "left_blank" and not draft.final_value(box)
 
     # what it tried: with "auto" and nothing connected, only a look for a local smith (refused); otherwise the one
     # AI that's connected (refused)

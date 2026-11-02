@@ -94,14 +94,16 @@ def test_scheduler_skips_companies_at_their_weekly_cap():
     assert scheduler.pick_new_jobs(5) == [ids["Beta"]]
 
 
-async def test_autopilot_leaves_capped_jobs_for_later_but_your_pick_still_fills(monkeypatch):
+async def test_autopilot_leaves_capped_jobs_for_later_but_your_pick_still_fills(monkeypatch, tmp_path):
+    from conftest import resume_pdf
+    resume_pdf(tmp_path)
     db.set_settings({"max_applications_per_day": 1, "autonomy": "autopilot"})
     _sent("Acme", 1)
     jid = _job("Beta", 2)
     db.x("UPDATE jobs SET fit_score=90 WHERE id=?", (jid,))   # clears the fit gate: only the cap stops it
     prepared = []
 
-    async def fake_prepare(j, research=None):
+    async def fake_prepare(j, research=None, **kw):
         prepared.append(j)
     monkeypatch.setattr(runner, "prepare", fake_prepare)
     await runner.autopilot([jid])
@@ -306,14 +308,16 @@ def test_fit_gate_says_why_a_match_passes_or_not():
     assert not guardrails.fit_gate({"fit_score": None})["passed"]
 
 
-async def test_autopilot_only_applies_at_or_above_the_bar_unless_you_picked_it(monkeypatch):
+async def test_autopilot_only_applies_at_or_above_the_bar_unless_you_picked_it(monkeypatch, tmp_path):
+    from conftest import resume_pdf
+    resume_pdf(tmp_path)
     db.set_settings({"min_fit_score": 50, "max_applications_per_day": 0})
     low, high = _job("Low", 1), _job("High", 2)
     db.x("UPDATE jobs SET fit_score=30 WHERE id=?", (low,))
     db.x("UPDATE jobs SET fit_score=70 WHERE id=?", (high,))
     prepared = []
 
-    async def fake_prepare(j, research=None):
+    async def fake_prepare(j, research=None, **kw):
         prepared.append(j)
     monkeypatch.setattr(runner, "prepare", fake_prepare)
     await runner.autopilot([low, high])

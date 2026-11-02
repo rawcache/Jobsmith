@@ -28,6 +28,10 @@ class QuotaError(LLMError):
     """A free tier's limit ran out. Jobsmith falls back to smith when it's installed."""
 
 
+class BudgetError(QuotaError):
+    """Your daily AI budget (Settings) is used up. Like a free limit: smith may stand in, nothing else is called."""
+
+
 # Which application (and what for) the current AI call belongs to; set by callers with `usage_for`.
 _usage_ctx: contextvars.ContextVar[tuple[str | None, str]] = contextvars.ContextVar("usage_ctx", default=(None, "other"))
 
@@ -43,17 +47,21 @@ def usage_for(job_id: str | None, purpose: str):
     return _Ctx()
 
 
-def _record_usage(b: "Backend", seconds: float) -> None:
-    u = getattr(b, "last_usage", None)
-    if not u:
+def _record_usage(b: "Backend", seconds: float, error: BaseException | None = None) -> None:
+    """Every AI call, answered or not: what it was for (purpose), which application, and its tokens. A refused or
+    failed call is logged too (ok=0), so a run of them shows up in `jobsmith stats` instead of vanishing."""
+    u = getattr(b, "last_usage", None) or {}
+    if not u and error is None:
         return
     job_id, purpose = _usage_ctx.get()
+    why = None if error is None else ("quota: " if isinstance(error, QuotaError) else "") + str(error)[:300]
     try:
         from . import db
         db.x("""INSERT INTO usage(job_id, purpose, backend, model, input_tokens, output_tokens, cached_tokens,
-                web_searches, cost_usd, seconds, at) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                web_searches, cost_usd, seconds, at, ok, error) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
              (job_id, purpose, b.name, getattr(b, "model", ""), int(u.get("input", 0)), int(u.get("output", 0)),
-              int(u.get("cached", 0)), int(u.get("searches", 0)), u.get("cost"), round(seconds, 1), time.time()))
+              int(u.get("cached", 0)), int(u.get("searches", 0)), u.get("cost"), round(seconds, 1), time.time(),
+              int(error is None), why))
     except Exception:
         pass
 
@@ -97,6 +105,7 @@ def find_claude(path: str = "claude") -> str | None:
 
 class Backend:
     name = "base"
+    last_usage: dict | None = None       # tokens of the last call, set by each backend; logged by _record_usage
 
     async def complete_json(self, system: str, prompt: str, schema: dict | None = None,
                             web: bool = False, timeout: float = 240) -> dict | list:
@@ -315,16 +324,34 @@ class GeminiAPI(Backend):
         self.model = model or "gemini-flash-latest"
 
     async def available(self):
+        """Asks Gemini about the model (models.get), which checks the key without writing anything: it isn't a
+        request against the free daily limit. A real one-line request here, every 10 minutes the dashboard was
+        open, used up the free day on its own."""
+        import httpx
         if not self.key:
             return False, "Add your Gemini API key in Settings."
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}"
         try:
-            await self.complete_json('Reply with the JSON {"ok": true}.', "ping", timeout=60)
+            async with httpx.AsyncClient(timeout=30) as c:
+                r = await c.get(url, headers={"x-goog-api-key": self.key})
+        except httpx.HTTPError as e:
+            return False, f"Couldn't reach Gemini: {e.__class__.__name__}"
+        if r.status_code == 200:
+            if gemini_limited():
+                return True, f"connected ({self.model}); today's free limit is used up"
             return True, f"connected ({self.model})"
-        except LLMError as e:
-            return False, str(e)[:200]
+        if r.status_code in (400, 401, 403) and ("API_KEY_INVALID" in r.text or "API key not valid" in r.text):
+            return False, "That Gemini key isn't valid. Copy it again from aistudio.google.com/apikey."
+        if r.status_code == 404:
+            return False, f"Gemini has no model called {self.model}. Pick another in Settings."
+        return False, f"Gemini API {r.status_code}: {r.text[:200]}"
 
     async def complete_json(self, system, prompt, schema=None, web=False, timeout=240):
         import httpx
+        if gemini_limited():                # known to be out: refused here, never sent to Google again
+            e = QuotaError(_gemini_out_message())
+            e.not_sent = True
+            raise e
         body: dict = {"system_instruction": {"parts": [{"text": system}]},
                       "contents": [{"role": "user", "parts": [{"text": _schema_hint(prompt, schema)}]}],
                       "generationConfig": {"temperature": 0.4}}
@@ -347,11 +374,12 @@ class GeminiAPI(Backend):
             await asyncio.sleep(min(60, int(m.group(1)) + 1) if m else 2 ** attempt * 3)
         if r.status_code == 429:
             daily = "PerDay" in r.text
+            # a per-minute limit (too many at once) is a minute's wait, not the day's limit
             _quota_hit["gemini_api"] = gemini_reset() if daily else time.time() + 60
+            _quota_daily["gemini_api"] = daily
             if daily:
                 _learn_limit(gemini_used_today())
-            raise QuotaError("Gemini's free tier limit is used up for now"
-                             + (f" (daily limit; it resets at {time.strftime('%I:%M %p', time.localtime(gemini_reset())).lstrip('0')})." if daily else "."))
+            raise QuotaError(_gemini_out_message())
         if r.status_code in (400, 403) and ("API_KEY_INVALID" in r.text or "API key not valid" in r.text):
             raise LLMError("That Gemini key isn't valid. Copy it again from aistudio.google.com/apikey.")
         if r.status_code != 200:
@@ -398,6 +426,14 @@ async def ollama_models(timeout: float = 2.0) -> list[str]:
 # Google resets Gemini's free daily limits at midnight Pacific time. It doesn't say how many requests are left,
 # so Jobsmith counts its own, and remembers the count at which the limit last ran out.
 _quota_hit: dict[str, float] = {}      # backend -> time until which it's out of quota
+_quota_daily: dict[str, bool] = {}     # backend -> whether that was the day's limit (else a minute's)
+
+
+def _gemini_out_message() -> str:
+    if _quota_daily.get("gemini_api", True):
+        at = time.strftime("%I:%M %p", time.localtime(gemini_reset())).lstrip("0")
+        return f"Gemini's free daily limit is used up (it resets at {at})."
+    return "Gemini's free per-minute limit was hit (too many at once); it's free again in a minute."
 
 
 def _gemini_day(now: float | None = None) -> tuple[float, float]:
@@ -419,7 +455,7 @@ def gemini_reset(now: float | None = None) -> float:
 def gemini_used_today() -> int:
     from . import db
     start = _gemini_day()[0]
-    return (db.q1("SELECT COUNT(*) n FROM usage WHERE backend='gemini_api' AND at>=?", (start,)) or {"n": 0})["n"]
+    return (db.q1("SELECT COUNT(*) n FROM usage WHERE backend='gemini_api' AND ok=1 AND at>=?", (start,)) or {"n": 0})["n"]
 
 
 def _learn_limit(n: int) -> None:
@@ -656,11 +692,30 @@ _sem: asyncio.Semaphore | None = None
 _local_sem: asyncio.Semaphore | None = None
 
 
+async def _call(b: Backend, system: str, prompt: str, schema, web: bool):
+    """One call, logged whatever happens. A call refused before it was sent (a limit already known to be used up)
+    isn't a call and isn't logged."""
+    b.last_usage = None
+    t0 = time.time()
+    try:
+        out = await b.complete_json(system, prompt, schema=schema, web=web)
+    except LLMError as e:
+        if not getattr(e, "not_sent", False):
+            _record_usage(b, time.time() - t0, e)
+        raise
+    except Exception as e:
+        _record_usage(b, time.time() - t0, e)
+        raise
+    _record_usage(b, time.time() - t0)
+    return out
+
+
 async def complete_json(system: str, prompt: str, schema: dict | None = None, web: bool = False,
                         role: str | None = None):
     """Concurrency-limited entry point used by the rest of the app.
     Web-enabled calls default to the research backend. Every prompt has lines aimed at AI (planted in postings)
-    removed, and every system prompt says page text is data, not instructions."""
+    removed, and every system prompt says page text is data, not instructions. A cloud AI is only called while
+    your daily AI budget has room (`spend`); once it or a free limit is used up, smith stands in when allowed."""
     from . import traps
     system, prompt = f"{system}\n\n{traps.DATA_RULE}", traps.redact(prompt)
     global _sem
@@ -672,23 +727,110 @@ async def complete_json(system: str, prompt: str, schema: dict | None = None, we
         global _local_sem
         _local_sem = _local_sem or asyncio.Semaphore(1)
         async with _local_sem:
-            t0 = time.time()
-            try:
-                return await b.complete_json(system, prompt, schema=schema, web=web)
-            finally:
-                _record_usage(b, time.time() - t0)
+            return await _call(b, system, prompt, schema, web)
     async with _sem:
-        t0 = time.time()
         try:
-            return await b.complete_json(system, prompt, schema=schema, web=web)
+            with spend(b):
+                return await _call(b, system, prompt, schema, web)
         except QuotaError:
-            if isinstance(b, OllamaLocal) or not _local_ok() or not await ollama_models():
+            if not _local_ok() or not await ollama_models():
                 raise
             b = OllamaLocal(get_settings().get("ollama_model") or "")   # out of free quota: smith takes over
-            t0 = time.time()
-            return await b.complete_json(system, prompt, schema=schema, web=web)
-        finally:
-            _record_usage(b, time.time() - t0)
+            return await _call(b, system, prompt, schema, web)
+
+
+# --------------------------------------------------------------------------- your daily AI budget
+GEMINI_FREE_BUDGET = 15     # Gemini's free tier ran out near 20 requests a day in Nov 2026: stay well under it
+_inflight = 0               # cloud calls sent and not back yet: they count against the budget already
+
+
+def _cloud(b: Backend) -> bool:
+    return not isinstance(b, (OllamaLocal, NoLLM))
+
+
+def ai_budget(s: dict | None = None) -> int | None:
+    """Cloud AI calls allowed today, or None for no limit. Unset: GEMINI_FREE_BUDGET when Gemini writes or
+    researches (its free tier), no limit for the others. 0: no limit."""
+    s = s or get_settings()
+    v = s.get("ai_daily_budget")
+    if v is None or v == "":
+        kinds = {s.get("llm_backend"), s.get("research_backend")}
+        if s.get("llm_backend") == "auto" and _auto_cache:
+            kinds.add(_auto_cache[1])
+        return GEMINI_FREE_BUDGET if "gemini_api" in kinds else None
+    n = int(v)
+    return n if n > 0 else None
+
+
+def _today() -> tuple[float, float]:
+    """Your day, from the calendar: local midnight to the next one."""
+    from datetime import date, datetime, timedelta
+    d = date.today()
+    return (datetime.combine(d, datetime.min.time()).timestamp(),
+            datetime.combine(d + timedelta(days=1), datetime.min.time()).timestamp())
+
+
+def ai_used_today() -> int:
+    """Cloud AI calls made today that count: answered ones, and failed ones a limit didn't refuse."""
+    from . import db
+    n = db.q1("""SELECT COUNT(*) n FROM usage WHERE at>=? AND backend NOT IN ('ollama')
+                 AND (ok=1 OR COALESCE(error, '') NOT LIKE 'quota:%')""", (_today()[0],))
+    return (n or {"n": 0})["n"]
+
+
+def budget_left() -> int | None:
+    b = ai_budget()
+    return None if b is None else max(0, b - ai_used_today() - _inflight)
+
+
+class spend:
+    """`with spend(backend):` around one cloud call: refused (BudgetError) when today's budget has no room, counted
+    while it's out so a batch started at once can't overshoot."""
+    def __init__(self, b: Backend):
+        self.b, self.counted = b, False
+
+    def __enter__(self):
+        global _inflight
+        if not _cloud(self.b):
+            return self
+        left = budget_left()
+        if left is not None and left <= 0:
+            e = BudgetError(f"Today's AI budget is used ({ai_budget()} calls; Settings). More tomorrow.")
+            e.not_sent = True
+            raise e
+        _inflight += 1
+        self.counted = True
+        return self
+
+    def __exit__(self, *a):
+        global _inflight
+        if self.counted:
+            _inflight -= 1
+
+
+def out_of_ai() -> str | None:
+    """Why no AI can be called right now (today's budget, or Gemini's free limit), with nothing to stand in; None
+    when one can. Autopilot checks this before starting work that needs AI, and says it once."""
+    b = backend("write")
+    if not _cloud(b):
+        return None
+    why = None
+    if (left := budget_left()) is not None and left <= 0:
+        why = f"Today's AI budget is used ({ai_budget()} calls). Autopilot carries on tomorrow, or raise it in Settings."
+    elif isinstance(b, GeminiAPI) and gemini_limited():
+        why = _gemini_out_message()
+    if why and _local_ok() and _models_cache[1]:
+        return None                                  # smith stands in
+    return why
+
+
+def ai_today() -> dict:
+    """For the dashboard: "AI used today: N calls", against your budget."""
+    from . import db
+    start, nxt = _today()
+    local = (db.q1("SELECT COUNT(*) n FROM usage WHERE at>=? AND backend='ollama' AND ok=1", (start,)) or {"n": 0})["n"]
+    return {"calls": ai_used_today(), "budget": ai_budget(), "smith_calls": local, "resets_at": nxt,
+            "out": out_of_ai()}
 
 
 _avail_cache: dict[tuple, tuple[float, bool, str]] = {}
@@ -715,10 +857,15 @@ def _check_key(b: Backend) -> tuple:
 
 async def _check(key: tuple, b: Backend) -> tuple[bool, str]:
     gen = _checks_gen
+    b.last_usage = None
+    t0 = time.time()
     try:
         ok, msg = await b.available()
     except Exception as e:     # a check that broke says so; it never leaves the next one waiting on it
         ok, msg = False, f"Couldn't check your AI: {e.__class__.__name__}"
+    if getattr(b, "last_usage", None):      # a check that was a real (tiny) request is logged like any call
+        with usage_for(None, "connection check"):
+            _record_usage(b, time.time() - t0)
     if gen == _checks_gen:                  # not from before you signed in or switched AI
         _avail_cache[key] = (time.time(), ok, msg)
     return ok, msg

@@ -2,8 +2,13 @@
 
 Order of preference for each field:
   1. answer bank (your own standard answers; legally sensitive ones are never generated)
-  2. a past answer you approved for essentially the same question (learning loop)
-  3. one batched AI call for everything else, which must cite fact ids; a validator checks it
+  2. your saved answer to that kind of essay question (essays.py), as you wrote it; an optional essay box with
+     none is left blank
+  3. a past answer you approved for essentially the same question (learning loop)
+  4. one batched AI call for everything else, which must cite fact ids; a validator checks it
+
+Autopilot answers 1-3 first, with no AI. If that already shows the application will wait for you (a fact only you
+can give), it's held there, and no AI is spent on it until you've answered.
 """
 from __future__ import annotations
 
@@ -11,9 +16,13 @@ import json
 import re
 
 from .skills import voice
-from . import classify, db, jobdetail, learn, profile, traps
+from . import classify, db, essays, jobdetail, learn, profile, traps
 from . import llm
-from .llm import LLMError, complete_json
+from .llm import LLMError, QuotaError, complete_json
+
+# Written by AI once it's available (and, for a held application, once you've answered what it waits on)
+PENDING_ISSUE = "Waiting for AI: written once it's available"
+AI_MADE = ("generated", "voice", "agent")
 
 # --------------------------------------------------------------------------- research
 RESEARCH_SCHEMA = {
@@ -550,9 +559,13 @@ def deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | Non
             issues.append(f"Your answer '{value}' doesn't match any option here; pick one")
     if not value:
         if canon == "previously_employed":
-            issues.append(f"Your resume doesn't say whether you've worked for {_asked_company(job or {}, field['label'])[0] or 'them'}. "
-                          "Answer it yourself, or confirm on your Profile page that your resume lists every employer "
-                          "and contract you've had")
+            # confirming your resume lists every employer answers it only for this job's own company, not its
+            # subsidiaries or another one (the U.S. Government): offered only then
+            company, _, own = _asked_company(job or {}, field["label"])
+            helps = own and company and not GROUP.search(field["label"] or "")
+            issues.append(f"Your resume doesn't say whether you've worked for {company or 'them'}. Answer it yourself"
+                          + (", or confirm on your Profile page that your resume lists every employer and contract "
+                             "you've had" if helps else ""))
         elif field["required"]:
             issues.append("Add this to your answers on the Profile page" if canon not in profile.EEO_KEYS
                           else "Set your demographic answers on the Profile page (or 'Decline to self-identify')")
@@ -775,17 +788,37 @@ async def refresh_questions(job_id: str, log=None) -> dict:
     return job
 
 
-async def draft_job(job_id: str, research: bool | None = None, log=None) -> dict:
+async def draft_job(job_id: str, research: bool | None = None, log=None, hold_first: bool = False) -> dict:
+    """Draft every answer on this application's form. hold_first (autopilot): answer what needs no AI first, and if
+    that already holds the application for you, hold it there: no research, no AI. Answers AI wrote on an earlier
+    pass are kept then, not paid for again."""
     log = log or (lambda m: None)
     job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (job_id,)))
     if not job["questions"] and not job["description"]:
         job = await jobdetail.fetch_job(job_id)
     elif questions_stale(job):
         job = await refresh_questions(job_id, log)
+    fields = [f for f in (job["questions"] or default_fields(job)) if f["qtype"] != "hidden"]
+    for f in fields:
+        f.setdefault("options", [])
+        f.setdefault("required", False)
+    if hold_first:
+        mine, _ = await answer_fields(job, fields, use_ai=False, keep_written=True)
+        rows = [dict(r, field=f["field"], label=f["label"], qtype=f["qtype"], required=int(bool(f.get("required"))),
+                     options=f.get("options") or []) for f in fields if (r := mine.get(f["field"]))]
+        held = [b["text"] for r in rows if (b := _blocker(r, job, profile.answers())) and not b.get("pending")]
+        if held:
+            save_results(job_id, fields, mine)
+            db.x("UPDATE jobs SET status='filled', error=NULL, hold_reason=?, updated_at=? WHERE id=?",
+                 ("; ".join(held[:3])[:500], db.now(), job_id))
+            log("Held for you before any AI was used: " + "; ".join(held[:3]))
+            return {"job_id": job_id, "drafted": len(mine), "error": None, "held": held}
     settings = db.get_settings()
     if research is None:
         research = settings.get("research_enabled", True)
-    if research and not job.get("research"):
+    # Research only feeds written answers: none to write, none paid for
+    essays_left = [f for f in fields if essays.is_essay(f) and offline(f, profile.answers(), job) is None]
+    if research and not job.get("research") and essays_left and not llm.out_of_ai():
         import time as _t
         t0 = _t.time()
         log(f"Researching {job['company']} on the web (usually 20-60s)…")
@@ -797,9 +830,7 @@ async def draft_job(job_id: str, research: bool | None = None, log=None) -> dict
             job["research"] = {}
             log(f"Research skipped: {e}")
     log("Writing answers…")
-
-    fields = [f for f in (job["questions"] or default_fields(job)) if f["qtype"] != "hidden"]
-    results, gen_error = await answer_fields(job, fields)
+    results, gen_error = await answer_fields(job, fields, keep_written=hold_first)
     save_results(job_id, fields, results, status="drafted", error=gen_error)
     return {"job_id": job_id, "drafted": len(results), "error": gen_error}
 
@@ -864,8 +895,37 @@ def _checked(field: dict, r: dict, job: dict) -> dict:
     return r
 
 
-async def answer_fields(job: dict, fields: list[dict], skip_locked: bool = True) -> tuple[dict[str, dict], str | None]:
-    """Answer form fields: your profile first, then your past approvals, then one AI call for the rest."""
+def offline(field: dict, ans: dict, job: dict, blank_optional: bool = True) -> dict | None:
+    """The answer to one field without AI, or None when only AI (or you) could write it: your profile, your saved
+    answer to this kind of essay (an optional essay box with none is left blank), or an answer you approved before."""
+    det = deterministic(field, ans, job)
+    if det:
+        return det
+    if essays.is_essay(field):
+        mine = essays.answer_for(field, job)
+        if mine:
+            return mine
+        if blank_optional and not field.get("required"):
+            return essays.left_blank(field)
+    if field["qtype"] != "file":
+        reuse = learn.reusable_answer(field["label"], field["qtype"], field["options"])
+        if reuse:
+            return {"kind": "learned", "answer": reuse["answer"], "confidence": min(1.0, 0.6 + 0.1 * reuse["support"]),
+                    "rationale": f"Reused your approved answer ({reuse['from']})", "issues": []}
+    return None
+
+
+def pending(field: dict) -> dict:
+    return {"kind": "pending", "answer": "", "confidence": 0, "issues": [PENDING_ISSUE]}
+
+
+async def answer_fields(job: dict, fields: list[dict], skip_locked: bool = True, use_ai: bool = True,
+                        keep_written: bool = False, blank_optional: bool = True) -> tuple[dict[str, dict], str | None]:
+    """Answer form fields: your profile first, then your saved and approved answers, then one AI call for the rest.
+    use_ai=False leaves the rest pending (no AI spent). keep_written keeps what AI wrote on an earlier pass instead
+    of paying for it again. A free limit or your daily budget running out leaves them pending too, to be written
+    when there's room: the application waits quietly instead of being held for you. blank_optional=False when you
+    asked for this answer yourself ("Write with Jobsmith", a cover letter): an optional essay is written then."""
     existing = {d["field"]: d for d in db.q("SELECT * FROM drafts WHERE job_id=?", (job["id"],))}
     ans = profile.answers()
     results: dict[str, dict] = {}
@@ -876,40 +936,69 @@ async def answer_fields(job: dict, fields: list[dict], skip_locked: bool = True)
         prev = existing.get(f["field"])
         if skip_locked and prev and is_locked(prev):
             continue  # locked by the user
-        det = deterministic(f, ans, job)
-        if det:
-            results[f["field"]] = det
+        mine = offline(f, ans, job, blank_optional)
+        if mine:
+            results[f["field"]] = mine
             continue
-        if f["qtype"] != "file":
-            reuse = learn.reusable_answer(f["label"], f["qtype"], f["options"])
-            if reuse:
-                results[f["field"]] = {
-                    "kind": "learned", "answer": reuse["answer"],
-                    "confidence": min(1.0, 0.6 + 0.1 * reuse["support"]),
-                    "rationale": f"Reused your approved answer ({reuse['from']})", "issues": []}
-                continue
+        if keep_written and prev and prev["kind"] in AI_MADE and (prev["answer"] or "").strip():
+            continue  # written already: kept, not paid for again
         if f["qtype"] == "file":  # cover letter upload -> generate text, attached as a file when filling
             if "cover" in (f["label"] + f["field"]).lower():
                 to_generate.append(dict(f, qtype="textarea", description="Cover letter, under 250 words."))
         else:
             to_generate.append(dict(f, qtype="select" if f["qtype"] == "listbox" else f["qtype"]))
     gen_error = None
-    try:
-        results.update(await generate(job, to_generate))
-    except LLMError as e:
-        gen_error = str(e)
+    if to_generate and use_ai:
+        try:
+            results.update(await generate(job, to_generate))
+        except QuotaError as e:        # today's budget or a free limit: written later, not held for you
+            gen_error = str(e)
+            for f in to_generate:
+                results[f["field"]] = pending(f)
+        except LLMError as e:
+            gen_error = str(e)
+            for f in to_generate:
+                results[f["field"]] = {"kind": "generated", "answer": "", "confidence": 0,
+                                       "issues": ["Needs your AI connected (Settings), or more of your writing (Voice), then Redraft"]}
+    else:
         for f in to_generate:
-            results[f["field"]] = {"kind": "generated", "answer": "", "confidence": 0,
-                                   "issues": ["Needs your AI connected (Settings), or more of your writing (Voice), then Redraft"]}
+            results[f["field"]] = pending(f)
     # No AI, the free limit ran out, or the AI came back empty: answer from your own writing instead.
     for f in to_generate:
         r = results.get(f["field"]) or {}
-        if f["qtype"] in ("textarea", "text") and not f["options"] and not (r.get("answer") or "").strip():
+        if f["qtype"] in ("textarea", "text") and not f["options"] and not (r.get("answer") or "").strip() and \
+                (use_ai or r.get("kind") != "pending"):
             mine = voice.compose(job, f)
             if mine:
                 results[f["field"]] = mine
     by_field = {f["field"]: f for f in fields}
     return {k: _checked(by_field[k], r, job) if k in by_field else r for k, r in results.items()}, gen_error
+
+
+def refresh_offline(job_id: str | None = None, *, job: dict | None = None) -> int:
+    """Answer again, without AI, every field of this application that isn't yours (approved or rewritten) and isn't
+    AI's finished work: after you answer something in Needs you, your new profile facts and saved answers reach
+    every held form at once. Returns how many answers changed."""
+    job = job or db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (job_id,)))
+    ans = profile.answers()
+    changed, fields, results = 0, [], {}
+    for d in drafts_for(job["id"]):
+        if is_locked(d) or (d["kind"] in AI_MADE and (d["answer"] or "").strip() and not d["issues"]):
+            continue
+        f = {"field": d["field"], "label": d["label"], "qtype": d["qtype"], "required": bool(d["required"]),
+             "options": d["options"] or [], "description": "", "section": "main"}
+        r = offline(f, ans, job)
+        if r is None:
+            continue
+        r = _checked(f, r, job)
+        if (r.get("answer") or "") != (d["answer"] or "") or r.get("issues", []) != (d["issues"] or []) or \
+                r["kind"] != d["kind"]:
+            fields.append(f)
+            results[f["field"]] = r
+            changed += 1
+    if results:
+        save_results(job["id"], fields, results)
+    return changed
 
 
 def save_results(job_id: str, fields: list[dict], results: dict[str, dict], status: str | None = None,
@@ -953,40 +1042,54 @@ def final_value(d: dict) -> str:
     return d["final_answer"] if d.get("final_answer") else d["answer"]
 
 
-def readiness(job_id: str) -> dict:
-    """Can this job be auto-submitted? Every field must be trusted and issue-free."""
+def _blocker(d: dict, job: dict, ans: dict, autopilot: bool | None = None) -> dict | None:
+    """Why this one answer keeps the application from being sent on its own, or None. `pending` marks an answer AI
+    will write once it's available: the application waits for AI, not for you."""
+    if autopilot is None:
+        autopilot = db.get_setting("autonomy") in ("autopilot", "autonomous")
     threshold = int(db.get_setting("trust_threshold") or 3)
-    autopilot = db.get_setting("autonomy") in ("autopilot", "autonomous")
     min_conf = float(db.get_setting("autopilot_min_confidence") or 0.7)
-    blockers = []
+    norm = lambda v: " ".join((v or "").lower().split())
+    val = final_value(d) or ""
+    issues = d.get("issues") or []
+    item = lambda issue, **kw: {"field": d.get("field"), "label": d["label"], "canon": d.get("canon"),
+                                "kind": d.get("kind"), "qtype": d.get("qtype"), "options": d.get("options") or [],
+                                "required": bool(d.get("required")), "draft_id": d.get("id"), "issue": issue,
+                                "text": f"{d['label']}: {issue}", **kw}
+    if d.get("verdict") == "red":
+        return item("you red-flagged this")
+    if d.get("kind") == "pending" and not val:
+        return item(PENDING_ISSUE, pending=True)
+    if d.get("required") and not val and d["qtype"] != "file":
+        return item(issues[0] if issues and d.get("kind") == "answer_bank" else "required and empty")
+    if d.get("verdict") == "green" or d.get("final_answer"):
+        return None
+    if d.get("canon") in LEGAL_YES_NO and d.get("kind") == "answer_bank" and val:
+        # Drafted earlier (an old blanket "No" for "worked here before?", or a profile answer you've changed
+        # since): only sent if your profile and resume give the same answer today.
+        now = deterministic(dict(d, required=bool(d.get("required"))), ans, job)
+        if now is None or norm(now.get("answer")) != norm(val) or now.get("issues"):
+            return item("your profile doesn't give this answer now; check it")
+    if not d.get("required") and not val and d.get("kind") in ("answer_bank", "left_blank") and \
+            d.get("canon") != "previously_employed":
+        return None  # optional (e.g. EEO, an optional essay) left blank on purpose; "worked here before?" waits either way
+    if issues:
+        return item(issues[0])
+    if d.get("kind") in AI_MADE and ((d.get("confidence") or 0) < min_conf or not val.strip()) and \
+            learn.trust_for(d["label"]) < threshold:
+        who = "Your-writing match" if d["kind"] == "voice" else "AI"
+        return item(f"{who} wasn't sure ({round((d.get('confidence') or 0) * 100)}% confident)")
+    if d.get("kind") == "learned" and (d.get("confidence") or 0) < (0.6 if autopilot else 0.8):
+        return item("reused answer has little support yet")
+    return None
+
+
+def readiness(job_id: str) -> dict:
+    """Can this job be auto-submitted? Every field must be trusted and issue-free. `items` says why not, one per
+    answer; `only_ai` means all that's left is for AI to write (nothing waits on you)."""
     job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (job_id,))) or {}
     ans = profile.answers()
-    norm = lambda v: " ".join((v or "").lower().split())
-    for d in drafts_for(job_id):
-        val = final_value(d)
-        if d["verdict"] == "red":
-            blockers.append(f"{d['label']}: you red-flagged this")
-            continue
-        if d["required"] and not val and d["qtype"] != "file":
-            blockers.append(f"{d['label']}: required and empty")
-            continue
-        if d["verdict"] == "green" or d.get("final_answer"):
-            continue
-        if d.get("canon") in LEGAL_YES_NO and d["kind"] == "answer_bank" and val:
-            # Drafted earlier (an old blanket "No" for "worked here before?", or a profile answer you've changed
-            # since): only sent if your profile and resume give the same answer today.
-            now = deterministic(dict(d, required=bool(d["required"])), ans, job)
-            if now is None or norm(now.get("answer")) != norm(val) or now.get("issues"):
-                blockers.append(f"{d['label']}: your profile doesn't give this answer now; check it")
-                continue
-        if not d["required"] and not val and d["kind"] == "answer_bank" and d.get("canon") != "previously_employed":
-            continue  # optional (e.g. EEO) left blank on purpose; "worked here before?" waits for you either way
-        if d["issues"]:
-            blockers.append(f"{d['label']}: {d['issues'][0]}")
-        elif d["kind"] in ("generated", "voice", "agent") and ((d["confidence"] or 0) < min_conf or not val.strip()) and \
-                learn.trust_for(d["label"]) < threshold:
-            who = "Your-writing match" if d["kind"] == "voice" else "AI"
-            blockers.append(f"{d['label']}: {who} wasn't sure ({round((d['confidence'] or 0) * 100)}% confident)")
-        elif d["kind"] == "learned" and d["confidence"] < (0.6 if autopilot else 0.8):
-            blockers.append(f"{d['label']}: reused answer has little support yet")
-    return {"ready": not blockers, "blockers": blockers}
+    autopilot = db.get_setting("autonomy") in ("autopilot", "autonomous")
+    items = [b for d in drafts_for(job_id) if (b := _blocker(d, job, ans, autopilot))]
+    return {"ready": not items, "blockers": [b["text"] for b in items], "items": items,
+            "only_ai": bool(items) and all(b.get("pending") for b in items)}

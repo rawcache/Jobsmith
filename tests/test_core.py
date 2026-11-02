@@ -367,8 +367,10 @@ async def test_command_company_and_links(fake_llm, monkeypatch):
     assert commands.history()[0]["text"] == "apply to Nvidia"
 
 
-async def test_scheduler_picks_respecting_limits(monkeypatch):
+async def test_scheduler_picks_respecting_limits(monkeypatch, tmp_path):
+    from conftest import resume_pdf
     from jobsmith import scheduler, commands
+    resume_pdf(tmp_path)
     db.set_settings({"max_applications_per_company": 1, "auto_max_per_run": 5, "notifications": False,
                      "onboarded": True, "auto_run": True, "power_mode": "full"})
     ids = []
@@ -386,6 +388,26 @@ async def test_scheduler_picks_respecting_limits(monkeypatch):
     monkeypatch.setattr(commands, "queue", lambda ids: ids)
     res = await scheduler.run_once("test")
     assert "Started 2 applications" in res["summary"]
+
+
+async def test_without_a_resume_pdf_autopilot_starts_nothing_and_says_so_once(monkeypatch):
+    """Every application attaches the resume PDF, so without one autopilot starts none (and spends no AI on them):
+    the run says so once, not once per application."""
+    from jobsmith import scheduler, commands
+    db.set_settings({"onboarded": True, "auto_run": True, "power_mode": "full", "notifications": False})
+    for co in ("A", "B"):
+        jid = sources.add_job_url(f"https://job-boards.greenhouse.io/{co}/jobs/1", co, "Intern")
+        db.x("UPDATE jobs SET fit_score=90 WHERE id=?", (jid,))
+
+    async def no_sync():
+        return []
+    queued = []
+    monkeypatch.setattr(scheduler.sources, "sync_all", no_sync)
+    monkeypatch.setattr(scheduler.match, "rescore", lambda ids=None: 0)
+    monkeypatch.setattr(commands, "queue", lambda ids: queued.extend(ids) or ids)
+    res = await scheduler.run_once("test")
+    assert queued == [] and res["started"] == []
+    assert res["summary"].count("Add your resume as a PDF") == 1
 
 
 def test_outcome_classify_and_match():

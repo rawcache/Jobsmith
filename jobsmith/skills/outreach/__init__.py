@@ -70,7 +70,8 @@ async def draft(job_id: str, person: dict, kind: str = "referral") -> dict:
                   f"JOB DESCRIPTION:\n{(job.get('description') or '')[:2500]}\n\nFACTS:\n{profile.facts_prompt_block(4000)}\n"
                   f"APPLICANT: {json.dumps({k: me.get(k) for k in ('first_name', 'last_name', 'school', 'major', 'graduation_date')})}")
         try:
-            text = ((await llm.complete_json(system, prompt)) or {}).get("text", "").strip()
+            with llm.usage_for(job_id, "outreach"):
+                text = ((await llm.complete_json(system, prompt)) or {}).get("text", "").strip()
         except llm.LLMError:
             text = ""
     if not text:
