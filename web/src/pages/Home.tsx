@@ -5,6 +5,7 @@ import { autopilotOn, setAutopilot, StatusCtx } from "../main";
 import { Dots, Icon, Logo, poll } from "../ui";
 import Ask from "../components/Ask";
 import Live from "../components/Live";
+import Fixes from "../components/Fixes";
 
 type Item = { key: string; label: string; detail?: string; done: boolean; href: string; points?: number };
 type HomeData = {
@@ -107,6 +108,7 @@ export default function Home() {
           {STAGES.map(([l, n, tone]) => (
             <span key={l} className={`metric ${tone} ${n ? "" : "zero"}`}><b className="num">{n}</b><span>{l}</span></span>))}
         </a>
+        {status?.ai_today && <AiToday a={status.ai_today} />}
 
         {(status?.live ?? 0) > 0 && (
           <section className="card">
@@ -118,6 +120,7 @@ export default function Home() {
         <section className="card flush">
           <div className="card-h"><h2>Needs you</h2>{d.review.length > 0 && <span className="badge warn">{d.review.length}</span>}
             {d.review.length > 0 && <a href="#/tracker">View all</a>}</div>
+          {d.review.length > 0 && <Fixes onChange={() => { load(); refresh(); }} />}
           {d.review.length === 0 ? <p className="empty">Nothing is waiting on you.</p> : (
             <ul className="lrows">{d.review.slice(0, 6).map(j => (
               <li key={j.id}><a href={`#/matches/${j.id}`}>
@@ -185,5 +188,18 @@ function Overall() {
       <span className="small muted">{ready} of {ps.length} done</span>
       <span className="q-bar wide"><span style={{ width: `${Math.round(done / all * 100)}%` }} /></span>
     </div>
+  );
+}
+
+/** "AI used today: N calls", against your daily budget; and once (not per application) when it's used up. */
+function AiToday({ a }: { a: NonNullable<import("../main").Status["ai_today"]> }) {
+  const left = a.budget == null ? null : Math.max(0, a.budget - a.calls);
+  return (
+    <p className={`small ai-today ${a.out ? "warn-text" : "muted"}`}>
+      AI used today: <b className="num">{a.calls}</b> call{a.calls === 1 ? "" : "s"}
+      {a.budget != null && <> of your {a.budget} a day{left === 0 ? "" : ` (${left} left)`}</>}
+      {a.smith_calls > 0 && <>, plus {a.smith_calls} by smith on this computer</>}
+      . {a.out ? a.out : <a href="#/settings">Daily AI budget</a>}
+    </p>
   );
 }

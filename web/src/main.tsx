@@ -31,6 +31,7 @@ export type Status = {
   counts: Record<string, number>; active: Record<string, string>;
   has_resume: boolean; facts: number; autonomy: string; tokens_today: number; live: number; onboarded: boolean; setup_step: string;
   quota: { name: string; used: number; limit: number | null; resets_at: number; limited: boolean; fallback: string | null } | null;
+  ai_today?: { calls: number; budget: number | null; smith_calls: number; resets_at: number; out: string | null };
   progress: Record<string, { step: number; total: number; label: string }>;
   attention: { job_id: string; company: string; kind: "code" | "captcha" | "signin"; message: string }[];
   power: { saver: boolean; paused: boolean; battery: { percent: number; plugged: boolean; draining_plugged: boolean } | null };

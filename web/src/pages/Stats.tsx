@@ -9,13 +9,20 @@ type U = { today: Usage; all: Usage; avg_per_app: number; apps: number;
   recent: { job_id: string; company: string; title: string; tokens: number; cost: number | null }[] };
 
 const PURPOSE: Record<string, string> = { research: "Company research", answers: "Writing answers", command: "Finding postings",
-  profile: "Reading your files", other: "Other" };
+  profile: "Reading your files", outreach: "Outreach drafts", "cover letter": "Cover letter", "extension answers": "Extension fill",
+  "extension answer": "Write with Jobsmith", "connection check": "Checking your AI", other: "Other" };
+type Call = { at: number; purpose: string; job_id: string | null; company: string | null; title: string | null; backend: string;
+  model: string; input_tokens: number; output_tokens: number; web_searches: number; ok: number; error: string | null };
 const BACKEND: Record<string, string> = { claude_cli: "Claude (subscription)", anthropic_api: "Claude API", openai_api: "OpenAI API" };
 
 export default function Stats() {
   const [l, setL] = useState<Learn | null>(null);
   const [u, setU] = useState<U | null>(null);
-  useEffect(() => { api.get<Learn>("/api/learning").then(setL); api.get<U>("/api/usage").then(setU); }, []);
+  const [calls, setCalls] = useState<Call[]>([]);
+  useEffect(() => {
+    api.get<Learn>("/api/learning").then(setL); api.get<U>("/api/usage").then(setU);
+    api.get<{ calls: Call[] }>("/api/usage/calls?limit=60").then(r => setCalls(r.calls)).catch(() => {});
+  }, []);
   if (!l || !u) return <div className="page"><p className="muted">Loading…</p></div>;
   const max = Math.max(1, ...u.recent.map(r => r.tokens));
 
@@ -47,6 +54,19 @@ export default function Stats() {
           {u.by_model.map(m => <tr key={m.backend + m.model}><th scope="row">{BACKEND[m.backend] ?? m.backend} {m.model}</th>
             <td>{tok(m.tokens)} tokens, {m.calls} calls</td></tr>)}
         </tbody></table>
+      </>)}
+      {calls.length > 0 && (<>
+        <h3 className="sub" id="calls">Every AI call</h3>
+        <p className="muted small">Newest first: what it was for, which application, and what it used. A failed call is listed too.</p>
+        <div className="table-scroll"><table className="kv wide calls"><tbody>
+          {calls.map((c, i) => (
+            <tr key={i}>
+              <th scope="row" className="num">{new Date(c.at * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</th>
+              <td>{PURPOSE[c.purpose] ?? c.purpose}{c.company ? <>, <a href={`#/job/${c.job_id}`}>{c.company}</a></> : ""}
+                <span className="muted small"> · {BACKEND[c.backend] ?? c.backend}{c.web_searches ? ` · ${c.web_searches} searches` : ""}</span></td>
+              <td className={c.ok ? "num" : "bad-text small"}>{c.ok ? tok(c.input_tokens + c.output_tokens) : (c.error ?? "failed")}</td>
+            </tr>))}
+        </tbody></table></div>
       </>)}
       {u.recent.length > 0 && (<>
         <h3 className="sub">Recent applications</h3>
