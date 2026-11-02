@@ -932,6 +932,22 @@ async def test_popup_answer_goes_to_every_application_waiting_on_it(page):
 
 
 @browser
+async def test_popup_keeps_what_you_typed_when_another_answer_redraws_the_list(page):
+    """Half an essay typed, then a Yes/No answered: the list is drawn again, the essay text still there. Answering
+    the last fix leaves what it did on show."""
+    await _popup_fixes(page, fixAnswer={**FIXES, "freed": ["j1"], "started": [], "note": ""})
+    await page.locator("#fixes .fix").nth(2).locator("textarea").fill("Half of my answer")
+    await page.locator("#fixes .fix").nth(1).get_by_role("button", name="Yes").click()
+    await page.wait_for_selector("#needs-said:not([hidden])")
+    assert await page.locator("#fixes .fix").nth(2).locator("textarea").input_value() == "Half of my answer"
+    await page.evaluate("__opts.fixAnswer = {held: 0, fixes: [], applications: [], freed: ['j2'], started: ['j2'], note: ''}")
+    await page.locator("#fixes .fix").nth(1).get_by_role("button", name="No").click()
+    await page.wait_for_function("document.querySelectorAll('#fixes .fix').length === 0")
+    assert await page.is_visible("#needs-said")
+    assert await page.inner_text("#needs-said") == "Saved. 1 application has nothing left: 1 going out now."
+
+
+@browser
 async def test_popup_saves_your_own_words_and_says_when_it_cant(page):
     """An essay is typed in your words and sent as typed; Save waits for an answer; an engine refusal is shown."""
     await _popup_fixes(page)
