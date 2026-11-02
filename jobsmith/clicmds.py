@@ -12,7 +12,9 @@
     jobsmith audit [-n N] [--seed S] [--json]
                                           N submitted applications (default 50), every answer with what it traces
                                           to; exits 1 if any answer doesn't trace to a fact
-    Add --practice to either to read the practice copy (`jobsmith demo`) instead of your own data.
+    jobsmith report [--days N] [--json]   one screen to send the maintainer each day: the gate numbers, the audit,
+                                          the five fixes waiting on you, AI used today and site errors
+    Add --practice to any of these three to read the practice copy (`jobsmith demo`) instead of your own data.
 """
 from __future__ import annotations
 
@@ -173,10 +175,10 @@ def main(argv: list[str]) -> None:
         voice_cmd(rest)
     elif cmd == "site":
         site()
-    elif cmd in ("stats", "audit"):
+    elif cmd in ("stats", "audit", "report"):
         if "--practice" in rest:
             _use_practice_copy()
-        (stats_cmd if cmd == "stats" else audit_cmd)([a for a in rest if a != "--practice"])
+        {"stats": stats_cmd, "audit": audit_cmd, "report": report_cmd}[cmd]([a for a in rest if a != "--practice"])
 
 
 def _use_practice_copy() -> None:
@@ -200,6 +202,13 @@ def stats_cmd(rest: list[str]) -> None:
     db.conn()
     d = stats.compute(days=_opt(rest, "--days", 30))
     print(json.dumps(d, indent=2) if "--json" in rest else stats.render(d))
+
+
+def report_cmd(rest: list[str]) -> None:
+    from . import db, report
+    db.conn()
+    d = report.compute(days=_opt(rest, "--days", 30))
+    print(json.dumps(d, indent=2, ensure_ascii=False) if "--json" in rest else report.render(d))
 
 
 def audit_cmd(rest: list[str]) -> None:
