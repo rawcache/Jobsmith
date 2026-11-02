@@ -1579,3 +1579,15 @@ def test_a_bare_plus_one_is_never_picked_without_a_confirmed_north_american_numb
         r = draft.deterministic({"field": "cc", "label": "Country Phone Code", "qtype": qtype, "required": True,
                                  "options": ["+1", "+44"]}, ans)
         assert r["answer"] == "" and r["issues"] and r["confidence"] == 0.0, (qtype, r)
+
+
+def test_one_shared_word_never_picks_a_name_from_a_list():
+    """A school, employer or place picked from a list by one shared word would be a made-up fact: "Example
+    Institute of Technology" isn't "Academy of Careers and Technology". A match that shares most of the words still
+    counts, and so does one the answer is part of."""
+    from jobsmith.classify import pick_option
+    schools = ["Elm High School", "Eastern University", "Virginia Tech", "Academy of Careers and Technology", "Other"]
+    assert pick_option("Example Institute of Technology", schools) is None
+    assert pick_option("Example Institute of Technology", schools + ["Example Institute Tech"]) == "Example Institute Tech"
+    assert pick_option("Computer Engineering", ["Engineering, Computer", "Computer Science"]) == "Engineering, Computer"
+    assert pick_option("Mobile", ["Home", "Mobile phone"]) == "Mobile phone"
