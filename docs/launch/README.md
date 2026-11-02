@@ -13,8 +13,11 @@ maintainer's own account, after the checks below.
 
 ## Before posting any of them
 
-1. **Fill in the numbers** marked `{{…}}` from `jobsmith report` on your own data, the day you post. If the gate isn't met
-   yet, say so plainly; don't round up. Every number in a post should be one you could show.
+0. **Only after the Phase 1 gate passes.** In [docs/ROADMAP.md](../ROADMAP.md) the gate is also the public launch:
+   80% of good matches sent without you and zero invented facts in a 50-application audit, both from
+   `jobsmith report` on real applications.
+1. **Fill in the numbers** marked `{{…}}` from `jobsmith report` on your own data, the day you post. Don't round up:
+   every number in a post should be one you could show.
 2. **Check every site claim** against `ats.SUPPORTED` and the README's "Supported sites" table that day. Today:
    Greenhouse, Ashby and Lever end to end. Workday stops at review, iCIMS fills step 1 of 5, SmartRecruiters fills
    the first page.

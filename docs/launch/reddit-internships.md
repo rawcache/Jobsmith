@@ -22,7 +22,7 @@ The rules it follows:
 - Work authorization and sponsorship answers come only from what you confirmed.
 - It never creates accounts, types passwords or touches LinkedIn. Anything like that comes to you.
 - It runs on your computer, with no account to make. Your resume goes only to the job sites you apply on and, if
-  you connect one, the AI you pick (Gemini, Claude or OpenAI); with a local model or no AI, it never leaves.
+  you connect one, the AI you pick (Gemini, Claude or OpenAI); with a local model or no AI, no AI service sees it.
 
 What it can't do yet: Workday, iCIMS and SmartRecruiters applications are only partly filled, so those are still
 yours to finish.
