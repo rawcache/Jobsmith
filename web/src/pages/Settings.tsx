@@ -108,7 +108,16 @@ export default function Settings({ focus }: { focus?: string }) {
         {s.llm_backend === "openai_api" && <label className="field">OpenAI key<input type="password" defaultValue={s.openai_api_key} placeholder="Paste your key" onBlur={e => save({ openai_api_key: e.target.value })} /></label>}
         {s.llm_backend === "ollama" && <Smith onReady={() => { load(); refresh(); }} />}
         {s.llm_backend === "claude_cli" && <><p className="small">Using your Claude Code login (personal use only).</p><ConnectClaude /></>}
+        <div className="set-row" id="budget"><div><strong>Daily AI budget</strong>
+          <p>Most calls a day to a cloud AI; smith on this computer doesn't count. Blank: {s.llm_backend === "gemini_api"
+            ? "15, well under Gemini's free daily limit" : "no limit (15 with Gemini's free tier)"}. 0 means no limit.
+            {status?.ai_today && <> Today: {status.ai_today.calls} call{status.ai_today.calls === 1 ? "" : "s"}.</>}{" "}
+            <a href="#/stats">Every call</a></p></div>
+          <label className="field tight">Calls a day<input type="number" min={0} placeholder={s.llm_backend === "gemini_api" ? "15" : "No limit"}
+            value={s.ai_daily_budget ?? ""} onChange={e => save({ ai_daily_budget: e.target.value === "" ? null : Number(e.target.value) })} /></label></div>
       </section>
+
+      <SavedAnswers />
 
       <section className="card">
         <h2>While it works</h2>
@@ -189,3 +198,30 @@ function ExtensionCard() {
   );
 }
 
+
+/** Your own answers to the essay questions most forms ask: used as you write them, on every form that asks. */
+function SavedAnswers() {
+  const [d, setD] = useState<{ kinds: Record<string, string>; saved: Record<string, string> } | null>(null);
+  const [said, setSaid] = useState("");
+  useEffect(() => { api.get<typeof d>("/api/essays").then(setD).catch(() => {}); }, []);
+  if (!d) return null;
+  const put = async (kind: string, text: string) => {
+    const r = await api.put<{ saved: Record<string, string>; recheck: { freed: string[] } }>(`/api/essays/${kind}`, { text });
+    setD({ ...d, saved: r.saved });
+    const n = r.recheck.freed.length;
+    setSaid(n ? `Saved. ${n} held application${n === 1 ? "" : "s"} can go now.` : "Saved.");
+  };
+  return (
+    <section className="card" id="saved-answers">
+      <h2>Your saved answers</h2>
+      <p className="small muted">Written once, used on every form that asks, exactly as you wrote them and marked as
+        yours. <code>{"{company}"}</code> and <code>{"{role}"}</code> are filled in for each application. An optional
+        essay box you have no answer for is left blank, and never holds an application. {said && <span className="ok-text">{said}</span>}</p>
+      {Object.entries(d.kinds).map(([kind, q]) => (
+        <label key={kind} className="field">{q.replace("{company}", "<company>")}
+          <textarea rows={kind === "cover_letter" ? 6 : 3} defaultValue={d.saved[kind] ?? ""}
+            placeholder={kind === "cover_letter" ? "Your cover letter (optional)" : "Your answer (optional)"}
+            onBlur={e => { if (e.target.value !== (d.saved[kind] ?? "")) put(kind, e.target.value); }} /></label>))}
+    </section>
+  );
+}

@@ -1112,3 +1112,21 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .note.first-run .audit-scroll { margin: 10px 0; }
 .note.first-run p + .row { margin-top: 10px; }
 .prewrap { white-space: pre-wrap; }
+
+/* Needs you, by fix: each thing held applications wait on, once, answered in place */
+.fixes { padding: 4px 16px 12px; }
+.fix-rows { list-style: none; margin: 0; padding: 0; }
+.fix { padding: 10px 0; border-top: 1px solid var(--line-2); }
+.fix:first-child { border-top: 0; }
+.fix-h { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.fix-h strong { color: var(--ink); font-size: 13.5px; }
+.fix p { margin: 2px 0 8px; }
+.fix-choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.fix-line { display: flex; gap: 6px; }
+.fix-line input { flex: 1; min-width: 0; }
+.fix textarea { width: 100%; margin-bottom: 6px; }
+.fix-said { margin: 6px 0 2px; }
+.ai-today { margin: -4px 2px 14px; }
+.field.tight { max-width: 140px; }
+.table-scroll { max-height: 360px; overflow: auto; }
+.calls td:last-child { text-align: right; white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
