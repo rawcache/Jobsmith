@@ -36,7 +36,8 @@ def _first_sentence(s: str) -> str:
     return s[:90]
 
 
-def compute(days: int = 30, now: float | None = None) -> dict:
+def compute(days: float = 30, now: float | None = None, clean=None) -> dict:
+    """clean: applied to each hold reason before it's shortened (`jobsmith report` takes your answers out)."""
     audit._ensure()
     outcomes._ensure()
     now = now if now is not None else time.time()
@@ -70,7 +71,8 @@ def compute(days: int = 30, now: float | None = None) -> dict:
             buckets["you_sent"] += 1
         elif g["status"] == "filled":
             buckets["held"] += 1
-            held_why[_first_sentence(g["hold_reason"]) or "Waiting for you"] += 1
+            why = clean(g["hold_reason"] or "") if clean else g["hold_reason"]
+            held_why[_first_sentence(why) or "Waiting for you"] += 1
         elif g["status"] == "error":
             buckets["failed"] += 1
         elif g["status"] == "skipped":
