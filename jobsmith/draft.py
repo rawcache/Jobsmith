@@ -982,11 +982,15 @@ def refresh_offline(job_id: str | None = None, *, job: dict | None = None) -> in
     job = job or db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (job_id,)))
     ans = profile.answers()
     changed, fields, results = 0, [], {}
+    # the form's own words beside each box (a "50 words max" in its help text): checked again, never dropped
+    asked = {q.get("field"): q for q in job.get("questions") or []}
     for d in drafts_for(job["id"]):
         if is_locked(d) or (d["kind"] in AI_MADE and (d["answer"] or "").strip() and not d["issues"]):
             continue
+        q = asked.get(d["field"]) or {}
         f = {"field": d["field"], "label": d["label"], "qtype": d["qtype"], "required": bool(d["required"]),
-             "options": d["options"] or [], "description": "", "section": "main"}
+             "options": d["options"] or [], "description": q.get("description") or "",
+             "section": q.get("section") or "main"}
         r = offline(f, ans, job)
         if r is None:
             continue

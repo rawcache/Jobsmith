@@ -864,7 +864,7 @@ async def _check(key: tuple, b: Backend) -> tuple[bool, str]:
     gen = _checks_gen
     b.last_usage = None
     t0 = time.time()
-    spends = b.name in CHECK_SPENDS
+    spends = b.name in CHECK_SPENDS and bool(getattr(b, "key", ""))     # no key: nothing is sent, nothing counted
     try:
         if spends:
             with spend(b):

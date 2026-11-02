@@ -222,6 +222,29 @@ async def test_your_saved_answer_is_checked_like_any_other_and_never_changed_to_
     assert issue in why["issues"] and not draft.readiness(jid)["ready"]
 
 
+async def test_a_limit_in_a_boxs_help_text_still_holds_your_saved_answer_after_a_recheck(fake_llm):
+    """The limit is only in the help text under the box. Answering something else in Needs you re-checks the
+    application; your too-long saved answer still holds it."""
+    _alex(work_auth=False)
+    essays.save("why_company", "Robots. " * 60)
+    jid = _job("Acme", FIRST, WORK_AUTH, dict(WHY_US, description="Please keep it to 50 words."))
+    fake_llm(lambda s, p: {"answers": []})
+    await draft.draft_job(jid, hold_first=True)
+    fixes.answer("profile:work_authorized_us", "Yes")
+    why = next(d for d in draft.drafts_for(jid) if d["field"] == "q_why")
+    assert "Over limit: 60/50 words" in why["issues"] and not draft.readiness(jid)["ready"]
+    assert db.q1("SELECT status FROM jobs WHERE id=?", (jid,))["status"] == "filled"
+
+
+@pytest.mark.parametrize("cls", [llm.AnthropicAPI, llm.OpenAIAPI])
+async def test_checking_an_ai_with_no_key_sends_nothing_and_counts_nothing(cls):
+    db.set_settings({"ai_daily_budget": 1})
+    b = cls(key="")
+    ok, msg = await llm._check(llm._check_key(b), b)
+    assert not ok and "API key" in msg
+    assert db.q1("SELECT COUNT(*) n FROM usage")["n"] == 0 and llm.budget_left() == 1
+
+
 async def test_your_saved_answer_traces_to_you_in_the_audit(fake_llm):
     from jobsmith import audit
     _alex()
