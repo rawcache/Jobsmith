@@ -185,6 +185,14 @@ def test_a_job_list_that_times_out_once_is_read_again_not_reported(monkeypatch):
     assert canary.find_posting("lever") == "https://jobs.lever.co/palantir/1/apply" and len(calls) == 2
 
 
+def test_a_job_list_cut_off_mid_reply_is_read_again(monkeypatch):
+    import http.client
+    fake, calls = _urlopen([http.client.IncompleteRead(b"[{"), b'[{"applyUrl": "https://jobs.lever.co/p/1/apply"}]'])
+    monkeypatch.setattr(canary.urllib.request, "urlopen", fake)
+    monkeypatch.setattr(canary.time, "sleep", lambda s: None)
+    assert canary.find_posting("lever") == "https://jobs.lever.co/p/1/apply" and len(calls) == 2
+
+
 def test_a_job_list_that_never_answers_or_answers_an_error_is_still_reported(monkeypatch):
     import urllib.error
     monkeypatch.setattr(canary.time, "sleep", lambda s: None)

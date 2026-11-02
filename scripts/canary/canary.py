@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import http.client
 import json
 import sys
 import time
@@ -73,7 +74,7 @@ def get_json(req: urllib.request.Request, tries: int = TRIES, wait: float = 10.0
                 return json.loads(r.read())
         except urllib.error.HTTPError:
             raise
-        except (TimeoutError, ConnectionError, urllib.error.URLError):
+        except (TimeoutError, ConnectionError, urllib.error.URLError, http.client.IncompleteRead):
             if n == tries - 1:
                 raise
             time.sleep(wait * (n + 1))
