@@ -39,8 +39,8 @@ def _clean(s: str, private: list[str], n: int = 90, quotes: bool = True) -> str:
     # an apostrophe between two letters (can't, Alex's) is a word's, not a quote's
     word = lambda i: s[i] in "'\u2019" and 0 < i < len(s) - 1 and s[i - 1].isalpha() and s[i + 1].isalpha()
     marks = [i for i, c in enumerate(s) if c in _QUOTES and not word(i)] if quotes else []
-    if marks:
-        s = s[:marks[0]] + "…" + (s[marks[-1] + 1:] if len(marks) > 1 else "")
+    if marks:                     # an odd count: the last quote never closes, so all of it from the first goes
+        s = s[:marks[0]] + "…" + (s[marks[-1] + 1:] if len(marks) % 2 == 0 else "")
     for v in private:
         s = re.sub(rf"(?<!\w){re.escape(v)}(?!\w)", "…", s, flags=re.I)
     return s if len(s) <= n else s[:n - 3] + "..."
@@ -90,9 +90,7 @@ def _ai_today(now: float) -> dict:
 
 def _stats(days: float, now: float, private: list[str]) -> dict:
     """`jobsmith stats`, with its held reasons cleaned like every other reason here."""
-    d = stats.compute(days=days, now=now)
-    d["held_reasons"] = [(_clean(why, private), n) for why, n in d["held_reasons"]]
-    return d
+    return stats.compute(days=days, now=now, clean=lambda why: _clean(why, private, 10**6))
 
 
 def compute(days: int = 30, now: float | None = None) -> dict:

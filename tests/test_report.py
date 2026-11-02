@@ -128,6 +128,8 @@ def test_quotes_with_apostrophes_long_ones_and_cut_ones_are_taken_out_whole():
     assert "relocate" not in clean("Held: draft said 'I can't relocate because of my family' here", private)
     assert "secret" not in clean("Draft: '" + "secret " * 80 + "' is too long", private)
     assert "Privateville" not in clean("x" * 80 + " Privateville, MA", private)            # redacted, then cut
+    assert "Northwind" not in clean("Field 'Why us?' rejected draft 'I led 400 robots at Northwind", private)
+    assert "Northwind" not in clean("Field \u201cWhy us?\u201d rejected \u201cI led robots at Northwind", private)
     assert clean("What's your preferred name?", private, quotes=False) == "What's your preferred name?"
     assert clean("Says 'a few ms matter' but the posting doesn't say so", private) == \
         "Says … but the posting doesn't say so"                                         # contractions kept
@@ -138,7 +140,7 @@ def test_the_json_has_no_private_hold_reason_from_stats_either():
     jid = _job("Initech", 3)
     audit.log_considered(jid, True, 80)
     db.x("UPDATE jobs SET status='filled', hold_reason=? WHERE id=?",
-         ("Location: Privateville, MA isn't an option. Draft said 'I can't move'", jid))
+         ("x" * 80 + " Privateville, MA isn't an option. Draft said 'I can't move'", jid))
     d = report.compute()
     assert "Privateville" not in json.dumps(d) and "can't move" not in json.dumps(d)
 
