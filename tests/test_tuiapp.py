@@ -170,6 +170,47 @@ def test_review_shows_a_first_submission_with_sources_and_s_approves_it(engine, 
     assert row["approved_at"] is None and row["answers"] == guardrails.answers_key(fields)
 
 
+def test_an_application_that_loads_after_you_moved_to_a_fix_is_not_shown(engine):
+    """You pass an application on the way back up to a fix; its answers arrive after. They're dropped: the fix
+    stays shown, and s (submit) has no application to act on."""
+    from jobsmith.tuiapp import Jobsmith, Review
+    db.conn()
+    _held_job()
+
+    async def go():
+        app = Jobsmith(engine, splash=False)
+        async with app.run_test(size=(140, 44)) as pilot:
+            await pilot.pause(1)
+            app.query_one("#prompt").value = "/review"
+            await pilot.press("enter")
+            assert await _until(pilot, lambda: isinstance(app.screen, Review) and app.screen.fixes)
+            screen = app.screen
+            await pilot.press("down")
+            assert await _until(pilot, lambda: screen.job.get("id") == "j1")
+            late = screen.get("/api/jobs/j1")                # what a slow load would hand back
+            await pilot.press("up")
+            assert await _until(pilot, lambda: screen.fix is not None)
+            screen.show_job(late)
+            assert screen.job == {} and screen.fix["id"] == "resume_pdf" and screen.approval is None
+    asyncio.run(go())
+
+
+def test_plain_review_shows_the_missing_resume_pdf_with_nothing_held(capsys):
+    """No application is held yet (they're drafted and waiting), but every one waits for your resume PDF: the plain
+    review says so instead of "Nothing needs you"."""
+    from jobsmith import tui
+
+    class Fake:
+        def get(self, path, **params):
+            if path == "/api/fixes":
+                return {"fixes": [{"id": "resume_pdf", "kind": "resume_pdf", "title": "Add your resume as a PDF",
+                                   "detail": "It's attached to every application.", "unblocks": 0}]}
+            return {"jobs": []}
+    tui.review(Fake())
+    out = capsys.readouterr().out
+    assert "Add your resume as a PDF" in out and "blocks every application" in out and "Nothing needs you" not in out
+
+
 def test_a_running_job_is_named_before_its_tab_opens(engine):
     """Researching and drafting happen before a browser tab exists; the terminal should name the company from the
     first frame, not show the job's id."""
