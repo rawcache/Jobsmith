@@ -44,7 +44,26 @@
     return out;
   };
 
-  function labelFor(el) {
+  // A label that's only "Type", "Number" or "Value" says what it is through its group (iCIMS's "Phones (1)"):
+  // the legend's words go in front ("Phones Type"). As base.SCAN_JS.
+  const GENERIC = /^(type|number|value)$/i;
+  const inGroup = (el, t) => {
+    if (!GENERIC.test(t)) return t;
+    const lg = el.closest("fieldset")?.querySelector("legend");
+    const g = lg ? clean(lg.innerText.replace(/\(\d+\)|\*?\s*required\.?/gi, " ")) : "";
+    return g ? `${g} ${t}` : t;
+  };
+  // A page that makes your account: its boxes are yours, never read or filled (rule 5): the password boxes, every
+  // box in the group around one (iCIMS's "Create a login"), and a box named for signing in. As base.SCAN_JS.
+  const accountBox = el => {
+    const pws = $$('input[type="password"]');
+    if (!pws.length) return false;
+    if (pws.map(p => p.closest('[role="group"], fieldset')).some(g => g && g.contains(el))) return true;
+    const l = labelTag(el);
+    return /^(log ?in|log ?in (id|name|email)|user ?(name|id)|sign[ -]?in (email|name|id))$/i.test(clean(l ? l.innerText : el.getAttribute("aria-label") || ""));
+  };
+  function labelFor(el) { return inGroup(el, rawLabel(el)); }
+  function rawLabel(el) {
     const l = labelTag(el); if (l) return clean(l.innerText);
     const by = el.getAttribute("aria-labelledby");
     if (by) { const t = by.split(/\s+/).map(i => byIdFrom(el, i)).filter(Boolean).map(n => n.innerText).join(" "); if (clean(t)) return clean(t); }
@@ -143,7 +162,7 @@
       if (!visible(el) && type !== "file") continue;
       if (besideDropdown(el)) continue;   // Workday keeps a dropdown's choice in a box beside its button: not a question
       // a honeypot sites hide from people to catch bots (Workday: "This input is for robots only"): never touched
-      if (HONEYPOT.test(labelFor(el)) || isPassword(el)) continue;
+      if (HONEYPOT.test(labelFor(el)) || isPassword(el) || accountBox(el)) continue;
       // A hidden copy that custom selects keep for the browser's "required" check (react-select's requiredInput):
       // not a question, and it borrows the label of whatever fieldset it sits in ("Phone").
       if (type !== "file" && el.getAttribute("aria-hidden") === "true" && el.tabIndex < 0) continue;
@@ -183,13 +202,18 @@
     }
     // Workday's dropdowns: <button aria-haspopup="listbox">Select One</button> in a form field (the header's menus
     // aren't questions)
-    for (const btn of $$('button[aria-haspopup="listbox"]')) {
+    // and iCIMS's search dropdowns: a link (role="combobox") beside the hidden <select> shows the choice and opens
+    // its list
+    for (const btn of $$('button[aria-haspopup="listbox"], a.dropdown-select[role="combobox"]')) {
       if (!visible(btn) || !btn.closest('[data-automation-id^="formField-"], form')) continue;
       const id = tag(btn); els.set(id, btn);
       const shown = clean(btn.innerText);
+      const list = btn.tagName === "A" && byIdFrom(btn, btn.id.replace(/_icimsDropdown$/, "_dropdown-results"));
       out.push({ id, label: dropdownLabel(btn), name: btn.name || btn.id, type: "combobox",
-                 required: /\bRequired\s*$/.test(btn.getAttribute("aria-label") || ""), options: [],
-                 filled: !!shown && !/^select\b/i.test(shown) });
+                 required: /\bRequired\s*$/.test(btn.getAttribute("aria-label") || "") || btn.getAttribute("aria-required") === "true",
+                 options: list ? [...list.querySelectorAll('li[role="option"]')].map(o => clean(o.getAttribute("title") || o.innerText))
+                   .filter(t => t && !/^(—\s*make a selection|no results$)/i.test(t)) : [],
+                 filled: !!shown && !/^(select\b|—\s*make a selection)/i.test(shown) });
     }
     // Yes/No buttons (Ashby): two buttons that toggle aria-pressed beside a hidden checkbox. A radio question.
     for (const box of new Set($$("button[aria-pressed]").map(b => b.parentElement))) {
@@ -413,7 +437,8 @@
       target.dispatchEvent(new Event("change", { bubbles: true }));
       return true;
     }
-    if (target.tagName === "BUTTON" && target.getAttribute("aria-haspopup") === "listbox") return fillDropdown(target, a.pick || value);
+    if ((target.tagName === "BUTTON" && target.getAttribute("aria-haspopup") === "listbox") || target.matches?.("a.dropdown-select"))
+      return fillDropdown(target, a.pick || value);
     if (promptBox(target)) return fillPrompt(target, a.pick || value);
     if (target.getAttribute("role") === "combobox" || target.getAttribute("aria-autocomplete") === "list") return fillCombobox(target, value, a.pick || value);
     if (target.value && target.value.trim()) return true;   // never overwrite what you typed
@@ -611,19 +636,39 @@
   }
   globalThis.__jobsmithFits = fits;
 
+  // the words on the button that makes the account, on the form holding the password box
+  const accountButton = pw => {
+    const box = pw.form || pw.closest("form") || document;
+    const b = [...box.querySelectorAll('button[type="submit"], input[type="submit"], button:not([type])')].find(visible);
+    return b ? clean(b.innerText || b.value) || "its button" : "its button";
+  };
+  const READING = /parsing (your )?resume|reading your resume|processing your resume/i;
+  async function whileReading() {
+    await sleep(300);
+    for (let t = 0; t < 120; t++) {
+      const busyNow = [...document.querySelectorAll("body *")].some(e => e.children.length === 0 && READING.test(e.textContent || "") && visible(e));
+      if (!busyNow) return;
+      await sleep(250);
+    }
+  }
+
   let busy = false;
   async function fill() {
     if (busy) return;
     busy = true; state.open = true;
     // a sign-in or a new account: a password box, iCIMS's "Email, then Next" (it finds your account or starts one),
     // or iCIMS's own login page (Auth0's _form-login-id)
-    if ([...document.querySelectorAll("input")].some(e => visible(e) && isPassword(e)) ||
+    // ...unless it also asks for your profile (iCIMS's Candidate Profile with "Create a login"): then the profile is
+    // filled and the account's boxes and its button are left to you
+    const pw = [...document.querySelectorAll("input")].find(e => visible(e) && isPassword(e));
+    const fields = scan();
+    const account = pw && fields.filter(f => f.type !== "file").length >= 3 ? accountButton(pw) : "";
+    if ((pw && !account) ||
         [...document.querySelectorAll("#enterEmailSubmitButton, form._form-login-id button")].some(visible) ||
         location.hostname === "login.icims.com") {
       say("This page signs you in or makes an account, which is yours to do. Once you're past it, press Fill again.", "warn");
       busy = false; return;
     }
-    const fields = scan();
     say(`Reading ${fields.length} fields and writing answers… Open questions take up to a minute.`);
     const r = await send({ type: "answers", body: { url: location.href, title: pageTitle(), site_name: site(), fields } });
     if (!r.ok) { say(esc(r.error), "warn"); busy = false; return; }
@@ -631,7 +676,12 @@
     let done = 0; const missing = [], checks = [], sources = []; let needAi = 0; let noPdf = false;
     const flag = (id, f) => { const el = els.get(id); const node = Array.isArray(el) ? el[0]?.closest("fieldset") || el[0] : el;
                               if (node && !f?.filled) node.style.outline = "2px solid #d97706"; };
-    for (const a of answers) {
+    // files first: a site can read the resume you attach and replace what's in the form with it (iCIMS: "Parsing
+    // resume, please wait..."), so the rest is filled once it's done
+    const files = answers.filter(a => a.file), rest = answers.filter(a => !a.file);
+    let read = false;
+    for (const a of [...files, ...rest]) {
+      if (!a.file && files.length && !read) { read = true; await whileReading(); }
       let ok = false;
       const f = fields.find(x => x.id === a.id);
       const held = a.hold || fits(a.qkind, a.value) || extensionRefusal(a.id, a.value);
@@ -645,13 +695,15 @@
       else if (f && f.required && !f.filled) { missing.push(f.label); if (a.kind === "generated" && !a.value) needAi++; flag(a.id, f); }
     }
     const list = (items, n = 110) => `<ul style="margin:4px 0 0 14px;list-style:disc">${items.slice(0, 6).map(m => `<li>${esc(m.slice(0, n))}</li>`).join("")}</ul>`;
-    say(`<b>Filled ${done} of ${fields.length} fields.</b> Check it, then submit when you're ready.` +
+    say(`<b>Filled ${done} of ${fields.length} fields.</b> ` +
+      (account ? `This page also makes your account: create your login and press ${esc(account)} yourself.`
+               : `Check it, then submit when you're ready.`) +
       (noPdf ? `<br>Add your resume PDF to attach it (Profile → PDF employers get, in Jobsmith).` : "") +
       (missing.length ? `<br>Needs you:${list(missing)}` : "") +
       (checks.length ? `<br>Check these:${list(checks)}` : "") +
       (sources.length ? `<br>Where these answers came from:${list(sources, 220)}` : "") +
       (needAi ? `<br><span class="small">${needAi} written answer${needAi > 1 ? "s need" : " needs"} an AI. Connect one in Jobsmith's Settings.</span>` :
-       error ? `<br><span class="small">${esc(error)}</span>` : ""), missing.length || checks.length || noPdf ? "warn" : "");
+       error ? `<br><span class="small">${esc(error)}</span>` : ""), missing.length || checks.length || noPdf || account ? "warn" : "");
     busy = false; load();
   }
 

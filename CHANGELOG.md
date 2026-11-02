@@ -20,6 +20,14 @@
 - iCIMS: the page-by-page filler works inside the frame iCIMS draws its application in, presses "Apply for this job
   online", and hands you iCIMS's email step ("Enter Your Information", whose Next finds your account or starts one)
   and its login page. The extension fills nothing on either.
+- iCIMS, signed in: on its Candidate Profile, which asks for your profile and makes your account on the same page,
+  autopilot and the extension fill the profile (picking from iCIMS's search dropdowns), never touch the Login,
+  Password or Password (Re-enter) boxes, never press Submit Profile, and hold the application under "Needs you" with
+  "Create your login and press Submit Profile yourself". Tested on IDEMIA's page, saved signed in (step 1 of 5; the
+  rest is #31). A plain sign-in page is still handed to you whole.
+- Any site: the resume is attached first and the form is filled after the site finishes reading it, since some
+  (iCIMS) replace what's in the form with what they read. A box labelled only "Type" or "Number" is read with its
+  group's name ("Phones Number").
 - SmartRecruiters: autopilot and the extension fill the first page of its application (name, email and its
   confirmation, City picked from its list, phone, LinkedIn, website, your resume in the Resume box) and stop there
   for you, tested on Bosch's "Application Engineer" form saved blank. Jobsmith never uses its "autocomplete your
@@ -154,6 +162,10 @@
   password-reset and account codes are never typed; anything that doesn't match waits for you.
 
 ### Fixed
+- A choice is never picked from a list by one shared word: "Example Institute of Technology" was taken as "Academy
+  of Careers and Technology". The words shared must cover at least half the answer's.
+- A dropdown without your answer among its choices is left at once instead of after a five-second wait.
+- Gemini's free day is counted from midnight Pacific to midnight, also on the days the clocks change (#30).
 - A phone's country code is picked only when the choice carries exactly your number's code and your country's own
   name: never "United States (+12)", never "United States Minor Outlying Islands (+1)".
 - The extension picks a site's own wording for "Decline to self-identify" ("I do not wish to answer.").

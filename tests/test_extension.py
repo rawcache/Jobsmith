@@ -1807,3 +1807,42 @@ async def test_the_submit_watcher_goes_by_the_words_shown_not_a_buttons_value(pa
       i.value = 'Submit'; i.addEventListener('click', e => e.preventDefault()); document.body.appendChild(i); }""")
     await page.click("#send-it")                                       # a Submit whose words are its value
     assert json.loads(await page.evaluate("sessionStorage.getItem('jobsmith-submit')"))["url"] == SR_URL
+
+
+ICIMS_PROFILE_URL = "https://uscareers-idemia.icims.com/jobs/8707/full-stack-software-engineering-internship/candidate"
+
+
+@browser
+async def test_autofill_fills_icims_profile_and_leaves_the_login_to_you(page):
+    """IDEMIA's iCIMS Candidate Profile makes your account on the same page. Fill attaches the resume first and
+    waits while iCIMS reads it (what it reads replaces the form), fills the profile, picks from iCIMS's search
+    dropdowns, never touches Login, Password or Password (Re-enter), never presses Submit Profile, and says the
+    login is yours."""
+    html = (FIXTURES / "icims_idemia_profile_frame.html").read_text(encoding="utf-8")
+    await page.route("https://**/*", lambda r: r.fulfill(status=200, content_type="text/html", body=html)
+                     if r.request.url.split("?")[0] == ICIMS_PROFILE_URL else r.abort())
+    std = lambda v: {"value": v, "kind": "standard"}
+    await page.add_init_script(_stub({"panelOpen": True}, resume="resume.pdf", answers={
+        "First Name": std("Alex"), "Last Name": std("Rivera"), "Email": std("alex.rivera@example.edu"),
+        "Phones Type": std("Mobile"), "Phones Number": std("617-555-0123"), "Country": std("United States"),
+        "Login": std("alex.rivera"), "Password": std("hunter2")}))
+    await page.goto(ICIMS_PROFILE_URL)
+    await page.add_script_tag(path=str(EXT / "content.js"))
+    await page.wait_for_function("document.querySelector('#jobsmith-panel')?.shadowRoot?.querySelector('.wrap')")
+    await _watch_for_submits(page)
+    await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
+    note = "document.querySelector('#jobsmith-panel').shadowRoot.querySelector('.note')"
+    await page.wait_for_function(f"{note}?.innerText.includes('Filled')", timeout=30000)
+    assert "create your login and press Submit Profile yourself" in await page.evaluate(f"{note}.innerText")
+    labels = [f["label"] for f in await page.evaluate("__calls.find(c => c.type === 'answers').body.fields")]
+    assert not [l for l in labels if l in ("Login", "Password", "Password (Re-enter)")], labels
+    box = lambda i: page.input_value(f'[id="{i}"]')
+    for account in ("PersonProfileFields.Login", "PersonProfileFields.Password", "PersonProfileFields.Password_Confirm"):
+        assert await box(account) == "", account
+    assert await page.evaluate("window.__resumeRead") == 1
+    assert await box("PersonProfileFields.FirstName") == "Alex" and await box("PersonProfileFields.LastName") == "Rivera"
+    assert await box("-1_PersonProfileFields.PhoneNumber") == "617-555-0123"
+    assert await page.eval_on_selector('[id="-1_PersonProfileFields.PhoneType"]', "e => e.selectedOptions[0].text.trim()") == "Mobile"
+    assert await box("-1_PersonProfileFields.AddressCountry") == "United States"
+    assert await page.evaluate("window.__signInPresses") == 0
+    await _never_submitted(page)

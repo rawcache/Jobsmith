@@ -1135,6 +1135,104 @@ async def test_icims_from_the_saved_posting_to_sign_in_is_handed_to_you(page):
     assert await view.input_value("#email") == "" and await view.evaluate("window.__signInPresses") == 0
 
 
+IDEMIA_ICIMS = "https://uscareers-idemia.icims.com/jobs/8707/full-stack-software-engineering-internship/job"
+
+
+async def test_icims_profile_page_fills_your_profile_and_leaves_the_login_to_you(fake_llm, page, tmp_path,
+                                                                               monkeypatch):
+    """IDEMIA's iCIMS Candidate Profile (step 1 of 5, saved signed in), which asks for your profile and makes your
+    account on the same page ("Create a login"). Autopilot attaches the resume first and waits while iCIMS reads it
+    (what it reads replaces the form), then fills the profile, picking from iCIMS's search dropdowns. It never
+    touches the Login, Password or Password (Re-enter) boxes, never presses Submit Profile, and holds the
+    application under Needs you: "Create your login and press Submit Profile yourself"."""
+    await _alex_for_workday(fake_llm)
+    asked = []
+    fake_llm(lambda s, p: asked.append(p) or {"answers": []})
+    pdf = tmp_path / "resume.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    db.x("INSERT INTO documents(kind, filename, path, text, is_primary, created_at) VALUES('resume','resume.pdf',?,'',1,?)",
+         (str(pdf), db.now()))
+    jid = sources.add_job_url(IDEMIA_ICIMS, "IDEMIA", "Full Stack Software Engineering Internship")
+    assert db.q1("SELECT ats FROM jobs WHERE id=?", (jid,))["ats"] == "icims"
+    db.x("UPDATE jobs SET url=?, locations=?, description='Full stack engineering at IDEMIA.' WHERE id=?",
+         (_icims("profile_frame"), json.dumps(["Eden Prairie, MN, United States"]), jid))
+    db.set_settings({"multistep_beta": True, "autonomy": "autonomous", "trust_threshold": 0})
+
+    class Browser:
+        def want_headless(self):
+            return True
+
+        async def new_page(self):
+            return page
+
+    async def no_watch(*a):
+        return None
+    monkeypatch.setattr(runner, "browser", Browser())
+    monkeypatch.setattr(runner, "takeover", Browser())
+    monkeypatch.setattr(runner, "watch_tab", no_watch)
+    try:
+        await runner.fill_multistep(jid, submit=True)
+    finally:
+        runner.live_drop(jid)
+    job = db.q1("SELECT status, hold_reason FROM jobs WHERE id=?", (jid,))
+    assert job["status"] == "filled", job
+    assert job["hold_reason"].startswith("Create your login and press Submit Profile yourself"), job["hold_reason"]
+    box = lambda i: page.input_value(f'[id="{i}"]')
+    for account in ("PersonProfileFields.Login", "PersonProfileFields.Password", "PersonProfileFields.Password_Confirm"):
+        assert await box(account) == "", account                                  # yours, never touched
+    assert await page.evaluate("window.__signInPresses") == 0                     # Submit Profile never pressed
+    assert await page.evaluate("document.getElementById('PortalProfileFields.Resume_File').files.length") == 1
+    assert await page.evaluate("window.__resumeRead") == 1                        # read before the form was filled
+    assert await box("PersonProfileFields.FirstName") == "Alex" and await box("PersonProfileFields.LastName") == "Rivera"
+    assert await box("PersonProfileFields.Email") == profile.answers()["email"]["value"]
+    assert await box("-1_PersonProfileFields.PhoneNumber") in ("617-555-0123", "(617) 555-0123", "(617)-555-0123")
+    shown = lambda i: page.eval_on_selector(f'[id="{i}"]', "e => e.selectedOptions[0].text.trim()")
+    assert await shown("-1_PersonProfileFields.PhoneType") == "Mobile"
+    assert await box("-1_PersonProfileFields.AddressCountry") == "United States"   # from iCIMS's search dropdown
+    assert not [p for p in asked if "Login" in p or "Password" in p], asked
+    assert not db.q("SELECT 1 FROM runs WHERE job_id=? AND kind='submit'", (jid,))
+
+
+async def test_a_sign_in_page_is_still_handed_to_you_whole(page, tmp_path):
+    """Only a page that asks for your profile too is filled around its login: a sign-in alone (email and password)
+    is handed to you as before, with nothing typed."""
+    from jobsmith.fill import multistep
+    signin = tmp_path / "signin.html"
+    signin.write_text('<form><label for="e">Email</label><input id="e" type="email"><label for="p">Password</label>'
+                      '<input id="p" type="password"><button type="submit">Sign In</button></form>', encoding="utf-8")
+    await page.goto(signin.as_uri())
+    assert await multistep.makes_account(page) == ""
+    asked = []
+
+    async def wait_for_user(msg, check, negate=False):
+        asked.append(msg)
+        return False
+
+    async def answer(fields):
+        raise AssertionError(f"nothing to answer on a sign-in: {fields}")
+    res = await multistep.run(page, signin.as_uri(), answer=answer, files={}, log=lambda m: None,
+                              wait_for_user=wait_for_user, allow_submit=lambda: False)
+    assert res["status"] == "waiting_user" and asked == ["Sign in to continue the application"], res
+    assert await page.input_value("#e") == "" and await page.input_value("#p") == ""
+
+
+async def test_the_boxes_that_make_an_account_are_never_read(page):
+    """On a page that makes an account: the boxes in the group around a password (the login, an email to sign in
+    with, the password and its confirmation) and a box named for signing in are left out of what's read; the
+    profile's own Email outside that group is read."""
+    await page.set_content("""<form>
+      <div role="group"><h2>Create a login</h2><label for="l">Login</label><input id="l">
+        <label for="se">Email for signing in</label><input id="se" type="email">
+        <label for="p1">Password</label><input id="p1" type="password">
+        <label for="p2">Password (Re-enter)</label><input id="p2" type="password"></div>
+      <div><label for="u">Username</label><input id="u"></div>
+      <div role="group"><h2>Enter your information</h2><label for="fn">First Name</label><input id="fn">
+        <label for="em">Email</label><input id="em" type="email"></div></form>""")
+    assert [f["label"] for f in await scan_form(page)] == ["First Name", "Email"]
+    await page.eval_on_selector("#p1", "e => e.closest('[role=group]').remove()")      # no account on the page
+    assert [f["label"] for f in await scan_form(page)] == ["Username", "First Name", "Email"]
+
+
 FRAMED_INNER = """<form><label for="fn">First Name</label><input id="fn" name="fn" required>
 <label for="st">State</label><select id="st" name="st"><option value="">Select</option><option>Massachusetts</option>
 <option>New York</option></select>
