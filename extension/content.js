@@ -657,15 +657,25 @@
     return false;
   }
   // After the read, the site may have drawn its boxes again: new elements for the same questions. Each answer's box
-  // is found again by its question (label, kind, and which of that label it is), and the read's empties are known
+  // is found again: the same element if it's still there, else the one with its name (id) if exactly one has it,
+  // else by its question (kind, label, which of them) only if that question has as many boxes as before. Anything
+  // less sure is left for you: an answer never goes into a box that may be another question's
   function redrawn(before) {
     const key = f => `${f.type}|${f.label}`;
-    const nth = new Map(), was = new Map();
-    for (const f of before) { const k = key(f), i = nth.get(k) || 0; nth.set(k, i + 1); was.set(f.id, `${k}|${i}`); }
-    const now = scan(), at = new Map(), seen = new Map();
-    for (const f of now) { const k = key(f), i = seen.get(k) || 0; seen.set(k, i + 1); at.set(`${k}|${i}`, f); }
+    const now = scan();
+    const ids = new Set(now.map(f => f.id));
+    const count = (list, k) => list.filter(f => key(f) === k).length;
+    const nthOf = (list, f) => list.filter(x => key(x) === key(f)).indexOf(f);
     const alias = new Map();
-    for (const [id, k] of was) { const f = at.get(k); if (f) alias.set(id, f); }
+    for (const f of before) {
+      if (ids.has(f.id)) continue;                                   // the same box, still there
+      const named = f.name ? now.filter(x => x.name === f.name && x.type === f.type) : [];
+      if (named.length === 1) { alias.set(f.id, named[0]); continue; }
+      if (named.length > 1 || count(before, key(f)) !== count(now, key(f))) continue;   // unsure: yours
+      const same = now.filter(x => key(x) === key(f));
+      const g = same[nthOf(before, f)];
+      if (g) alias.set(f.id, g);
+    }
     return alias;
   }
 
@@ -710,6 +720,7 @@
       const held = a.hold || fits(a.qkind, a.value) || extensionRefusal(a.id, a.value);
       if (held) { if (f && !f.filled) { missing.push(`${f.label}: ${held}`); flag(a.id, f); } continue; }   // never typed in
       if (a.file === "resume" && !resume) noPdf ||= !f?.filled;   // no resume PDF yet: skip the upload, fill the rest
+      else if (a.file && f?.filled) { done++; continue; }        // attached already (Fill again): not sent to be read twice
       else try { ok = await fillOne(a.id, a, job_id); } catch (_) { ok = false; }
       if (ok && a.source) sources.push(`${f?.label || "An answer"}: ${a.value}. ${a.source}`);   // legal yes/no: where from
       if (ok && a.check) { checks.push(`${f?.label || "An answer"}: ${a.check}`); flag(a.id, {}); }   // filled, not counted
