@@ -28,7 +28,7 @@ def test_time_windows():
     assert ask.window("past hour", now)[2] == "in the past hour"
     assert ask.window("what did you do today", now)[2] == "today"
     s, u, lab = ask.window("yesterday", now)
-    assert u - s == 86400 and lab == "yesterday"
+    assert u - s in (23 * 3600, 24 * 3600, 25 * 3600) and lab == "yesterday"     # a calendar day (#32)
     assert ask.window("last week", now)[2] == "last week"
     assert ask.window("whatever", now) == (None, None, "")
 
@@ -102,7 +102,7 @@ def test_code_waits_dont_crowd_out_applications_ready_to_submit():
 def test_company_counts_and_unknowns():
     db.conn()
     _job("a", "Acme Robotics", "submitted")
-    _sent("a", 5)
+    _sent("a", 0)            # just now: 5 hours back was last week from Monday midnight to 5 AM (#32)
     _job("b", "Acme Robotics", "error", title="Hardware Intern", error="Page not found")
     out = _blocks("what failed at acme robotics?")
     assert out[0]["text"].startswith("Couldn't finish at Acme Robotics") and out[1]["text"] == "Acme Robotics"
@@ -122,3 +122,19 @@ def test_stream_endpoint():
         r = c.post("/api/ask", json={"text": "what are my best matches?"})
         blocks = [json.loads(line) for line in r.text.splitlines() if line]
     assert blocks[0]["t"] == "head" and blocks[0]["text"].startswith("Best matches")
+
+
+def test_a_week_starts_at_monday_midnight_even_when_the_clocks_change():
+    """"This week" runs from Monday midnight, so early on a Monday, 5 hours ago is last week (#32). Taken from the
+    calendar: in the week the clocks go back, Monday midnight isn't 24 x days before today's midnight."""
+    import datetime as dt
+    monday_early = dt.datetime(2026, 11, 2, 0, 44).timestamp()           # a Monday, 00:44
+    since, until, _ = ask.window("this week", monday_early)
+    assert since == dt.datetime(2026, 11, 2).timestamp() and until is None
+    assert monday_early - 5 * 3600 < since                               # sent 5 hours ago: last week
+    after_change = dt.datetime(2026, 11, 4, 12, 0).timestamp()           # the Wednesday after the US clocks went back
+    assert ask.window("this week", after_change)[0] == dt.datetime(2026, 11, 2).timestamp()
+    assert ask.window("last week", after_change)[:2] == (dt.datetime(2026, 10, 26).timestamp(),
+                                                        dt.datetime(2026, 11, 2).timestamp())
+    assert ask.window("yesterday", after_change)[:2] == (dt.datetime(2026, 11, 3).timestamp(),
+                                                        dt.datetime(2026, 11, 4).timestamp())
