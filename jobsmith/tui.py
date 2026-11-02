@@ -434,7 +434,7 @@ def review_fixes(e: Engine) -> bool:
 def review(e: Engine) -> None:
     """Go through everything autopilot held for you: each fix once first, then one answer at a time."""
     jobs = e.get("/api/jobs", status="filled,error", limit=50)["jobs"]
-    if not jobs:
+    if not jobs and not e.get("/api/fixes").get("fixes"):     # a missing resume PDF holds drafted ones too
         console.print("[green]Nothing needs you.[/]")
         return
     if not review_fixes(e):

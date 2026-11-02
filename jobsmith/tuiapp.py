@@ -397,7 +397,7 @@ class Review(View):
             t.add_row(mark, Text(r["company"][:20], style="bold"), why[:40], key=r["id"])
         self.query_one("#t", Static).update(self.heading((f"Review  {len(rows)} waiting for you", "bold"),
                                                        ("   a approve · e edit · s submit · k skip · esc back", DIM)))
-        if not rows:
+        if not rows and not self.fixes:
             self.query_one("#detail", Static).update(Text("Nothing is waiting for you. Everything is either sent or still being worked on.", style=DIM))
             self.query_one("#qs", DataTable).clear()
             return
@@ -406,6 +406,7 @@ class Review(View):
         self.pick(str(t.coordinate_to_cell_key(t.cursor_coordinate).row_key.value))
 
     def pick(self, key: str) -> None:
+        self.selected = key             # an application that finishes loading after you moved on is not shown
         if key.startswith("fix:"):
             self.show_fix(next((f for f in self.fixes if "fix:" + f["id"] == key), None))
         else:
@@ -445,6 +446,8 @@ class Review(View):
         return d["verdict"] != "green" and any(b.startswith(d["label"] + ":") for b in blockers)
 
     def show_job(self, d: dict) -> None:
+        if d["job"]["id"] != getattr(self, "selected", d["job"]["id"]):
+            return                      # you've moved on (to a fix, say): s must never act on this one
         self.job = d["job"]
         self.approval = d.get("approval")
         if self.approval:
