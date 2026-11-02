@@ -9,7 +9,7 @@ import pytest
 from jobsmith import db, draft, jobdetail, profile, runner, sources
 from jobsmith.fill import base, generic, greenhouse
 from jobsmith.fill.base import page_confirms_submission, scan_form
-from conftest import FIXTURES, TWIN_COMPONENTS, trust
+from conftest import FIXTURES, NESTED_COMPONENTS, TWIN_COMPONENTS, trust
 
 def _browser_available():
     from playwright.sync_api import sync_playwright
@@ -330,10 +330,12 @@ async def test_boxes_inside_two_copies_of_a_component_are_each_their_own(page):
     from jobsmith.fill.base import fill_field
     await page.set_content(TWIN_COMPONENTS)
     fields = {f["label"]: f for f in await scan_form(page)}
-    assert {"First name", "Last name", "City", "Over 18?", "Willing to relocate?"} <= set(fields), sorted(fields)
+    assert {"First name", "Last name", "City", "Over 18?", "Willing to relocate?", "Open to nights?"} <= set(fields), \
+        sorted(fields)
     assert len({f["field"] for f in fields.values()}) == len(fields)                  # a key names one box
+    assert fields["Willing to relocate?"]["options"] == ["Yes", "No"]                  # label[for], in its own copy
     for label, value in (("First name", "Alex"), ("Last name", "Rivera"), ("City", "Boston"),
-                         ("Over 18?", "Yes"), ("Willing to relocate?", "No")):
+                         ("Over 18?", "Yes"), ("Willing to relocate?", "No"), ("Open to nights?", "Yes")):
         f = fields[label]
         assert await fill_field(page, base.css_for(f["field"]), f["qtype"], value), label
     inside = lambda host, sel, js: page.evaluate(
@@ -342,6 +344,22 @@ async def test_boxes_inside_two_copies_of_a_component_are_each_their_own(page):
     assert await inside("x-field:not([id])", "#box", "value") == "Boston"
     assert await inside("#first", "[value=Y]", "checked") and await inside("#last", "[value=N]", "checked")
     assert not await inside("#first", "[value=N]", "checked") and not await inside("#last", "[value=Y]", "checked")
+    assert await inside("#third", "[value=Y]", "checked") and not await inside("#third", "[value=N]", "checked")
+
+
+async def test_unnamed_components_nested_three_deep_each_get_their_own_answer(page):
+    """Copies of a component with nothing naming them are told apart by their place, counted the way the filler
+    finds them (depth first): Alpha, Gamma inside it, then Beta."""
+    from jobsmith.fill.base import fill_field
+    await page.set_content(NESTED_COMPONENTS)
+    fields = {f["label"]: f for f in await scan_form(page)}
+    assert set(fields) == {"Alpha", "Beta", "Gamma"}, sorted(fields)
+    for label in fields:
+        assert await fill_field(page, base.css_for(fields[label]["field"]), "text", label.lower()), label
+    got = await page.evaluate("""() => { const out = {}; const walk = r => r.querySelectorAll('*').forEach(e => {
+        if (e.matches('input')) out[e.getRootNode().querySelector('label').innerText] = e.value;
+        if (e.shadowRoot) walk(e.shadowRoot); }); walk(document); return out; }""")
+    assert got == {"Alpha": "alpha", "Beta": "beta", "Gamma": "gamma"}, got
 
 
 async def test_lever_asks_about_the_jobs_own_country_so_a_london_job_waits_for_you(fake_llm, tmp_path, monkeypatch):

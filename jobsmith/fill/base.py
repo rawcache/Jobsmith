@@ -23,8 +23,11 @@ SCAN_JS = r"""
 () => {
   // every open shadow root on the page (web-component forms such as SmartRecruiters' keep their boxes inside them),
   // the page first; a box's label and the ids it points at are looked up in its own root
-  const roots = [document];
-  for (let i = 0; i < roots.length; i++) for (const e of roots[i].querySelectorAll('*')) if (e.shadowRoot) roots.push(e.shadowRoot);
+  // Depth first, each root's own boxes before the roots inside it: the order Playwright's selectors count in, so a
+  // component's place among its kind ("nth=") names the same one when filled
+  const roots = [];
+  const collect = r => { roots.push(r); for (const e of r.querySelectorAll('*')) if (e.shadowRoot) collect(e.shadowRoot); };
+  collect(document);
   const all = sel => roots.flatMap(r => [...r.querySelectorAll(sel)]);
   const rootOf = el => el.getRootNode();
   const byIdIn = (el, i) => (rootOf(el).getElementById ? rootOf(el).getElementById(i) : null) || document.getElementById(i);

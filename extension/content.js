@@ -13,9 +13,10 @@
   };
   // Web-component forms (SmartRecruiters) keep their boxes inside shadow roots: the page's own and every open one
   // inside it, never this panel's. An id or a label[for] is looked up in the box's own root first. As base.SCAN_JS.
-  const shadowRoots = () => {
-    const r = [document];
-    for (let i = 0; i < r.length; i++) for (const e of r[i].querySelectorAll("*")) if (e.shadowRoot && e.id !== "jobsmith-panel") r.push(e.shadowRoot);
+  const shadowRoots = () => {        // depth first, each root before the roots inside it (page order)
+    const r = [];
+    const collect = root => { r.push(root); for (const e of root.querySelectorAll("*")) if (e.shadowRoot && e.id !== "jobsmith-panel") collect(e.shadowRoot); };
+    collect(document);
     return r;
   };
   const $$ = sel => shadowRoots().flatMap(r => [...r.querySelectorAll(sel)]);
@@ -709,8 +710,8 @@
     if (!b) return;
     // a shadow root's <button> doesn't count the words slotted into it as its own text: those too
     const slotted = [...b.querySelectorAll("slot")].flatMap(s => s.assignedNodes({ flatten: true })).map(n => n.textContent).join(" ");
-    const t = (b.innerText || b.value || slotted || "").trim();
-    if (/^(submit|submit application|apply|send application|finish)/i.test(t))
+    // its own words, its value, or the words slotted into it (beside an icon of its own, or blank space)
+    if ([b.innerText, b.value, slotted].some(t => /^(submit|submit application|apply|send application|finish)/i.test((t || "").trim())))
       sessionStorage.setItem("jobsmith-submit", JSON.stringify({ url: location.href, title: pageTitle(), at: Date.now() }));
   }, true);
   async function checkThanks() {
