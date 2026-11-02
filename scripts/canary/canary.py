@@ -16,6 +16,8 @@ import argparse
 import asyncio
 import json
 import sys
+import time
+import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass, field
 
@@ -59,12 +61,29 @@ def posting_url(site: str, listing: object) -> str:
     raise ValueError(site)
 
 
+TRIES = 3                  # a read that times out once is the network, not the site: #34 opened on one Lever timeout
+
+
+def get_json(req: urllib.request.Request, tries: int = TRIES, wait: float = 10.0) -> object:
+    """A GET, tried again after a timeout or a dropped connection. An answer that isn't JSON, or an HTTP error, is
+    the site's own reply and fails at once."""
+    for n in range(tries):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return json.loads(r.read())
+        except urllib.error.HTTPError:
+            raise
+        except (TimeoutError, ConnectionError, urllib.error.URLError):
+            if n == tries - 1:
+                raise
+            time.sleep(wait * (n + 1))
+
+
 def find_posting(site: str) -> str:
     board, api = BOARDS[site]
     req = urllib.request.Request(api.format(board=board), headers={"Accept": "application/json",
                                                                    "User-Agent": "jobsmith-canary"})
-    with urllib.request.urlopen(req, timeout=30) as r:          # a GET
-        return posting_url(site, json.loads(r.read()))
+    return posting_url(site, get_json(req))
 
 
 def check_fields(fields: list[dict]) -> list[str]:
@@ -124,8 +143,7 @@ def greenhouse_api(posting: str) -> dict:
     host = "boards-api.eu.greenhouse.io" if region == "eu" else "boards-api.greenhouse.io"
     req = urllib.request.Request(f"https://{host}/v1/boards/{board}/jobs/{job_id}?questions=true",
                                  headers={"Accept": "application/json", "User-Agent": "jobsmith-canary"})
-    with urllib.request.urlopen(req, timeout=30) as r:          # a GET
-        return json.loads(r.read())
+    return get_json(req)
 
 
 async def run_site(site: str, browser) -> Result:

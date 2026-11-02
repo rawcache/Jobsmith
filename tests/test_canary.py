@@ -148,3 +148,53 @@ def test_the_canary_workflow_runs_weekly_with_no_credentials():
     text = (ROOT / ".github" / "workflows" / "canary.yml").read_text(encoding="utf-8")
     assert "secrets." not in text and "--label canary" in text
     assert "scripts/canary/canary.py" in text
+
+
+class _Reply:
+    def __init__(self, body: bytes):
+        self.body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def read(self):
+        return self.body
+
+
+def _urlopen(replies: list):
+    calls = []
+
+    def fake(req, timeout):
+        calls.append(req.full_url)
+        r = replies.pop(0)
+        if isinstance(r, Exception):
+            raise r
+        return _Reply(r)
+    return fake, calls
+
+
+def test_a_job_list_that_times_out_once_is_read_again_not_reported(monkeypatch):
+    """#34: one timeout reading Lever's job list opened a canary issue. The network gets two more tries."""
+    fake, calls = _urlopen([TimeoutError("The read operation timed out"),
+                            b'[{"applyUrl": "https://jobs.lever.co/palantir/1/apply"}]'])
+    monkeypatch.setattr(canary.urllib.request, "urlopen", fake)
+    monkeypatch.setattr(canary.time, "sleep", lambda s: None)
+    assert canary.find_posting("lever") == "https://jobs.lever.co/palantir/1/apply" and len(calls) == 2
+
+
+def test_a_job_list_that_never_answers_or_answers_an_error_is_still_reported(monkeypatch):
+    import urllib.error
+    monkeypatch.setattr(canary.time, "sleep", lambda s: None)
+    fake, calls = _urlopen([TimeoutError("timed out")] * canary.TRIES)
+    monkeypatch.setattr(canary.urllib.request, "urlopen", fake)
+    with pytest.raises(TimeoutError):
+        canary.find_posting("lever")
+    assert len(calls) == canary.TRIES
+    fake, calls = _urlopen([urllib.error.HTTPError("u", 404, "Not Found", {}, None)])
+    monkeypatch.setattr(canary.urllib.request, "urlopen", fake)
+    with pytest.raises(urllib.error.HTTPError):                 # the site's own answer: not tried again
+        canary.find_posting("lever")
+    assert len(calls) == 1
