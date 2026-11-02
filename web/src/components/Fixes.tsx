@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import { Icon } from "../ui";
+import { Icon, poll } from "../ui";
 
 /** Needs you, by fix: each thing held applications wait on, once, with how many it unblocks and a way to answer it
  *  right here. Answering re-checks every held application; the complete ones go out within your limits. */
@@ -11,14 +11,19 @@ export type Fix = {
 export type FixesData = { held: number; fixes: Fix[]; applications: { id: string; company: string; title: string; own: string[] }[] };
 type Answered = FixesData & { freed: string[]; started: string[]; note: string };
 
-export default function Fixes({ onChange, limit = 6 }: { onChange?: () => void; limit?: number }) {
+/** onCount: how many fixes there are, each time they load (Home says "Nothing is waiting" only at none). */
+export default function Fixes({ onChange, onCount, limit = 6 }: { onChange?: () => void; onCount?: (n: number) => void; limit?: number }) {
   const [d, setD] = useState<FixesData | null>(null);
   const [said, setSaid] = useState("");
-  const load = () => api.get<FixesData>("/api/fixes").then(setD).catch(() => {});
-  useEffect(() => { load(); }, []);
+  const show = (r: FixesData) => { setD(r); onCount?.(r.fixes.length); };
+  // kept fresh while you look: autopilot holds new applications as it works
+  useEffect(() => {
+    const get = () => { api.get<FixesData>("/api/fixes").then(show).catch(() => {}); };
+    get(); const t = poll(get, 15000); return () => t.stop();
+  }, []);
   if (!d || d.fixes.length === 0) return null;
   const done = (r: Answered) => {
-    setD(r);
+    show(r);
     const n = r.freed.length, s = r.started.length;
     setSaid(r.note || (n === 0 ? "Saved. Nothing else was waiting on just that." :
       `Saved. ${n} application${n === 1 ? " has" : "s have"} nothing left${s ? `: ${s} going out now` : ""}.`));
