@@ -16,7 +16,7 @@ RULES: list[tuple[str, str]] = [
     # Same rule as EXT_LABEL in fill/base.py and content.js.
     (r"^\W*(?:[a-z]+\W+){0,2}ext(?:ension)?\b\W*$|^\W*(?:(?:tele)?phone\s+)?ext(?:ension|\.|\b)", "phone_extension"),
     (r"(country|dial(l?ing)?) (phone )?code\b|\bcountry calling code", "phone_country_code"),
-    (r"phone (device )?type|type of phone", "phone_type"),
+    (r"phones? (device )?type|type of phone", "phone_type"),
     (r"phone|mobile", "phone"),
     (r"^resume|^cv\b|resume/cv", "resume"),
     (r"cover letter", "cover_letter"),
@@ -255,9 +255,13 @@ def pick_option(answer: str, options: list[str]) -> str | None:
     for o in options:
         if len(al) > 3 and (al in o.lower() or o.lower() in al):
             return o
-    words = set(re.findall(r"[a-z]{3,}", expanded))    # best word overlap, if it's unambiguous
+    # best word overlap, if it's unambiguous and covers at least half the answer's words: one shared word
+    # ("Technology") never makes "Example Institute of Technology" into "Academy of Careers and Technology"
+    stop = {"and", "the", "for", "with", "from"}
+    words = set(re.findall(r"[a-z]{3,}", expanded)) - stop
+    need = max(1, -(-len(set(re.findall(r"[a-z]{3,}", al)) - stop) // 2))
     scored = sorted(((len(words & set(re.findall(r"[a-z]{3,}", o.lower()))), o) for o in options
                      if not DECLINE.search(o)), reverse=True)
-    if scored and scored[0][0] > 0 and (len(scored) == 1 or scored[0][0] > scored[1][0]):
+    if scored and scored[0][0] >= need and (len(scored) == 1 or scored[0][0] > scored[1][0]):
         return scored[0][1]
     return None
