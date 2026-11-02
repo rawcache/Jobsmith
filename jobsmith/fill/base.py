@@ -450,14 +450,24 @@ async def combobox_text(page: Page, selector: str) -> str:
         return ""
 
 
+PLACEHOLDER = re.compile(r"^(select\b|--|please\b|—\s*make a selection)", re.I)     # SCAN_JS's PLACEHOLDER
+
+
 async def fill_select(page: Page, selector: str, value: str) -> bool:
     loc = page.locator(selector).first
     tag = (await loc.evaluate("e => e.tagName")).lower()
     if tag == "select":
-        # the choice by its words: exactly, else one that holds them; none, and it's left (no wait for one)
-        opts = await loc.evaluate("e => [...e.options].map(o => o.text.trim())")
-        match = next((o for o in opts if o.lower() == value.lower()), None) or \
-            next((o for o in opts if value.lower() in o.lower()), None)
+        # the choice by its words: exactly, else one that holds them. A list with no real choices yet may be
+        # loading (a State list fills in once a Country is picked): waited for, up to 3 s. A full list without
+        # it: left at once
+        match = None
+        for _ in range(12):
+            opts = await loc.evaluate("e => [...e.options].map(o => o.text.trim())")
+            match = next((o for o in opts if o.lower() == value.lower()), None) or \
+                next((o for o in opts if value.lower() in o.lower()), None)
+            if match or len([o for o in opts if o and not PLACEHOLDER.match(o)]) > 1:
+                break
+            await page.wait_for_timeout(250)
         if not match:
             return False
         await loc.select_option(label=match, timeout=5000)

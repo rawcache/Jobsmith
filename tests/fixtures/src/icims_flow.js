@@ -9,8 +9,8 @@
 //   - iCIMS's search dropdowns: the <select> is hidden and a link shows the choice; clicking it opens a list, and
 //     picking from it fills the <select> (iCIMS loads the values as you pick; here a choice's value is its words).
 //     Picking a country fills its State list from a short list of ours (the saved one was empty);
-//   - a resume chosen shows "Parsing resume, please wait..." for a moment, then what was read replaces the form's
-//     boxes (iCIMS's page says so); here nothing is read, so they come back empty. window.__resumeRead counts it;
+//   - a resume chosen shows "Parsing resume, please wait..." a moment later, then what was read replaces the form's
+//     boxes (iCIMS's page says so); here nothing is read, so they're drawn again empty. window.__resumeRead counts it;
 //   - Submit Profile makes the account from the Login and Password typed here: it never sends anything, and
 //     window.__signInPresses counts it.
 (() => {
@@ -81,19 +81,28 @@
       listOf(select)?.querySelectorAll("li[role=option]").forEach(li => wire(select, li));
     });
     // A resume chosen is read by iCIMS ("Parsing resume, please wait..."), and what it reads replaces what's in the
-    // form (the page says so). Here the read takes a moment and finds nothing, so the boxes come back empty
+    // form (the page says so). Here the notice comes a moment after the file is chosen, the read takes a moment more
+    // and finds nothing, and the boxes are drawn again, empty: new boxes, as iCIMS draws them, not the ones that
+    // were there. window.__parseDelay and window.__parseTime (ms) let a test make either longer
     const resume = document.getElementById("PortalProfileFields.Resume_File");
     const busy = document.getElementById("PortalProfileFields.Resume_Loading");
-    resume?.addEventListener("change", () => {
+    const boxes = '#profileForm input[type="text"], #profileForm input[type="email"]';
+    const drawn = new Map([...document.querySelectorAll(boxes)].map(i => [i.id, i.outerHTML]));
+    resume?.addEventListener("change", () => setTimeout(() => {
       busy.classList.remove("iCIMS_NoDisplay");
       setTimeout(() => {
-        document.querySelectorAll('#profileForm input[type="text"], #profileForm input[type="email"]').forEach(i => {
-          if (!/Login/.test(i.id)) i.value = "";
+        document.querySelectorAll(boxes).forEach(i => {
+          if (/Login/.test(i.id) || !drawn.has(i.id)) return;
+          const t = document.createElement("template");
+          t.innerHTML = drawn.get(i.id);
+          const fresh = t.content.firstElementChild;
+          fresh.value = "";
+          i.replaceWith(fresh);
         });
         busy.classList.add("iCIMS_NoDisplay");
         window.__resumeRead = (window.__resumeRead || 0) + 1;
-      }, 1500);
-    });
+      }, window.__parseTime ?? 1500);
+    }, window.__parseDelay ?? 600));
     // Submit Profile makes the account with the login and password typed here: never sent from here, counted
     document.querySelectorAll("#profileForm").forEach(f => f.addEventListener("submit", press));
     document.querySelectorAll("#cp_form_submit_i").forEach(b => b.addEventListener("click", press));
