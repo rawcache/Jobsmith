@@ -1,4 +1,6 @@
 """Asking Jobsmith about your job hunt in plain words, answered from its records with no AI."""
+import pytest
+
 from jobsmith import ask, db
 from jobsmith.skills import outreach
 
@@ -124,17 +126,31 @@ def test_stream_endpoint():
     assert blocks[0]["t"] == "head" and blocks[0]["text"].startswith("Best matches")
 
 
-def test_a_week_starts_at_monday_midnight_even_when_the_clocks_change():
-    """"This week" runs from Monday midnight, so early on a Monday, 5 hours ago is last week (#32). Taken from the
-    calendar: in the week the clocks go back, Monday midnight isn't 24 x days before today's midnight."""
+@pytest.fixture
+def new_york(monkeypatch):
+    """Local time with clock changes (US Eastern), whatever the machine's own zone. Needs time.tzset (not Windows)."""
+    import time
+    if not hasattr(time, "tzset"):
+        pytest.skip("can't switch the local time zone here")
+    monkeypatch.setenv("TZ", "America/New_York")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+def test_a_week_starts_at_monday_midnight_even_when_the_clocks_change(new_york):
+    """"This week" runs from Monday midnight, so early on a Monday, 5 hours ago is last week (#32). Days come from
+    the calendar: the US clocks went back on Sunday Nov 1, 2026 (a 25-hour day) and forward on Sunday Mar 8 (23)."""
     import datetime as dt
-    monday_early = dt.datetime(2026, 11, 2, 0, 44).timestamp()           # a Monday, 00:44
+    at = lambda *d: dt.datetime(*d).timestamp()
+    monday_early = at(2026, 11, 2, 0, 44)
     since, until, _ = ask.window("this week", monday_early)
-    assert since == dt.datetime(2026, 11, 2).timestamp() and until is None
+    assert since == at(2026, 11, 2) and until is None
     assert monday_early - 5 * 3600 < since                               # sent 5 hours ago: last week
-    after_change = dt.datetime(2026, 11, 4, 12, 0).timestamp()           # the Wednesday after the US clocks went back
-    assert ask.window("this week", after_change)[0] == dt.datetime(2026, 11, 2).timestamp()
-    assert ask.window("last week", after_change)[:2] == (dt.datetime(2026, 10, 26).timestamp(),
-                                                        dt.datetime(2026, 11, 2).timestamp())
-    assert ask.window("yesterday", after_change)[:2] == (dt.datetime(2026, 11, 3).timestamp(),
-                                                        dt.datetime(2026, 11, 4).timestamp())
+    noon = at(2026, 11, 2, 12)
+    assert ask.window("yesterday", noon)[:2] == (at(2026, 11, 1), at(2026, 11, 2))         # 25 hours
+    assert ask.window("last week", noon)[:2] == (at(2026, 10, 26), at(2026, 11, 2))
+    assert ask.window("this week", at(2026, 11, 4, 12))[0] == at(2026, 11, 2)
+    assert ask.window("yesterday", at(2026, 3, 9, 12))[:2] == (at(2026, 3, 8), at(2026, 3, 9))  # 23 hours
+    assert ask.window("last week", at(2026, 3, 11, 12))[:2] == (at(2026, 3, 2), at(2026, 3, 9))
