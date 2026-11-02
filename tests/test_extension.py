@@ -54,7 +54,8 @@ const reply = msg => {
   if (msg.type === "answers") return { ok: true, data: { job_id: "j1", resume: __opts.resume || null, error: null,
     answers: msg.body.fields.map(f => f.type === "file" ? { id: f.id, file: "resume", kind: "file" }
                                                        : Object.assign({ id: f.id, value: ANSWERS[f.label] || "", kind: "standard" },
-                                                                       (__opts.answers || {})[f.label] || {})) } };
+                                                                       (__opts.answers || {})[f.label] || {},
+                                                                       (__opts.byName || {})[f.name] || {})) } };
   if (msg.type === "generate") return { ok: true, data: Object.assign({ text: "", based_on: [], error: null }, __opts.generate || {}) };
   if (msg.type === "form-report") return { ok: true, data: { url: "https://github.com/rawcache/Jobsmith/issues/new?title=x" } };
   if (msg.type === "file") return __opts.resume ? { ok: true, name: __opts.resume, type: "application/pdf", b64: btoa("%PDF-1.4") }
@@ -1846,3 +1847,67 @@ async def test_autofill_fills_icims_profile_and_leaves_the_login_to_you(page):
     assert await box("-1_PersonProfileFields.AddressCountry") == "United States"
     assert await page.evaluate("window.__signInPresses") == 0
     await _never_submitted(page)
+
+
+REDRAWN_URL = "https://careers.example.com/apply/redrawn"
+REDRAWN = """<form><label for="em">Email</label><input id="em" name="email">
+<label for="r">Resume</label><input type="file" id="r" name="resume">
+<p id="busy" hidden>Parsing resume, please wait...</p>
+<div id="boxes"><label>City <input name="home_city" id="home_city"></label>
+<label>City <input name="work_city" id="work_city"></label>
+<label>Notes <input name="notes" id="notes"></label></div></form><script>
+window.__changes = 0;
+document.getElementById("r").addEventListener("change", () => { window.__changes++; setTimeout(() => {
+  const busy = document.getElementById("busy"); busy.hidden = false;
+  setTimeout(() => {          // the read draws the boxes again: new elements, the two Cities in the other order,
+    const box = (n, l) => `<label>${l} <input name="${n}" id="${n}"></label>`;   // and Notes gone
+    document.getElementById("boxes").innerHTML = (window.__dropHome ? "" : box("work_city", "City") + box("home_city", "City"))
+      + (window.__dropHome ? box("work_city", "City") : "");
+    busy.hidden = true; }, 400); }, 500); });
+</script>"""
+
+
+async def _redrawn(page, before: str = ""):
+    await page.route("https://**/*", lambda r: r.fulfill(status=200, content_type="text/html", body=REDRAWN)
+                     if r.request.url == REDRAWN_URL else r.abort())
+    await page.add_init_script(before + _stub({"panelOpen": True}, resume="resume.pdf", byName={
+        "home_city": {"value": "Boston"}, "work_city": {"value": "Denver"}, "notes": {"value": "Hi"},
+        "email": {"value": "alex.rivera@example.com"}}))
+    await page.goto(REDRAWN_URL)
+    await page.add_script_tag(path=str(EXT / "content.js"))
+    await page.wait_for_function("document.querySelector('#jobsmith-panel')?.shadowRoot?.querySelector('.wrap')")
+    await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
+    note = "document.querySelector('#jobsmith-panel').shadowRoot.querySelector('.note')"
+    await page.wait_for_function(f"{note}?.innerText.includes('Filled')", timeout=15000)
+
+
+@browser
+async def test_boxes_a_resume_read_draws_again_get_their_own_answers(page):
+    """A site that reads your resume can draw its boxes again (new elements, maybe in another order). Each answer
+    goes back into its own box, found by the box's name: two "City" boxes swapped by the redraw keep their own
+    answers, and an answer whose box is gone is typed nowhere."""
+    await _redrawn(page)
+    assert await page.input_value("#home_city") == "Boston" and await page.input_value("#work_city") == "Denver"
+    assert await page.evaluate("window.__changes") == 1
+
+
+@browser
+async def test_an_answer_whose_box_a_resume_read_removed_goes_nowhere_else(page):
+    """Two boxes with the same question, and the read keeps only one: the one it kept gets its own answer, never
+    the other box's."""
+    await _redrawn(page, "window.__dropHome = true;")
+    assert await page.input_value("#work_city") == "Denver"
+    assert await page.locator("#home_city").count() == 0
+
+
+@browser
+async def test_fill_again_doesnt_upload_a_resume_that_is_already_attached(page):
+    """Pressing Fill again on a form whose resume is already attached doesn't send it to be read a second time."""
+    await _redrawn(page)
+    await page.evaluate("""() => { const b = document.querySelector('#jobsmith-panel').shadowRoot.querySelector('.note');
+                                   b.innerText = ''; }""")
+    await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
+    note = "document.querySelector('#jobsmith-panel').shadowRoot.querySelector('.note')"
+    await page.wait_for_function(f"{note}?.innerText.includes('Filled')", timeout=15000)
+    assert await page.evaluate("window.__changes") == 1
+    assert await page.evaluate("__calls.filter(c => c.type === 'file').length") == 1
