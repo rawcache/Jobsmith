@@ -157,7 +157,9 @@ You're responsible for what's submitted in your name.
 
 ## FAQ
 
-**Does it cost anything?** No. Gemini's free tier covers most days; smith and the voice skill cost nothing at all.
+**Does it cost anything?** No. With Gemini's free tier, Jobsmith keeps to a daily AI budget (15 calls unless you
+change it in Settings) well under the free limit, spends none on an application that waits for you anyway, and
+shows "AI used today" on Home. Smith and the voice skill cost nothing at all.
 
 **Which sites?** Greenhouse, Ashby and Lever end to end; most other single-page forms filled generically. Workday is
 filled page by page and stops at review; you sign in yourself. On iCIMS, Jobsmith fills the profile page and you make

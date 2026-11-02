@@ -68,8 +68,27 @@
   another country ("authorized to work in Canada?") waits for you instead of getting your US answer, and one that
   takes the US or elsewhere ("based in the U.S., Canada or LATAM?") gets your US "Yes" only; and whether a company
   may text you (SMS, WhatsApp) is always left for you.
+- "Needs you" lists each thing held applications wait on once, with how many it unblocks ("Confirm work
+  authorization: unblocks 41"), and a way to answer it right there: on Home, in the terminal's review (and `/review`)
+  and in the extension's popup. An answer re-checks every held application at once, and the ones now complete go
+  out within your daily limits. A missing resume PDF is listed first ("blocks every application").
+- Your saved answers (Settings) to "Why do you want to join {company}?", "Why this role?", "Additional information"
+  and a cover letter, with optional `{company}` and `{role}` slots. They're used exactly as you wrote them, marked
+  "your saved answer", and count as filled.
+- Every AI call is logged with why it was made, for which application, its tokens and whether it worked; Stats
+  lists every call (a failed one too), `jobsmith stats` counts them by reason, and Home shows "AI used today: N
+  calls".
+- A daily AI budget (Settings). Unset, it's 15 calls a day when Gemini's free tier writes, well under its daily
+  limit, and no limit for the others; smith on this computer doesn't count. When it's used up, that's said once,
+  not once per application, and applications that need no AI still go.
 
 ### Changed
+- Autopilot no longer spends AI on an application it would hold anyway: what needs no AI (your profile, your
+  saved answers) is answered first, and one still missing a fact from you is held before any research or AI
+  writing. A role you may not qualify for is skipped before any AI too, not after it was drafted. Answers the AI already wrote aren't paid for again on the next run, and the ten-minute check that
+  your AI is reachable no longer asks Gemini to write anything.
+- Without a resume PDF, autopilot starts no application (each one attaches it) and says so once.
+- An optional essay box you have no saved answer for is left blank instead of holding the application.
 - A new website: a clean top bar with the GitHub star count and one Install button, a centred headline over a large
   dashboard screenshot, then how it works (find, fill, check, submit), a terminal sample, the safety rules, skills,
   install steps for macOS, Linux and Windows, and a short FAQ. It follows your system's light or dark setting

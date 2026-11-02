@@ -141,7 +141,7 @@ async def generate(url: str, label: str, title: str = "", site_name: str = "", d
     f = {"field": "ext_" + re.sub(r"[^a-z0-9]+", "_", label.lower())[:60], "label": label[:300], "qtype": "textarea",
          "required": False, "options": [], "description": (description + (f" Limit: {limit} characters." if limit else ""))[:600],
          "section": "main"}
-    results, err = await draft.answer_fields(job, [f], skip_locked=False)
+    results, err = await draft.answer_fields(job, [f], skip_locked=False, blank_optional=False)
     draft.save_results(jid, [f], results)
     r = results.get(f["field"]) or {}
     facts = profile.facts_by_id()

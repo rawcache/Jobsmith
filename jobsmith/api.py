@@ -235,6 +235,7 @@ async def status():
                      "last_summary": scheduler.state["last_summary"]},
             "needs_you": db.q1("SELECT COUNT(*) n FROM jobs WHERE status IN ('filled','error')")["n"],
             "tokens_today": _usage_rows("at > ?", (db.now() - 86400,))["tokens"],
+            "ai_today": llm.ai_today(),
             "onboarded": bool(s_.get("onboarded")) or bool(db.q1("SELECT 1 FROM runs WHERE kind='submit' LIMIT 1")),
             "setup_step": s_.get("setup_step") or "", "build": BUILD, "version": __version__, "demo": DEMO,
             "skills": [{"key": k["key"], "name": k["name"], "enabled": k["enabled"]} for k in skills.listing()],
@@ -621,6 +622,9 @@ async def upload(file: UploadFile = File(...), slot: str = Form("resume")):
         raise HTTPException(400, "The attached resume must be a PDF.")
     res = await profile.ingest_document(dest, slot)
     match.rescore()
+    if profile.attachment_file() is not None:          # the fix every application waited on: they go now
+        from . import fixes
+        fixes.recheck(more=True)
     return res
 
 
@@ -1034,7 +1038,7 @@ async def cover_letter_write(job_id: str):
     from . import letters
     job_or_404(job_id)
     try:
-        with llm.usage_for(job_id, "answers"):
+        with llm.usage_for(job_id, "cover letter"):
             text = await letters.write_cover(job_id)
     except RuntimeError as e:
         raise HTTPException(400, str(e))
@@ -1241,7 +1245,66 @@ def usage():
     top = db.q("""SELECT u.job_id, j.company, j.title, SUM(u.input_tokens + u.output_tokens) tokens, SUM(u.cost_usd) cost
                   FROM usage u JOIN jobs j ON j.id = u.job_id GROUP BY u.job_id ORDER BY MAX(u.at) DESC LIMIT 30""")
     return {"today": _usage_rows("at > ?", (day,)), "all": _usage_rows(), "avg_per_app": avg,
-            "apps": len(per_app), "by_purpose": by_purpose, "by_model": by_model, "recent": top}
+            "apps": len(per_app), "by_purpose": by_purpose, "by_model": by_model, "recent": top,
+            "ai_today": llm.ai_today()}
+
+
+@app.get("/api/usage/calls")
+def usage_calls(limit: int = 100):
+    """Every AI call, newest first: when, what for, which application, which AI, tokens, and whether it worked."""
+    return {"calls": db.q("""SELECT u.at, u.purpose, u.job_id, j.company, j.title, u.backend, u.model, u.input_tokens,
+                                    u.output_tokens, u.web_searches, u.ok, u.error FROM usage u
+                             LEFT JOIN jobs j ON j.id=u.job_id ORDER BY u.at DESC LIMIT ?""", (min(limit, 1000),)),
+            "today": llm.ai_today()}
+
+
+# --------------------------------------------------------------------------- Needs you, by fix
+@app.get("/api/fixes")
+def get_fixes():
+    from . import fixes
+    return fixes.compute()
+
+
+class FixAnswer(BaseModel):
+    id: str
+    value: str = ""
+
+
+@app.post("/api/fixes/answer")
+async def answer_fix(b: FixAnswer):
+    """Your answer to one fix, then every held application re-checked; the ones now complete go out within your
+    limits. Async: it may start applications."""
+    from . import fixes
+    try:
+        return fixes.answer(b.id, b.value)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/fixes/recheck")
+async def recheck_fixes():
+    from . import fixes
+    return fixes.recheck()
+
+
+@app.get("/api/essays")
+def get_essays():
+    from . import essays
+    return {"kinds": essays.KINDS, "saved": essays.saved()}
+
+
+class EssayIn(BaseModel):
+    text: str = ""
+
+
+@app.put("/api/essays/{kind}")
+async def put_essay(kind: str, b: EssayIn):
+    from . import essays, fixes
+    try:
+        essays.save(kind, b.text)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"saved": essays.saved(), "recheck": fixes.recheck()}
 
 
 def job_usage(job_id: str) -> dict:
@@ -1353,7 +1416,7 @@ async def ext_ping():
 @app.post("/api/ext/answers")
 async def ext_answers(b: ExtFill):
     from . import extension
-    with llm.usage_for(None, "answers"):
+    with llm.usage_for(None, "extension answers"):
         return await extension.answers(b.url, b.fields, b.title, b.company, b.site_name)
 
 
@@ -1409,7 +1472,7 @@ class ExtGenerate(BaseModel):
 @app.post("/api/ext/generate")
 async def ext_generate(b: ExtGenerate):
     from . import extension
-    with llm.usage_for(None, "answers"):
+    with llm.usage_for(None, "extension answer"):
         return await extension.generate(b.url, b.label, b.title, b.site_name, b.description, b.limit)
 
 

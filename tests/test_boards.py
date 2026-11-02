@@ -326,7 +326,7 @@ async def test_apply_anyway_makes_a_left_out_role_a_match_that_later_syncs_keep(
     src, senior = await _left_out_board()
     prepared = []
 
-    async def prepare(jid):                        # stop before anything opens: this is about the choice
+    async def prepare(jid, **kw):                  # stop before anything opens: this is about the choice
         prepared.append(jid)
     monkeypatch.setattr(runner, "prepare", prepare)
     monkeypatch.setattr(eligibility, "check", lambda job: {"ok": True, "reasons": [], "notes": []})
@@ -343,7 +343,7 @@ async def test_apply_anyway_makes_a_left_out_role_a_match_that_later_syncs_keep(
 async def test_autopilot_on_its_own_never_waives_a_left_out_role(monkeypatch):
     from jobsmith import runner
     _, senior = await _left_out_board()
-    monkeypatch.setattr(runner, "prepare", lambda jid: (_ for _ in ()).throw(AssertionError("opened " + jid)))
+    monkeypatch.setattr(runner, "prepare", lambda jid, **kw: (_ for _ in ()).throw(AssertionError("opened " + jid)))
     await runner.autopilot([senior])
     assert db.q1("SELECT status FROM jobs WHERE id=?", (senior,))["status"] == "left_out"
 

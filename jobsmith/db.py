@@ -113,7 +113,7 @@ CREATE TABLE IF NOT EXISTS drafts (
 CREATE TABLE IF NOT EXISTS usage (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   job_id TEXT,                     -- NULL for profile parsing, commands, etc.
-  purpose TEXT NOT NULL,           -- research|answers|command|profile|other
+  purpose TEXT NOT NULL,           -- why: research|answers|command|profile|outreach|connection check|other
   backend TEXT NOT NULL,
   model TEXT NOT NULL DEFAULT '',
   input_tokens INTEGER NOT NULL DEFAULT 0,
@@ -122,7 +122,9 @@ CREATE TABLE IF NOT EXISTS usage (
   web_searches INTEGER NOT NULL DEFAULT 0,
   cost_usd REAL,                   -- what the provider reported (Claude Code reports an API-equivalent figure)
   seconds REAL,
-  at REAL NOT NULL
+  at REAL NOT NULL,
+  ok INTEGER NOT NULL DEFAULT 1,   -- 0: the call failed (error says why; "quota: …" when a limit refused it)
+  error TEXT
 );
 CREATE INDEX IF NOT EXISTS usage_job ON usage(job_id);
 
@@ -200,6 +202,10 @@ def conn() -> sqlite3.Connection:
         dcols = {r[1] for r in c.execute("PRAGMA table_info(drafts)").fetchall()}
         if "model" not in dcols:
             c.execute("ALTER TABLE drafts ADD COLUMN model TEXT")
+        ucols = {r[1] for r in c.execute("PRAGMA table_info(usage)").fetchall()}
+        if "ok" not in ucols:          # failed calls are logged too, so a run of refused calls shows up
+            c.execute("ALTER TABLE usage ADD COLUMN ok INTEGER NOT NULL DEFAULT 1")
+            c.execute("ALTER TABLE usage ADD COLUMN error TEXT")
         _conn = c
         _rehome_paths(c)
     return _conn

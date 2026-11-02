@@ -102,6 +102,9 @@ DEFAULT_SETTINGS: dict = {
     "on_battery": "slow",              # slow: one application at a time | pause: autopilot waits for the charger
     "smith_fallback": "plugged",       # when a cloud AI's free limit runs out: plugged | always | never
     "llm_concurrency": 3,              # parallel drafting calls
+    # AI calls a day to a cloud AI, at most (smith on this computer doesn't count). None: 15 when it's Gemini's free
+    # tier (well under its daily limit), no limit for the others. 0: no limit
+    "ai_daily_budget": None,
     # --- Autonomy ---------------------------------------------------------
     # autopilot: applies on its own; anything it isn't sure about waits in your review queue
     # copilot: fill the form, stop before submit, you click Submit
@@ -109,6 +112,7 @@ DEFAULT_SETTINGS: dict = {
     "autopilot_min_confidence": 0.7,   # AI-written answers below this wait for you
     "trust_threshold": 3,              # green flags (unedited) needed before a question type is auto-trusted
     "research_enabled": True,          # web research on the company before drafting (uses LLM web search)
+    "saved_answers": {},               # your own answers to common essay questions, by kind (see essays.py)
     "browser_channel": "chrome",       # use your installed Chrome; falls back to Playwright Chromium
     "headless": False,
     "browser_window": "background",   # background: window stays minimized, peek from the dashboard | visible

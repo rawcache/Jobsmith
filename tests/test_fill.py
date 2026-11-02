@@ -217,18 +217,17 @@ async def test_lever_saved_palantir_form_is_filled_and_held_before_submit(fake_l
     through the whole autopilot path: scan, draft, fill, hold. Work authorization and sponsorship come from the
     confirmed profile (the job is in New York); the place is picked from Lever's lookup; high school questions
     and the AI notetaker consent wait for Alex; the disability question stays blank because any answer there needs
-    Alex's signature, which Jobsmith never gives. Submit is never pressed."""
+    Alex's signature, which Jobsmith never gives; the optional "time you changed your mind" essay is left blank (no
+    saved answer of Alex's fits it), never written by AI. Submit is never pressed."""
     async def no_watch(*a):
         return None
     monkeypatch.setattr(runner, "watch_tab", no_watch)
     jid = await _lever_job(tmp_path)
-    jetson = [f["id"] for f in profile.facts() if "Jetson" in f["text"]]
     asked = []
 
     def responder(system, prompt):
         asked.append(prompt.split("QUESTIONS TO ANSWER:")[1])
-        return {"answers": [{"field": CHANGED_MIND, "fact_ids": jetson, "confidence": 0.9,
-                             "answer": "I switched my fire detection model to NVIDIA Jetson Nano after testing it."}]}
+        return {"answers": []}
     fake_llm(responder)
     await runner.prepare(jid, research=False)
     try:
@@ -240,7 +239,7 @@ async def test_lever_saved_palantir_form_is_filled_and_held_before_submit(fake_l
         assert await page.evaluate("document.querySelector('#resume-upload-input').files.length") == 1
         assert await page.input_value('[name="urls[GitHub]"]') == profile.answers()["github"]["value"]
         assert await _checked(page, WORK_AUTH_LEVER) == ["Yes"] and await _checked(page, SPONSORSHIP) == ["No"]
-        assert "Jetson" in await page.input_value(CHANGED_MIND)
+        assert await page.input_value(CHANGED_MIND) == ""                   # optional essay: left blank, not held
         assert await page.input_value(HIGH_SCHOOL) == "" and await page.input_value(HIGH_SCHOOL_YEAR) == ""
         assert await _checked(page, NOTETAKER) == []
         assert await page.eval_on_selector('[name="eeo[veteran]"]', "e => e.selectedOptions[0].text") == \
@@ -257,7 +256,7 @@ async def test_lever_saved_palantir_form_is_filled_and_held_before_submit(fake_l
     assert auth["answer"] == "Yes" and auth["rationale"].endswith("(you confirmed it)")
     assert drafts["Disability status"]["answer"] == "" and "never signs" in drafts["Disability status"]["rationale"]
     never_ai = ("authorized to work", "sponsorship", "High School", "Disability", "Veteran", "notetakers",
-                "Which university")
+                "Which university", "changed your mind")
     assert not [q for q in never_ai for a in asked if q in a], asked        # rule 2, and nothing to guess
     job = db.q1("SELECT status, hold_reason FROM jobs WHERE id=?", (jid,))
     assert job["status"] == "filled" and job["hold_reason"]
