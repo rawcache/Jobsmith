@@ -12,8 +12,9 @@ LETTERS_DIR = DATA_DIR / "letters"
 
 
 def cover_draft(job_id: str) -> dict | None:
+    """This application's cover letter: a written one before an optional box left blank."""
     return db.q1("""SELECT * FROM drafts WHERE job_id=? AND (lower(field) LIKE '%cover%' OR lower(label) LIKE '%cover letter%')
-                    ORDER BY id LIMIT 1""", (job_id,))
+                    ORDER BY TRIM(COALESCE(NULLIF(final_answer, ''), answer, '')) = '', id LIMIT 1""", (job_id,))
 
 
 def cover_text(job_id: str) -> str:
@@ -78,7 +79,7 @@ def cover_pdf(job_id: str, out_dir: Path | None = None) -> Path | None:
 async def write_cover(job_id: str) -> str:
     """Write a cover letter for this job even if its form doesn't ask for one (you can attach it yourself)."""
     job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (job_id,)))
-    if cover_draft(job_id):
+    if cover_text(job_id).strip():          # written already (an optional one left blank is written now)
         return cover_text(job_id)
     f = {"field": "cover_letter", "label": "Cover letter", "qtype": "textarea", "required": False, "options": [],
          "description": "Cover letter, under 250 words.", "section": "main"}

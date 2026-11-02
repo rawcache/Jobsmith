@@ -855,17 +855,30 @@ def _check_key(b: Backend) -> tuple:
     return b.name, getattr(b, "model", ""), getattr(b, "path", ""), secret
 
 
+# Their check is a real one-line request, so it counts against your daily budget like any call (Gemini's and the
+# Claude CLI's write nothing)
+CHECK_SPENDS = ("anthropic_api", "openai_api")
+
+
 async def _check(key: tuple, b: Backend) -> tuple[bool, str]:
     gen = _checks_gen
     b.last_usage = None
     t0 = time.time()
+    spends = b.name in CHECK_SPENDS
     try:
-        ok, msg = await b.available()
+        if spends:
+            with spend(b):
+                ok, msg = await b.available()
+        else:
+            ok, msg = await b.available()
+    except BudgetError:        # budget used: not checked (the last answer stands), never a call over it
+        prev = _avail_cache.get(key)
+        return (prev[1], prev[2]) if prev else (False, "Today's AI budget is used, so your AI is checked again tomorrow.")
     except Exception as e:     # a check that broke says so; it never leaves the next one waiting on it
         ok, msg = False, f"Couldn't check your AI: {e.__class__.__name__}"
-    if getattr(b, "last_usage", None):      # a check that was a real (tiny) request is logged like any call
-        with usage_for(None, "connection check"):
-            _record_usage(b, time.time() - t0)
+    if getattr(b, "last_usage", None) or (spends and not ok):   # a real (tiny) request is logged like any call,
+        with usage_for(None, "connection check"):                # a failed one too
+            _record_usage(b, time.time() - t0, None if ok else LLMError(msg))
     if gen == _checks_gen:                  # not from before you signed in or switched AI
         _avail_cache[key] = (time.time(), ok, msg)
     return ok, msg

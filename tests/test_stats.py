@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from jobsmith import audit, clicmds, db, draft, extension, guardrails, outcomes, profile, runner, sources, stats
+from jobsmith import audit, clicmds, db, draft, extension, guardrails, llm, outcomes, profile, runner, sources, stats
 
 DAY = 86400
 
@@ -279,7 +279,7 @@ def test_stats_count_every_ai_call_by_why_it_was_made_failed_ones_too():
     rows = [(jid, "answers", "gemini_api", 900, 100, 1, None, now - 60),
             (jid, "answers", "gemini_api", 0, 0, 0, "quota: Gemini's free limit for today is used", now - 30),
             (jid, "research", "gemini_api", 1500, 300, 1, None, now - 90),
-            (None, "connection check", "smith", 10, 2, 1, None, now - 10),
+            (None, "connection check", llm.OllamaLocal.name, 10, 2, 1, None, now - 10),   # smith
             (jid, "answers", "gemini_api", 500, 50, 1, None, now - 40 * DAY)]       # outside the period
     for r in rows:
         db.x("""INSERT INTO usage(job_id, purpose, backend, input_tokens, output_tokens, ok, error, at)

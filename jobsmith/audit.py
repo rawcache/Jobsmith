@@ -122,6 +122,11 @@ def provenance(d: dict, answers: dict, facts: dict, job: dict | None = None) -> 
     if kind == "learned":
         return {"source": "approved", "detail": [{"ref": d.get("rationale") or "Your approved answer", "text": ""}],
                 "traces": True}
+    if kind == "saved":
+        return {"source": "you", "traces": True,
+                "detail": [{"ref": d.get("rationale") or "Your saved answer", "text": ""}]}
+    if kind == "left_blank":
+        return {"source": "you", "traces": True, "detail": [{"ref": "Left blank: optional, no saved answer", "text": ""}]}
     if kind == "voice":
         return {"source": "writing", "detail": [{"ref": d.get("rationale") or "Your writing", "text": ""}],
                 "traces": True}
