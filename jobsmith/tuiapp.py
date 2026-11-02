@@ -344,7 +344,9 @@ class View(Screen):
 
 
 class Review(View):
-    """Applications waiting for you: each one's answers, problems first. Approve, edit, submit, skip."""
+    """Applications waiting for you: first each fix they wait on, once, with how many it unblocks (e answers it,
+    and every held application is checked again); then each application's answers, problems first. Approve,
+    edit, submit, skip."""
     BINDINGS = View.BINDINGS + [
         Binding("a", "approve", "Approve"), Binding("e", "edit", "Edit"), Binding("s", "submit", "Submit"),
         Binding("k", "skip", "Skip job"), Binding("t", "takeover", "Take over"), Binding("c", "code", "Code"),
@@ -371,17 +373,24 @@ class Review(View):
         self.job: dict = {}
         self.drafts: list[dict] = []
         self.approval: dict | None = None
+        self.fixes: list[dict] = []
+        self.fix: dict | None = None
         self.load_jobs()
 
     @work(thread=True, exclusive=True, group="jobs")
     def load_jobs(self) -> None:
         home = self.get("/api/home")
-        self.app.call_from_thread(self.show_jobs, home.get("review", []))
+        fixes = self.get("/api/fixes").get("fixes", [])
+        self.app.call_from_thread(self.show_jobs, home.get("review", []), fixes)
 
-    def show_jobs(self, rows: list[dict]) -> None:
+    def show_jobs(self, rows: list[dict], fixes: list[dict] | None = None) -> None:
         t = self.query_one("#jobs", DataTable)
         keep = t.cursor_row
         t.clear()
+        self.fixes = fixes or []
+        for f in self.fixes:            # what to do, once each, before the applications it holds
+            count = "blocks every one" if f["id"] == "resume_pdf" else f"unblocks {f['unblocks']}"
+            t.add_row(Text("?", style=WARN), Text(f["title"][:20], style="bold " + EMBER), count, key="fix:" + f["id"])
         for r in rows:
             mark = Text("✗", style=BAD) if r["status"] == "error" else Text("!", style=WARN)
             why = "approve the first submission" if r.get("approve") else r.get("hold_reason") or r.get("error") or "ready to submit"
@@ -394,12 +403,36 @@ class Review(View):
             return
         t.move_cursor(row=min(keep, t.row_count - 1))
         t.focus()
-        self.load_job(str(t.coordinate_to_cell_key(t.cursor_coordinate).row_key.value))
+        self.pick(str(t.coordinate_to_cell_key(t.cursor_coordinate).row_key.value))
+
+    def pick(self, key: str) -> None:
+        if key.startswith("fix:"):
+            self.show_fix(next((f for f in self.fixes if "fix:" + f["id"] == key), None))
+        else:
+            self.fix = None
+            self.load_job(key)
 
     @on(DataTable.RowHighlighted, "#jobs")
     def picked_job(self, e: DataTable.RowHighlighted) -> None:
-        if e.row_key and e.row_key.value != self.job.get("id"):
-            self.load_job(str(e.row_key.value))
+        if e.row_key and (str(e.row_key.value).startswith("fix:") or e.row_key.value != self.job.get("id")):
+            self.pick(str(e.row_key.value))
+
+    def show_fix(self, f: dict | None) -> None:
+        """One fix: what it is, how many applications wait on it, and how to answer (e)."""
+        self.fix, self.job, self.drafts, self.approval = f, {}, [], None
+        qs = self.query_one("#qs", DataTable)
+        qs.clear()
+        qs.border_title = "Fix"
+        if not f:
+            return
+        how = ("Upload your resume PDF in the dashboard (Profile), then come back." if f["kind"] == "resume_pdf" else
+               "Press e to answer: " + " / ".join(f["choices"]) if f.get("choices") else "Press e to answer.")
+        waits = ("Every application waits for it." if f["kind"] == "resume_pdf" else
+                 f"{f['unblocks']} held application{'s wait' if f['unblocks'] != 1 else ' waits'} on it"
+                 + (f"; {f['ready_after']} need nothing else." if f.get("ready_after") else "."))
+        self.query_one("#detail", Static).update(Group(
+            Text(f["title"], style="bold"), Text(""), Text(waits, style=WARN), Text(f.get("detail") or "", style=STEEL),
+            Text(""), Text(f"Now: {f['value']}" if f.get("value") else "", style=INK), Text(how, style=DIM)))
 
     @work(thread=True, exclusive=True, group="job")
     def load_job(self, jid: str) -> None:
@@ -514,6 +547,9 @@ class Review(View):
             self.notify(r["error"], severity="warning") if r.get("error") else self.load_job(self.job["id"])
 
     def action_edit(self) -> None:
+        if self.fix:
+            self.answer_fix(self.fix)
+            return
         x = self.current()
         if not x or self._filled_already():
             return
@@ -523,6 +559,37 @@ class Review(View):
                 r = self.send("PUT", f"/api/drafts/{x['id']}", {"final_answer": text, "verdict": "green"})
                 self.notify(r["error"], severity="warning") if r.get("error") else self.load_job(self.job["id"])
         self.app.push_screen(EditAnswer(x["label"], x.get("final_answer") or x.get("answer") or ""), saved)
+
+    def answer_fix(self, f: dict) -> None:
+        """Your answer to one fix; every held application is checked again and the complete ones go out."""
+        if f["kind"] == "resume_pdf":
+            self.notify("Upload your resume PDF on the dashboard's Profile page; the applications waiting on it go "
+                        "out after that.", timeout=8)
+            return
+
+        def saved(text: str | None) -> None:
+            if text is None or (f["kind"] != "essay" and not text.strip()):
+                return
+            value = text if f["kind"] == "essay" else text.strip()
+            if f.get("choices"):
+                match = [c for c in f["choices"] if c.lower() == value.lower()]
+                if not match:
+                    self.notify("Pick one of: " + " / ".join(f["choices"]), severity="warning")
+                    return
+                value = match[0]
+            r = self.send("POST", "/api/fixes/answer", {"id": f["id"], "value": value}, timeout=120)
+            if r.get("error"):
+                self.notify(str(r["error"]), severity="warning")
+                return
+            n, sent = len(r.get("freed", [])), len(r.get("started", []))
+            msg = r.get("note") or (f"Saved. {n} application{'s have' if n != 1 else ' has'} nothing left"
+                                    + (f"; {sent} going out now." if sent else ".") if n else "Saved.")
+            self.notify(msg, timeout=8)
+            self.app.say(f"{f['title']}: saved. {msg}")
+            self.load_jobs()
+        hint = (" (" + " / ".join(f["choices"]) + ")") if f.get("choices") else \
+            ("  {company} and {role} are filled in for you" if f["kind"] == "essay" else "")
+        self.app.push_screen(EditAnswer(f["title"] + hint, f.get("value") or ""), saved)
 
     def action_submit(self) -> None:
         if not self.job:

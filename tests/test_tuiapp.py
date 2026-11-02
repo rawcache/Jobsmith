@@ -84,6 +84,13 @@ def test_ask_review_and_autopilot(engine):
             await pilot.press("enter")
             await pilot.pause(1.2)
             assert isinstance(app.screen, Review)
+            # what held applications wait on comes first, once each (here: the resume PDF), then the applications
+            fixes = [f["id"] for f in app.screen.fixes]
+            assert fixes == ["resume_pdf"] and app.screen.fix["id"] == "resume_pdf"
+            assert "blocks every one" in str(app.screen.query_one("#jobs").get_row_at(0))
+            for _ in fixes:
+                await pilot.press("down")
+            await pilot.pause(0.8)
             assert app.screen.current()["label"] == "Why Acme?"   # problems first
             await pilot.press("e")
             await pilot.pause(0.3)
@@ -138,6 +145,9 @@ def test_review_shows_a_first_submission_with_sources_and_s_approves_it(engine, 
             await pilot.press("enter")
             await pilot.pause(1.5)
             screen = app.screen
+            for _ in screen.fixes:                                  # past what held applications wait on
+                await pilot.press("down")
+            await pilot.pause(1)
             assert isinstance(screen, Review) and screen.approval["site_name"] == "Greenhouse"
             from textual.widgets import DataTable, Static
             qs = screen.query_one("#qs", DataTable)
