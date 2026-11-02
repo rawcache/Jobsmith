@@ -81,3 +81,15 @@ def fake_llm():
         llm.set_backend_override(b)
         return b
     return install
+
+
+# Two copies of one web component, each with the same ids and radio name inside (a component's insides are its own)
+TWIN_COMPONENTS = """<form>
+<x-field id="first"><template shadowrootmode="open"><label for="box">First name</label><input id="box">
+<fieldset><legend>Over 18?</legend><label><input type="radio" name="yn" value="Y"> Yes</label>
+<label><input type="radio" name="yn" value="N"> No</label></fieldset></template></x-field>
+<x-field id="last"><template shadowrootmode="open"><label for="box">Last name</label><input id="box">
+<fieldset><legend>Willing to relocate?</legend><label><input type="radio" name="yn" value="Y"> Yes</label>
+<label><input type="radio" name="yn" value="N"> No</label></fieldset></template></x-field>
+<x-field><template shadowrootmode="open"><label for="box">City</label><input id="box"></template></x-field>
+</form>"""

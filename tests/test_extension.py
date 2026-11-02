@@ -1739,3 +1739,47 @@ async def test_the_submit_watcher_sees_a_submit_inside_a_web_component_but_not_n
     await page.click("#written-submit button")
     noted = json.loads(await page.evaluate("sessionStorage.getItem('jobsmith-submit')"))
     assert noted["url"] == SR_URL
+
+
+@browser
+async def test_autofill_answers_each_copy_of_a_component_on_its_own(page):
+    """Two copies of one component with the same ids and radio name inside: each box and each Yes/No is its own
+    question and gets its own answer."""
+    from conftest import TWIN_COMPONENTS
+    html = f"<!doctype html><html><body><h1>Apply</h1>{TWIN_COMPONENTS}</body></html>"
+    await page.route("https://**/*", lambda r: r.fulfill(status=200, content_type="text/html", body=html)
+                     if r.request.url.split("?")[0] == SR_URL else r.abort())
+    std = lambda v: {"value": v, "kind": "standard"}
+    await page.add_init_script(_stub({"panelOpen": True}, answers={
+        "First name": std("Alex"), "Last name": std("Rivera"), "City": std("Boston"),
+        "Over 18?": std("Yes"), "Willing to relocate?": std("No")}))
+    await page.goto(SR_URL)
+    await page.add_script_tag(path=str(EXT / "content.js"))
+    await page.wait_for_function("document.querySelector('#jobsmith-panel')?.shadowRoot?.querySelector('.wrap')")
+    await _watch_for_submits(page)
+    await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
+    note = "document.querySelector('#jobsmith-panel').shadowRoot.querySelector('.note')"
+    await page.wait_for_function(f"{note}?.innerText.includes('Filled')", timeout=30000)
+    labels = [f["label"] for f in await page.evaluate("__calls.find(c => c.type === 'answers').body.fields")]
+    assert sorted(labels) == ["City", "First name", "Last name", "Over 18?", "Willing to relocate?"], labels
+    inside = lambda host, sel, js: page.evaluate(
+        f"document.querySelector('{host}').shadowRoot.querySelector('{sel}').{js}")
+    assert await inside("#first", "#box", "value") == "Alex" and await inside("#last", "#box", "value") == "Rivera"
+    assert await inside("#first", "[value=Y]", "checked") and await inside("#last", "[value=N]", "checked")
+    assert not await inside("#last", "[value=Y]", "checked")
+    await _never_submitted(page)
+
+
+@browser
+async def test_the_submit_watcher_sees_a_submit_whose_words_are_slotted_in(page):
+    """A component's own <button> around words the page slots in (<x-button><span>Submit</span></x-button>):
+    clicking the words is pressing that button, so it's noticed."""
+    await _on_smartrecruiters(page)
+    await page.evaluate("""() => {
+      const host = document.createElement('x-button'); host.id = 'slotted-submit';
+      host.attachShadow({ mode: 'open' }).innerHTML = '<button type="button"><slot></slot></button>';
+      host.innerHTML = '<span>Submit</span>';
+      document.body.appendChild(host); }""")
+    await page.click("#slotted-submit span")
+    noted = json.loads(await page.evaluate("sessionStorage.getItem('jobsmith-submit')") or "null")
+    assert noted and noted["url"] == SR_URL

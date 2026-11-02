@@ -70,6 +70,21 @@ SCAN_JS = r"""
   // inside a shadow root its host often has the same id (SmartRecruiters' <spl-input id=…>): name the tag too
   const byId = (id, el) => el && rootOf(el) !== document ? `${el.tagName.toLowerCase()}[id="${id}"]`
     : /^[A-Za-z_][\w-]*$/.test(id) ? `#${id}` : `[id="${id}"]`;
+  // A key names one box on the whole page. Components often reuse the same ids and names inside each copy, so a
+  // box inside a shadow root whose own key matches more than one is named through its host, in Playwright's chain
+  // form ("spl-input[id=\"a\"] >> input[id=\"x\"]"); the host the same way, out to the page.
+  const hostKey = h => {
+    const tag = h.tagName.toLowerCase();
+    const own = h.id ? `${tag}[id="${h.id}"]` : ['data-test', 'data-testid', 'name'].map(a => h.getAttribute(a) &&
+      `${tag}[${a}="${h.getAttribute(a)}"]`).find(Boolean);
+    if (own && all(own).length === 1) return own;
+    const same = all(own || tag);
+    const scoped = rootOf(h) === document ? null : hostKey(rootOf(h).host);
+    if (own && scoped) return `${scoped} >> ${own}`;
+    return `${own || tag} >> nth=${same.indexOf(h)}`;          // nothing that names it: its place among its kind
+  };
+  const unique = (el, key) => rootOf(el) === document || all(key.replace(/^#([\w-]+)$/, '[id="$1"]')).length <= 1
+    ? key : `${hostKey(rootOf(el).host)} >> ${key}`;
   // Workday: a dropdown keeps its choice in a box beside its button (not a question); a search box with picked
   // items as pills (multiSelectContainer); a date's year box, named "Year", whose question is the field's label
   const besideDropdown = el => !!el.previousElementSibling && el.previousElementSibling.matches('button[aria-haspopup="listbox"]');
@@ -89,7 +104,7 @@ SCAN_JS = r"""
     return clean((el.getAttribute('aria-label') || '').replace(el.innerText, ' ').replace(/\bSelect One\b|\bRequired\s*$/g, ' '));
   };
   const CHOICE_TYPES = ['checkbox', 'radio', 'select-one', 'select-multiple', 'file', 'range', 'color'];
-  const out = []; const seenGroups = new Set();
+  const out = []; const seenGroups = new Set();      // by key: the same name in another component is another group
   for (const el of all('input, textarea, select')) {
     const type = (el.type || el.tagName).toLowerCase();
     // a password is never Jobsmith's to type (sign-ins are handed to you), so it isn't a question at all
@@ -105,10 +120,11 @@ SCAN_JS = r"""
     if (!vis(el) && type !== 'file') continue;
     if (besideDropdown(el)) continue;
     const auto = el.getAttribute('data-automation-id');
-    const key = el.id ? byId(el.id, el) : (el.name ? `[name="${el.name}"]` : (auto ? `[data-automation-id="${auto}"]` : null));
-    if (!key) continue;
+    const plain = el.id ? byId(el.id, el) : (el.name ? `[name="${el.name}"]` : (auto ? `[data-automation-id="${auto}"]` : null));
+    if (!plain) continue;
+    const key = unique(el, plain);
     if (type === 'radio' || type === 'checkbox') {
-      const g = el.name || el.id; if (seenGroups.has(g)) continue;
+      const g = el.name ? unique(el, `input[name="${el.name}"]`) : key; if (seenGroups.has(g)) continue;
       const group = el.name ? [...rootOf(el).querySelectorAll(`input[name="${CSS.escape(el.name)}"]`)] : [el];
       seenGroups.add(g);
       const fs = el.closest('fieldset'); const legend = fs && fs.querySelector('legend');
@@ -120,7 +136,7 @@ SCAN_JS = r"""
       const isOpt = t => /^(yes|no)\W*$/i.test(t) || (group.length > 1 && opts.some(o => o && (t.startsWith(o) || o.startsWith(t))));
       if (!label) { let p = el.parentElement; for (let i = 0; i < 5 && p; i++, p = p.parentElement) {
         const t = clean((p.innerText || '').split('\n')[0]); if (t && group.every(x => p.contains(x)) && t.length > 2 && !isOpt(t)) { label = t; break; } } }
-      out.push({ field: el.name ? `[name="${el.name}"]` : key, label: label || opts[0],
+      out.push({ field: el.name ? (g.includes(' >> ') ? g : `[name="${el.name}"]`) : key, label: label || opts[0],
                  ...(!label && group.every(unworded) ? { unworded: true } : {}), value: group.some(x => x.checked) ? 'set' : '',
                  qtype: group.length > 1 ? (type === 'radio' ? 'radio' : 'multiselect') : 'checkbox',
                  required: group.some(x => x.required || x.getAttribute('aria-required') === 'true') || !!(group.length > 1 && el.closest('[aria-required="true"]')) || /[*✱]\s*$/.test((legend ? legend.innerText : '').trim()), options: group.length > 1 ? opts : [], description: '', group: groupFor(el) });
@@ -151,7 +167,7 @@ SCAN_JS = r"""
     const bs = [...box.children].filter(b => b.tagName === 'BUTTON' && b.hasAttribute('aria-pressed'));
     if (bs.length !== 2 || !bs.every(b => /^(yes|no)$/i.test(clean(b.innerText))) || !vis(bs[0])) continue;
     const named = box.querySelector('input[name]');
-    const key = named ? `[name="${named.name}"]` : (box.id ? byId(box.id, box) : null);
+    const key = named ? unique(named, `[name="${named.name}"]`) : (box.id ? unique(box, byId(box.id, box)) : null);
     if (!key) continue;
     let head = null;
     for (let p = box.parentElement, i = 0; p && i < 3 && !head; p = p.parentElement, i++) head = p.querySelector('label, legend');
@@ -165,7 +181,7 @@ SCAN_JS = r"""
   for (const el of all('button[aria-haspopup="listbox"], [role="button"][aria-haspopup="listbox"]')) {
     if (!vis(el) || el.closest('header, nav, [data-automation-id="header"]')) continue;   // the site's own menus
     const auto = el.getAttribute('data-automation-id');
-    const key = el.id ? byId(el.id, el) : (auto ? `[data-automation-id="${auto}"]` : null);
+    const key = el.id ? unique(el, byId(el.id, el)) : (auto ? `[data-automation-id="${auto}"]` : null);
     if (!key) continue;
     const txt = clean(el.innerText);
     out.push({ field: key, label: dropdownLabel(el), ...(dropdownLabel(el) ? {} : { unworded: true }), qtype: 'listbox',
@@ -196,6 +212,8 @@ async def scan_form(page: Page) -> list[dict]:
 
 
 def css_for(field: str) -> str:
+    if " >> " in field:                             # a box in one copy of a component, named through its host
+        return field
     if re.match(r"[a-z][\w-]*\[", field):          # "input[id=…]": a box inside a shadow root, by tag and id
         return field
     if field.startswith(("#", "[")):
@@ -422,7 +440,8 @@ async def fill_choice(page: Page, selector: str, value: str | list[str]) -> bool
     ok = False
     for i in range(n):
         el = group.nth(i)
-        label = await el.evaluate("""e => { const l = e.id && document.querySelector(`label[for="${CSS.escape(e.id)}"]`);
+        label = await el.evaluate("""e => { const l = e.id && (e.getRootNode().querySelector(`label[for="${CSS.escape(e.id)}"]`) ||
+                                                 document.querySelector(`label[for="${CSS.escape(e.id)}"]`));
                                      return ((l && l.innerText) || (e.closest('label') && e.closest('label').innerText) ||
                                      e.value || '').trim(); }""")
         if any(v.lower() == label.lower() or (len(v) > 2 and v.lower() in label.lower()) for v in values):

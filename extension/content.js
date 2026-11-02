@@ -135,7 +135,7 @@
 
   function scan() {
     els.clear();
-    const out = []; const groups = new Set();
+    const out = []; const groups = new Map();
     for (const el of $$("input, textarea, select")) {
       const type = (el.type || el.tagName).toLowerCase();
       if (["hidden", "submit", "button", "image", "reset", "search", "password"].includes(type)) continue;
@@ -147,7 +147,10 @@
       // not a question, and it borrows the label of whatever fieldset it sits in ("Phone").
       if (type !== "file" && el.getAttribute("aria-hidden") === "true" && el.tabIndex < 0) continue;
       if (type === "radio" || type === "checkbox") {
-        const g = el.name || el.id; if (!g || groups.has(g)) continue; groups.add(g);
+        // by root too: the same name in another copy of a component is another question
+        const g = el.name || el.id; if (!g) continue;
+        const seen = groups.get(el.getRootNode()) || new Set(); groups.set(el.getRootNode(), seen);
+        if (seen.has(g)) continue; seen.add(g);
         const group = el.name ? [...el.getRootNode().querySelectorAll(`input[name="${CSS.escape(el.name)}"]`)] : [el];
         const fs = el.closest("fieldset"); const legend = fs && fs.querySelector("legend");
         let label = legend ? clean(legend.innerText) : "";
@@ -698,10 +701,15 @@
   // When you press Submit and the page then thanks you, log it to Applications (and suggest similar roles).
   const THANKS = /thank you for (applying|your application|submitting)|application (has been )?(submitted|received)|we('ve| have) received your application|thanks for applying|successfully (submitted|applied)/i;
   document.addEventListener("click", e => {
-    const hit = e.composedPath ? e.composedPath()[0] : e.target;      // the button itself, inside a shadow root too
-    const b = hit && hit.nodeType === 1 ? around(hit, "button, input[type=submit], a[role=button]") : null;
-    if (!b || around(b, "#jobsmith-panel")) return;      // the panel's own buttons
-    const t = (b.innerText || b.value || "").trim();
+    // every element the click passed through, inside shadow roots and slots too (a component's Submit can be its
+    // own <button> around the page's slotted words): the button pressed, never the component around it
+    const path = (e.composedPath ? e.composedPath() : [e.target]).filter(n => n.nodeType === 1);
+    if (path.some(n => n.id === "jobsmith-panel")) return;      // the panel's own buttons
+    const b = path.find(n => n.matches("button, input[type=submit], a[role=button]"));
+    if (!b) return;
+    // a shadow root's <button> doesn't count the words slotted into it as its own text: those too
+    const slotted = [...b.querySelectorAll("slot")].flatMap(s => s.assignedNodes({ flatten: true })).map(n => n.textContent).join(" ");
+    const t = (b.innerText || b.value || slotted || "").trim();
     if (/^(submit|submit application|apply|send application|finish)/i.test(t))
       sessionStorage.setItem("jobsmith-submit", JSON.stringify({ url: location.href, title: pageTitle(), at: Date.now() }));
   }, true);
