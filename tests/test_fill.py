@@ -1193,6 +1193,63 @@ async def test_icims_profile_page_fills_your_profile_and_leaves_the_login_to_you
     assert not db.q("SELECT 1 FROM runs WHERE job_id=? AND kind='submit'", (jid,))
 
 
+async def test_a_resume_the_site_is_still_reading_stops_the_run_for_you(fake_llm, page, tmp_path, monkeypatch):
+    """iCIMS replaces the form with what it reads from your resume. If it's still reading when Jobsmith's wait runs
+    out, nothing is typed (it could be undone under you): the application is held for you to check and finish."""
+    from jobsmith.fill import multistep
+    await _alex_for_workday(fake_llm)
+    fake_llm(lambda s, p: {"answers": []})
+    pdf = tmp_path / "resume.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    db.x("INSERT INTO documents(kind, filename, path, text, is_primary, created_at) VALUES('resume','resume.pdf',?,'',1,?)",
+         (str(pdf), db.now()))
+    jid = sources.add_job_url(IDEMIA_ICIMS, "IDEMIA", "Full Stack Software Engineering Internship")
+    db.x("UPDATE jobs SET url=?, description='Full stack engineering at IDEMIA.' WHERE id=?", (_icims("profile_frame"), jid))
+    db.set_settings({"multistep_beta": True, "autonomy": "autonomous", "trust_threshold": 0})
+    await page.add_init_script("window.__parseTime = 60000")              # still reading long after Jobsmith stops
+    monkeypatch.setattr(multistep, "READ_WAIT_MS", 1500)
+
+    class Browser:
+        def want_headless(self):
+            return True
+
+        async def new_page(self):
+            return page
+
+    async def no_watch(*a):
+        return None
+    monkeypatch.setattr(runner, "browser", Browser())
+    monkeypatch.setattr(runner, "takeover", Browser())
+    monkeypatch.setattr(runner, "watch_tab", no_watch)
+    try:
+        await runner.fill_multistep(jid, submit=True)
+    finally:
+        runner.live_drop(jid)
+    job = db.q1("SELECT status, hold_reason FROM jobs WHERE id=?", (jid,))
+    assert job["status"] == "filled" and job["hold_reason"].startswith("The site was still reading your resume"), job
+    assert await page.input_value('[id="PersonProfileFields.FirstName"]') == ""          # nothing typed under it
+    assert await page.evaluate("window.__signInPresses") == 0
+
+
+async def test_a_list_that_fills_in_after_another_choice_is_waited_for(page):
+    """A State list that only gets its choices once a Country is picked: picked when they arrive. A full list
+    without the answer is left at once (no wait)."""
+    from jobsmith.fill.base import fill_select
+    await page.set_content("""<form><select id="c"><option value="">Select</option><option>United States</option>
+      </select><select id="s"><option value="">Select</option></select><select id="t"><option>Red</option>
+      <option>Blue</option><option>Green</option></select></form><script>
+      document.getElementById("c").addEventListener("change", () => setTimeout(() => {
+        for (const n of ["Massachusetts", "New York"]) document.getElementById("s").add(new Option(n)); }, 800));
+      </script>""")
+    assert await fill_select(page, "#c", "United States")
+    assert await fill_select(page, "#s", "New York")
+    assert await page.eval_on_selector("#s", "e => e.selectedOptions[0].text") == "New York"
+    import time
+    t0 = time.time()
+    assert not await fill_select(page, "#t", "Purple")
+    assert time.time() - t0 < 1
+
+
 async def test_a_sign_in_page_is_still_handed_to_you_whole(page, tmp_path):
     """Only a page that asks for your profile too is filled around its login: a sign-in alone (email and password)
     is handed to you as before, with nothing typed."""

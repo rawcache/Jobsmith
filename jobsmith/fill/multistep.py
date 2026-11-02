@@ -104,16 +104,32 @@ async def makes_account(view) -> str:
 READING = r"/parsing (your )?resume|reading your resume|processing your resume/i"
 
 
-async def _wait_while_reading(view, timeout_ms: int = 30000) -> None:
-    await view.wait_for_timeout(300)
+READ_WAIT_MS = 30000       # how long a site may take to read an attached resume before Jobsmith stops for you
+READ_START_MS = 2000       # how long after the upload its "Parsing resume" notice may take to show
+
+
+async def _wait_while_reading(view) -> bool:
+    """Wait while the site reads the resume just attached (iCIMS: "Parsing resume, please wait..."): what it reads
+    replaces the boxes, so nothing is typed until it's done. The notice can come a moment after the upload. False
+    when it's still reading after READ_WAIT_MS: filling then could be undone under you, so the run stops."""
     busy = view.locator(f"text={READING}")
-    for _ in range(timeout_ms // 250):
-        shown = False
+
+    async def shown() -> bool:
         for i in range(await busy.count()):
-            shown = shown or await busy.nth(i).is_visible()
-        if not shown:
-            return
+            if await busy.nth(i).is_visible():
+                return True
+        return False
+    for _ in range(READ_START_MS // 250):
+        if await shown():
+            break
         await view.wait_for_timeout(250)
+    else:
+        return True                            # never read it (or done before we looked)
+    for _ in range(READ_WAIT_MS // 250):
+        if not await shown():
+            return True
+        await view.wait_for_timeout(250)
+    return False
 
 
 def _file_for(f: dict, files: dict) -> str | None:
@@ -229,7 +245,11 @@ async def run(page: Page, url: str, *, answer: Callable, files: dict, log: Calla
                 issues.append(f"{f['label']}: couldn't attach the file")
         if attached:
             filled_total += attached
-            await _wait_while_reading(view)
+            if not await _wait_while_reading(view):
+                log("The site was still reading your resume; stopped so nothing is filled under it.")
+                return {"status": "waiting_user", "filled": filled_total, "issues": issues,
+                        "hold": "The site was still reading your resume after "
+                                f"{READ_WAIT_MS // 1000} seconds: check what it filled in, then finish the form"}
             fields = [f for f in await scan_form(view) if f["qtype"] != "hidden"]
         todo = [f for f in fields if not f.get("value") and f["qtype"] != "file"]
         log(f"Page {page_no}: {len(fields)} fields, {len(todo)} empty")

@@ -643,13 +643,30 @@
     return b ? clean(b.innerText || b.value) || "its button" : "its button";
   };
   const READING = /parsing (your )?resume|reading your resume|processing your resume/i;
+  // Waits while the site reads the resume just attached; its notice can come a moment after the upload. False when
+  // it's still reading after 30 s (the engine's multistep.READ_WAIT_MS): nothing more is filled then
   async function whileReading() {
-    await sleep(300);
+    const busyNow = () => [...document.querySelectorAll("body *")].some(e => e.children.length === 0 && READING.test(e.textContent || "") && visible(e));
+    let seen = false;
+    for (let t = 0; t < 8 && !(seen = busyNow()); t++) await sleep(250);
+    if (!seen) return true;
     for (let t = 0; t < 120; t++) {
-      const busyNow = [...document.querySelectorAll("body *")].some(e => e.children.length === 0 && READING.test(e.textContent || "") && visible(e));
-      if (!busyNow) return;
+      if (!busyNow()) return true;
       await sleep(250);
     }
+    return false;
+  }
+  // After the read, the site may have drawn its boxes again: new elements for the same questions. Each answer's box
+  // is found again by its question (label, kind, and which of that label it is), and the read's empties are known
+  function redrawn(before) {
+    const key = f => `${f.type}|${f.label}`;
+    const nth = new Map(), was = new Map();
+    for (const f of before) { const k = key(f), i = nth.get(k) || 0; nth.set(k, i + 1); was.set(f.id, `${k}|${i}`); }
+    const now = scan(), at = new Map(), seen = new Map();
+    for (const f of now) { const k = key(f), i = seen.get(k) || 0; seen.set(k, i + 1); at.set(`${k}|${i}`, f); }
+    const alias = new Map();
+    for (const [id, k] of was) { const f = at.get(k); if (f) alias.set(id, f); }
+    return alias;
   }
 
   let busy = false;
@@ -679,11 +696,17 @@
     // files first: a site can read the resume you attach and replace what's in the form with it (iCIMS: "Parsing
     // resume, please wait..."), so the rest is filled once it's done
     const files = answers.filter(a => a.file), rest = answers.filter(a => !a.file);
-    let read = false;
-    for (const a of [...files, ...rest]) {
-      if (!a.file && files.length && !read) { read = true; await whileReading(); }
+    let read = false, alias = null, stillReading = false;
+    for (const a0 of [...files, ...rest]) {
+      if (!a0.file && files.length && !read) {
+        read = true;
+        if (!(await whileReading())) { stillReading = true; break; }
+        alias = redrawn(fields);
+      }
+      const now = alias && alias.get(a0.id);
+      const a = now ? { ...a0, id: now.id } : a0;
       let ok = false;
-      const f = fields.find(x => x.id === a.id);
+      const f = now || fields.find(x => x.id === a.id);
       const held = a.hold || fits(a.qkind, a.value) || extensionRefusal(a.id, a.value);
       if (held) { if (f && !f.filled) { missing.push(`${f.label}: ${held}`); flag(a.id, f); } continue; }   // never typed in
       if (a.file === "resume" && !resume) noPdf ||= !f?.filled;   // no resume PDF yet: skip the upload, fill the rest
@@ -693,6 +716,11 @@
       else if (ok) done++;
       else if (a.file === "resume" && !resume) { /* said once below */ }
       else if (f && f.required && !f.filled) { missing.push(f.label); if (a.kind === "generated" && !a.value) needAi++; flag(a.id, f); }
+    }
+    if (stillReading) {
+      say("The site was still reading your resume after 30 seconds, so nothing else was filled (it could be undone " +
+          "under you). Check what it filled in, then press Fill again.", "warn");
+      busy = false; load(); return;
     }
     const list = (items, n = 110) => `<ul style="margin:4px 0 0 14px;list-style:disc">${items.slice(0, 6).map(m => `<li>${esc(m.slice(0, n))}</li>`).join("")}</ul>`;
     say(`<b>Filled ${done} of ${fields.length} fields.</b> ` +
