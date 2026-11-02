@@ -895,9 +895,18 @@ def _checked(field: dict, r: dict, job: dict) -> dict:
     return r
 
 
-def offline(field: dict, ans: dict, job: dict, blank_optional: bool = True) -> dict | None:
+def ai_writes_optional() -> bool:
+    """Settings, "Let AI write optional essays" (off by default): optional essay boxes you have no saved answer for
+    are then written by AI, against your daily budget, and left blank whenever it can't or isn't sure."""
+    return bool(db.get_setting("ai_optional_essays"))
+
+
+def offline(field: dict, ans: dict, job: dict, blank_optional: bool | None = None) -> dict | None:
     """The answer to one field without AI, or None when only AI (or you) could write it: your profile, your saved
-    answer to this kind of essay (an optional essay box with none is left blank), or an answer you approved before."""
+    answer to this kind of essay (an optional essay box with none is left blank, unless you let AI write those), or
+    an answer you approved before. blank_optional=None follows that setting."""
+    if blank_optional is None:
+        blank_optional = not ai_writes_optional()
     det = deterministic(field, ans, job)
     if det:
         return det
@@ -920,16 +929,24 @@ def pending(field: dict) -> dict:
 
 
 async def answer_fields(job: dict, fields: list[dict], skip_locked: bool = True, use_ai: bool = True,
-                        keep_written: bool = False, blank_optional: bool = True) -> tuple[dict[str, dict], str | None]:
+                        keep_written: bool = False, blank_optional: bool | None = None) -> tuple[dict[str, dict], str | None]:
     """Answer form fields: your profile first, then your saved and approved answers, then one AI call for the rest.
     use_ai=False leaves the rest pending (no AI spent). keep_written keeps what AI wrote on an earlier pass instead
     of paying for it again. A free limit or your daily budget running out leaves them pending too, to be written
     when there's room: the application waits quietly instead of being held for you. blank_optional=False when you
-    asked for this answer yourself ("Write with Jobsmith", a cover letter): an optional essay is written then."""
-    existing = {d["field"]: d for d in db.q("SELECT * FROM drafts WHERE job_id=?", (job["id"],))}
+    asked for this answer yourself ("Write with Jobsmith", a cover letter): an optional essay is written then.
+    None follows Settings: optional essays are left blank, or, if you let AI write them, written when there's AI to
+    spare and left blank when there isn't or the answer isn't sure enough to send. Never held, never waited for."""
+    optional_by_ai = blank_optional is None and ai_writes_optional()
+    if blank_optional is None:
+        blank_optional = not optional_by_ai
+    existing = {d["field"]: db.decode(d) for d in db.q("SELECT * FROM drafts WHERE job_id=?", (job["id"],))}
     ans = profile.answers()
     results: dict[str, dict] = {}
     to_generate: list[dict] = []
+    # optional essays AI may write (the switch on): whatever answers them, if it can't be sent as it is, is left
+    # blank, never held. Your saved answer is the exception: it's yours, so a failed check holds it for you.
+    optional = {f["field"] for f in fields if optional_by_ai and not f.get("required") and essays.is_essay(f)}
     for f in fields:
         f.setdefault("options", [])
         f.setdefault("required", False)
@@ -941,12 +958,21 @@ async def answer_fields(job: dict, fields: list[dict], skip_locked: bool = True,
             results[f["field"]] = mine
             continue
         if keep_written and prev and prev["kind"] in AI_MADE and (prev["answer"] or "").strip():
+            if f["field"] in optional:
+                if prev["kind"] == "voice":          # your writing, kept from before it was checked like your own
+                    prev = dict(prev, issues=list(prev.get("issues") or []) + essays.checks(f, prev["answer"], job))
+                if why := _unsure(prev, f, job, ans):
+                    results[f["field"]] = _optional_blank(f, why)
             continue  # written already: kept, not paid for again
         if f["qtype"] == "file":  # cover letter upload -> generate text, attached as a file when filling
             if "cover" in (f["label"] + f["field"]).lower():
                 to_generate.append(dict(f, qtype="textarea", description="Cover letter, under 250 words."))
         else:
             to_generate.append(dict(f, qtype="select" if f["qtype"] == "listbox" else f["qtype"]))
+    if use_ai and any(f["field"] in optional for f in to_generate) and llm.out_of_ai():
+        for f in [f for f in to_generate if f["field"] in optional]:   # no AI to spare today: blank, not waited for
+            results[f["field"]] = _optional_blank(f, "no AI left today")
+        to_generate = [f for f in to_generate if f["field"] not in optional]
     gen_error = None
     if to_generate and use_ai:
         try:
@@ -969,10 +995,38 @@ async def answer_fields(job: dict, fields: list[dict], skip_locked: bool = True,
         if f["qtype"] in ("textarea", "text") and not f["options"] and not (r.get("answer") or "").strip() and \
                 (use_ai or r.get("kind") != "pending"):
             mine = voice.compose(job, f)
+            if mine and f["field"] in optional:      # your writing, checked like your saved answers before it goes
+                mine = dict(mine, issues=list(mine.get("issues") or []) + essays.checks(f, mine["answer"], job))
             if mine:
                 results[f["field"]] = mine
     by_field = {f["field"]: f for f in fields}
-    return {k: _checked(by_field[k], r, job) if k in by_field else r for k, r in results.items()}, gen_error
+    out = {k: _checked(by_field[k], r, job) if k in by_field else r for k, r in results.items()}
+    for k in optional & out.keys():
+        if out[k].get("kind") == "pending" and not use_ai:
+            continue                                  # AI's turn comes next (autopilot answers what needs none first)
+        if out[k].get("kind") != "saved" and (why := _unsure(out[k], by_field[k], job, ans)):
+            out[k] = _optional_blank(by_field[k], why)
+    return out, gen_error
+
+
+def _unsure(r: dict, field: dict, job: dict, ans: dict) -> str | None:
+    """Why an answer to an optional essay can't be sent as it is, or None: it's left blank rather than held. Asks
+    the same question readiness does (`_blocker`), so whatever would hold the application blanks the box instead."""
+    if r.get("kind") == "left_blank":
+        return None
+    if not (r.get("answer") or "").strip():
+        return "AI couldn't write it"
+    if r.get("issues") or r.get("held"):
+        return "the answer didn't pass the checks"
+    d = dict(r, field=field["field"], label=field.get("label", ""), qtype=field.get("qtype", "textarea"),
+             options=field.get("options") or [], required=False)
+    if _blocker(d, job, ans):
+        return "it wasn't sure enough to send"
+    return None
+
+
+def _optional_blank(field: dict, why: str) -> dict:
+    return dict(essays.left_blank(field), rationale=f"Optional, so it's left blank: {why}")
 
 
 def refresh_offline(job_id: str | None = None, *, job: dict | None = None) -> int:

@@ -205,6 +205,131 @@ async def test_an_optional_essay_box_with_no_saved_answer_is_left_blank_not_held
     assert extra["kind"] == "left_blank" and not extra["answer"] and draft.readiness(jid)["ready"]
 
 
+def _extra_by_ai(jet: list[str], confidence: float = 0.9, answer: str = "I build tools for small teams."):
+    return lambda s, p: {"answers": [{"field": "q_extra", "answer": answer, "fact_ids": jet,
+                                      "confidence": confidence}]}
+
+
+async def test_with_the_switch_on_ai_writes_an_optional_essay_and_it_counts_against_the_budget(fake_llm):
+    """Settings, "Let AI write optional essays": off by default (blank, above); on, AI writes the box, checked like
+    any AI answer, and the call is one of the day's budget."""
+    _alex()
+    assert draft.ai_writes_optional() is False                                  # off by default
+    db.set_settings({"ai_optional_essays": True, "ai_daily_budget": 5, "research_enabled": False})
+    jid = _job("Acme", FIRST, WORK_AUTH, EXTRA)
+    ai = fake_llm(_extra_by_ai([profile.add_fact("experience", "Built tools for small teams", subject="Northwind")]))
+    await draft.draft_job(jid, hold_first=True)
+    extra = next(d for d in draft.drafts_for(jid) if d["field"] == "q_extra")
+    assert extra["kind"] == "generated" and extra["answer"] == "I build tools for small teams."
+    assert len(ai.prompts) == 1 and llm.budget_left() == 4
+    assert draft.readiness(jid)["ready"]
+
+
+@pytest.mark.parametrize("confidence, answer", [(0.3, "I build tools for small teams."), (0.9, "")])
+async def test_with_the_switch_on_an_unsure_or_empty_optional_essay_is_left_blank_not_held(fake_llm, confidence,
+                                                                                          answer):
+    _alex()
+    db.set_settings({"ai_optional_essays": True, "research_enabled": False})
+    jid = _job("Acme", FIRST, WORK_AUTH, EXTRA)
+    fake_llm(_extra_by_ai([profile.add_fact("experience", "Built tools for small teams", subject="Northwind")],
+                          confidence, answer))
+    await draft.draft_job(jid, hold_first=True)
+    extra = next(d for d in draft.drafts_for(jid) if d["field"] == "q_extra")
+    assert extra["kind"] == "left_blank" and not extra["answer"] and "left blank" in extra["rationale"]
+    assert draft.readiness(jid)["ready"]
+
+
+async def test_with_the_switch_on_and_no_ai_left_today_an_optional_essay_is_left_blank_not_waited_for(fake_llm):
+    _alex()
+    db.set_settings({"ai_optional_essays": True, "ai_daily_budget": 1, "research_enabled": False})
+    db.x("""INSERT INTO usage(job_id, purpose, backend, model, at) VALUES(NULL, 'answers', 'fake', '', ?)""",
+         (db.now(),))
+    jid = _job("Acme", FIRST, WORK_AUTH, EXTRA)
+    ai = fake_llm(_extra_by_ai([]))
+    await draft.draft_job(jid, hold_first=True)
+    extra = next(d for d in draft.drafts_for(jid) if d["field"] == "q_extra")
+    assert extra["kind"] == "left_blank" and "no AI left today" in extra["rationale"]
+    r = draft.readiness(jid)
+    assert r["ready"] and not r["only_ai"] and ai.prompts == []
+
+
+async def test_with_the_switch_on_your_writing_standing_in_for_ai_is_checked_and_left_blank_if_it_fails(fake_llm,
+                                                                                                   monkeypatch):
+    """AI came back empty, so a passage of your own writing stands in. In an optional box it gets the checks your
+    saved answers get: a number in neither your resume, profile nor the posting leaves the box blank, not held."""
+    from jobsmith.skills import voice
+    _alex()
+    db.set_settings({"ai_optional_essays": True, "research_enabled": False})
+    monkeypatch.setattr(voice, "compose", lambda job, f: {"kind": "voice", "answer": "I shipped 400 robots.",
+                                                          "confidence": 0.85, "fact_ids": [], "issues": [],
+                                                          "rationale": "Your own words, from essay.md"})
+    jid = _job("Acme", FIRST, WORK_AUTH, EXTRA)
+    fake_llm(lambda s, p: {"answers": []})
+    await draft.draft_job(jid, hold_first=True)
+    extra = next(d for d in draft.drafts_for(jid) if d["field"] == "q_extra")
+    assert extra["kind"] == "left_blank" and not extra["answer"] and draft.readiness(jid)["ready"]
+    assert "didn't pass the checks" in extra["rationale"]
+
+
+async def test_with_the_switch_on_an_optional_essay_ai_wrote_earlier_that_failed_is_left_blank(fake_llm):
+    """An answer AI wrote on an earlier pass is kept, not paid for again; one that didn't pass its checks is left
+    blank on the next pass instead of holding the application."""
+    _alex()
+    db.set_settings({"ai_optional_essays": True, "research_enabled": False})
+    jid = _job("Acme", FIRST, WORK_AUTH, EXTRA)
+    draft.save_results(jid, [EXTRA], {"q_extra": {"kind": "generated", "answer": "I shipped 400 robots.",
+                                                  "confidence": 0.9, "issues": ["Number '400' not found"]}})
+    ai = fake_llm(lambda s, p: {"answers": []})
+    await draft.draft_job(jid, hold_first=True)
+    extra = next(d for d in draft.drafts_for(jid) if d["field"] == "q_extra")
+    assert extra["kind"] == "left_blank" and ai.prompts == [] and draft.readiness(jid)["ready"]
+
+
+async def test_with_the_switch_on_your_writing_kept_from_before_the_checks_is_checked_now(fake_llm):
+    """A passage of your writing saved in an optional box before it was checked like your saved answers: kept, not
+    rewritten, but checked on the next pass, and a number found nowhere leaves the box blank."""
+    _alex()
+    db.set_settings({"ai_optional_essays": True, "research_enabled": False})
+    jid = _job("Acme", FIRST, WORK_AUTH, EXTRA)
+    draft.save_results(jid, [EXTRA], {"q_extra": {"kind": "voice", "answer": "I shipped 400 robots.",
+                                                  "confidence": 0.85, "issues": []}})
+    ai = fake_llm(lambda s, p: {"answers": []})
+    await draft.draft_job(jid, hold_first=True)
+    extra = next(d for d in draft.drafts_for(jid) if d["field"] == "q_extra")
+    assert extra["kind"] == "left_blank" and ai.prompts == [] and draft.readiness(jid)["ready"]
+
+
+async def test_with_the_switch_on_a_reused_answer_copilot_wouldnt_send_is_left_blank(fake_llm, monkeypatch):
+    """Copilot asks more of a reused answer (0.8) than autopilot (0.6). One with little support in an optional box
+    is left blank under either, never held: the same rule readiness uses decides."""
+    from jobsmith import learn
+    _alex()
+    db.set_settings({"ai_optional_essays": True, "research_enabled": False, "autonomy": "copilot"})
+    monkeypatch.setattr(learn, "reusable_answer", lambda *a: {"answer": "I like small teams.", "support": 1,
+                                                              "from": "Globex: Additional information"})
+    jid = _job("Acme", FIRST, WORK_AUTH, EXTRA)
+    fake_llm(lambda s, p: {"answers": []})
+    await draft.draft_job(jid, hold_first=True)
+    extra = next(d for d in draft.drafts_for(jid) if d["field"] == "q_extra")
+    assert extra["kind"] == "left_blank" and draft.readiness(jid)["ready"], extra
+
+
+async def test_with_the_switch_on_a_required_essay_and_a_failed_saved_answer_still_hold(fake_llm):
+    """Only optional boxes are left blank. A required essay AI couldn't write well, and your saved answer that
+    fails a check, still hold the application for you."""
+    _alex()
+    db.set_settings({"ai_optional_essays": True, "research_enabled": False})
+    essays.save("additional_info", "I shipped 400 robots.")
+    jid = _job("Acme", FIRST, WORK_AUTH, WHY_US, EXTRA)
+    fake_llm(lambda s, p: {"answers": [{"field": "q_why", "answer": "Acme.", "fact_ids": [], "confidence": 0.3}]})
+    await draft.draft_job(jid, hold_first=True)
+    ds = {d["field"]: d for d in draft.drafts_for(jid)}
+    assert ds["q_extra"]["kind"] == "saved" and ds["q_extra"]["issues"]
+    assert ds["q_why"]["kind"] != "left_blank"
+    held = {b["field"] for b in draft.readiness(jid)["items"]}
+    assert {"q_why", "q_extra"} <= held
+
+
 @pytest.mark.parametrize("text, issue", [
     ("At {company} I'd ship 400 robots a week.", "Number '400' not found in your facts"),
     ("Robots. " * 60, "Over limit: 60/50 words"),

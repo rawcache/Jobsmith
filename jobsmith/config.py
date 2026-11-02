@@ -113,6 +113,7 @@ DEFAULT_SETTINGS: dict = {
     "trust_threshold": 3,              # green flags (unedited) needed before a question type is auto-trusted
     "research_enabled": True,          # web research on the company before drafting (uses LLM web search)
     "saved_answers": {},               # your own answers to common essay questions, by kind (see essays.py)
+    "ai_optional_essays": False,       # let AI write optional essay boxes you have no saved answer for (uses budget)
     "browser_channel": "chrome",       # use your installed Chrome; falls back to Playwright Chromium
     "headless": False,
     "browser_window": "background",   # background: window stays minimized, peek from the dashboard | visible

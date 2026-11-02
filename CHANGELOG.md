@@ -89,6 +89,9 @@
   your AI is reachable no longer asks Gemini to write anything.
 - Without a resume PDF, autopilot starts no application (each one attaches it) and says so once.
 - An optional essay box you have no saved answer for is left blank instead of holding the application.
+- Settings, "Let AI write optional essays" (off by default): AI then writes optional essay boxes you have no
+  saved answer for, counted in your daily AI budget. One is still left blank, never held or waited for, when
+  there's no AI left today or its answer doesn't pass the checks or isn't sure enough to send.
 - A new website: a clean top bar with the GitHub star count and one Install button, a centred headline over a large
   dashboard screenshot, then how it works (find, fill, check, submit), a terminal sample, the safety rules, skills,
   install steps for macOS, Linux and Windows, and a short FAQ. It follows your system's light or dark setting
