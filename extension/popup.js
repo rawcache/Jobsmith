@@ -41,6 +41,64 @@ async function pageScript(tab) {
   return info;
 }
 
+// Needs you, by fix: what held applications wait on, each once with how many it unblocks, answered right here.
+// An answer goes to Jobsmith, which re-checks every held application and starts the complete ones within your
+// limits. Everything shown comes from the engine and is put on the page as text, never as markup.
+const SHOWN = 3;
+
+function el(tag, props = {}, ...kids) {
+  const e = Object.assign(document.createElement(tag), props);
+  e.append(...kids);
+  return e;
+}
+
+function showFixes(d) {
+  const list = d.fixes || [];
+  $("needs").hidden = list.length === 0;
+  $("fixes").replaceChildren(...list.slice(0, SHOWN).map(fixRow));
+  $("needs-more").hidden = list.length <= SHOWN;
+  $("needs-more").textContent = `${list.length - SHOWN} more in the dashboard.`;
+}
+
+function fixRow(f) {
+  const count = f.kind === "resume_pdf" ? "blocks every application" : `unblocks ${f.unblocks}`;
+  const row = el("li", { className: "fix" },
+    el("div", { className: "fix-h" }, el("strong", { textContent: f.title }), el("span", { className: "count", textContent: count })));
+  const answer = async (value, buttons) => {
+    buttons.forEach(b => { b.disabled = true; });
+    const r = await send({ type: "fix", body: { id: f.id, value } });
+    buttons.forEach(b => { b.disabled = false; });
+    const said = $("needs-said");
+    said.hidden = false;
+    if (!r.ok) { said.className = "result bad"; said.textContent = r.error; return; }
+    const n = r.data.freed.length, s = r.data.started.length;
+    said.className = "result";
+    said.textContent = r.data.note || (n === 0 ? "Saved. Nothing else was waiting on just that." :
+      `Saved. ${n} application${n === 1 ? " has" : "s have"} nothing left${s ? `: ${s} going out now` : ""}.`);
+    showFixes(r.data);
+  };
+  if (f.kind === "resume_pdf") {
+    const b = el("button", { className: "primary", textContent: "Add it in the dashboard" });
+    b.addEventListener("click", () => send({ type: "open", path: "/#/" }));
+    row.append(b);
+  } else if ((f.choices || []).length) {
+    const buttons = f.choices.map(c => el("button", { textContent: c }));
+    buttons.forEach((b, i) => b.addEventListener("click", () => answer(f.choices[i], buttons)));
+    row.append(el("div", { className: "choices" }, ...buttons));
+  } else {
+    const box = f.kind === "essay"
+      ? el("textarea", { rows: 4, value: f.value || "", placeholder: "Your answer, in your words. {company} and {role} are filled in for each one." })
+      : el("input", { value: f.value || "", placeholder: "Your answer" });
+    box.setAttribute("aria-label", f.title);
+    const save = el("button", { className: "primary", textContent: f.kind === "essay" ? "Save your answer" : "Save" });
+    const ready = () => { save.disabled = !box.value.trim(); };
+    box.addEventListener("input", ready); ready();
+    save.addEventListener("click", () => answer(box.value, [save]));
+    row.append(box, save);
+  }
+  return row;
+}
+
 async function init() {
   const { applyWithAutopilot } = await chrome.storage.local.get("applyWithAutopilot");
   $("apply").checked = applyWithAutopilot === true;
@@ -57,6 +115,7 @@ async function init() {
   $("status").textContent = `Connected. Writing with ${p.ai}${p.ai_ok ? "" : " (not ready)"}.` +
     (p.resume ? "" : " Add your resume PDF to attach it; everything else still fills.");
   $("actions").hidden = false;
+  send({ type: "fixes" }).then(r => { if (r.ok) showFixes(r.data); });
 
   const tab = await activeTab();
   const info = await pageScript(tab);
