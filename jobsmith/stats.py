@@ -79,7 +79,7 @@ def compute(days: int = 30, now: float | None = None) -> dict:
             buckets["not_yet"] += 1             # still drafting, or waiting for room under a limit
     pct = lambda a, b: round(100 * a / b) if b else None
     ai = db.q("""SELECT purpose, COUNT(*) calls, SUM(ok=0) failed, SUM(input_tokens + output_tokens) tokens,
-                         SUM(backend='smith') smith
+                         SUM(backend='ollama') smith
                   FROM usage WHERE at BETWEEN ? AND ? GROUP BY purpose ORDER BY calls DESC, purpose""", (since, now))
     return {
         "days": days, "since": since, "until": now,

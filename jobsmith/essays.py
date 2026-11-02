@@ -89,9 +89,26 @@ def answer_for(field: dict, job: dict) -> dict | None:
     text = saved().get(kind) if kind else None
     if not text:
         return None
-    return {"kind": "saved", "canon": None, "answer": fill_slots(text, job), "confidence": 1.0, "issues": [],
+    answer = fill_slots(text, job)
+    return {"kind": "saved", "canon": None, "answer": answer, "confidence": 1.0, "issues": checks(field, answer, job),
             "fact_ids": [], "rationale": f"{SAVED.capitalize()} for “{KINDS[kind]}”, used as you wrote it",
             "check": SAVED}
+
+
+# validate's checks that are about AI's writing, not yours: it cites facts by id (your words cite none) and its
+# em-dashes give it away
+NOT_FOR_YOUR_WORDS = ("No supporting facts cited", "Contains an em-dash")
+
+
+def checks(field: dict, answer: str, job: dict) -> list[str]:
+    """draft.validate on your saved answer as it would go in: a number that isn't in your resume, profile or the
+    posting, or more than the box allows, holds the application for you. Your words are never changed to fit."""
+    from . import draft, profile
+    f = dict(field, qtype="textarea" if field.get("qtype") == "file" else field.get("qtype") or "textarea",
+             options=field.get("options") or [], required=bool(field.get("required")))
+    issues, _ = draft.validate(f, answer, [], profile.facts_by_id(),
+                               f"{job.get('company', '')} {job.get('title', '')} {job.get('description', '')}")
+    return [i for i in issues if not i.startswith(NOT_FOR_YOUR_WORDS)]
 
 
 def is_essay(field: dict) -> bool:

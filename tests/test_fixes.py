@@ -205,6 +205,74 @@ async def test_an_optional_essay_box_with_no_saved_answer_is_left_blank_not_held
     assert extra["kind"] == "left_blank" and not extra["answer"] and draft.readiness(jid)["ready"]
 
 
+@pytest.mark.parametrize("text, issue", [
+    ("At {company} I'd ship 400 robots a week.", "Number '400' not found in your facts"),
+    ("Robots. " * 60, "Over limit: 60/50 words"),
+])
+async def test_your_saved_answer_is_checked_like_any_other_and_never_changed_to_pass(fake_llm, text, issue):
+    """Rule 1: what goes in is checked before it's sent, your words too. A number that's in neither your resume,
+    profile nor the posting, or more than the box allows, holds it for you; the text stays exactly yours."""
+    _alex()
+    essays.save("why_company", text)
+    jid = _job("Acme", FIRST, WORK_AUTH, dict(WHY_US, label="Why do you want to work at {co}? (50 words max)"))
+    fake_llm(lambda s, p: {"answers": []})
+    await draft.draft_job(jid, hold_first=True)
+    why = next(d for d in draft.drafts_for(jid) if d["field"] == "q_why")
+    assert why["kind"] == "saved" and why["answer"] == text.replace("{company}", "Acme")
+    assert issue in why["issues"] and not draft.readiness(jid)["ready"]
+
+
+async def test_your_saved_answer_traces_to_you_in_the_audit(fake_llm):
+    from jobsmith import audit
+    _alex()
+    essays.save("why_company", "Your tools taught me to build.")
+    jid = _job("Acme", FIRST, WORK_AUTH, WHY_US, EXTRA)
+    fake_llm(lambda s, p: {"answers": []})
+    await draft.draft_job(jid, hold_first=True)
+    ds = {d["field"]: d for d in draft.drafts_for(jid)}
+    for f in ("q_why", "q_extra"):
+        p = audit.provenance(ds[f], profile.answers(), profile.facts_by_id())
+        assert p["source"] == "you" and p["traces"], (f, p)
+
+
+async def test_an_optional_cover_letter_left_blank_is_written_when_you_ask(fake_llm):
+    """Autopilot leaves an optional cover letter box blank; asking for a cover letter still writes one."""
+    from jobsmith import letters
+    _alex()
+    jid = _job("Acme", FIRST, {"field": "cover_letter_text", "label": "Cover Letter", "qtype": "textarea",
+                               "required": False, "options": []})
+    fake_llm(lambda s, p: {"answers": []})
+    await draft.draft_job(jid, hold_first=True)
+    assert letters.cover_text(jid) == ""
+    jet = [f["id"] for f in profile.facts()][:1]
+    fake_llm(lambda s, p: {"answers": [{"field": "cover_letter", "answer": "I build tools.", "fact_ids": jet,
+                                        "confidence": 0.9}]})
+    assert await letters.write_cover(jid) == "I build tools."
+
+
+async def test_a_connection_check_that_is_a_real_request_keeps_to_the_budget_and_is_logged(monkeypatch):
+    """Claude's and OpenAI's check is a one-line request: with today's budget used it isn't sent (the last answer
+    stands), and one that fails is logged like any failed call."""
+    sent = []
+
+    class Claude(llm.AnthropicAPI):
+        async def available(self):
+            sent.append(1)
+            return False, "Anthropic API 401: invalid key"
+    b = Claude(key="sk-test")
+    db.set_settings({"ai_daily_budget": 1})
+    ok, msg = await llm._check(llm._check_key(b), b)
+    assert sent == [1] and not ok
+    row = db.q1("SELECT purpose, backend, ok, error FROM usage")
+    assert row == {"purpose": "connection check", "backend": "anthropic_api", "ok": 0,
+                   "error": "Anthropic API 401: invalid key"}
+    ok, msg = await llm._check(llm._check_key(b), b)                     # that call used today's one: not sent,
+    assert sent == [1] and msg == "Anthropic API 401: invalid key"       # the last answer stands
+    llm.forget_checks()
+    ok, msg = await llm._check(llm._check_key(b), b)
+    assert sent == [1] and not ok and "budget is used" in msg
+
+
 # --------------------------------------------------------------------------- Needs you, by fix
 async def _held(company: str, *fields: dict) -> str:
     """Autopilot's drafting; held before AI when a profile fact is missing, else held where the form filler holds
