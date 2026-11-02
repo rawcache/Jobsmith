@@ -1152,11 +1152,14 @@ async def fill_multistep(job_id: str, submit: bool = False) -> None:
                     run.done("done")
                     return
             _set_status(job_id, "filled")
+            if res.get("hold"):        # a step that's yours (making the account): held under Needs you with it
+                db.x("UPDATE jobs SET hold_reason=? WHERE id=?",
+                     ("; ".join([res["hold"]] + res["issues"][:3])[:500], job_id))
             run.log("Stopped for you: review the browser tab and click Submit when ready."
                     if res["status"] == "review" else "Stopped: this page needs you.")
             notify("Jobsmith: ready for you", f"{job['company']}: {job['title']} needs a look.")
             live_set(job_id, phase="review", note="review the last page" if res["status"] == "review"
-                     else "; ".join(res["issues"][:2]) or "this page needs you")
+                     else res.get("hold") or "; ".join(res["issues"][:2]) or "this page needs you")
             run.done("waiting_user")
             t = asyncio.create_task(watch_tab(job_id, page, run_dir, run))
             _tasks.add(t)

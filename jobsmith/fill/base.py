@@ -61,7 +61,14 @@ SCAN_JS = r"""
     return '';
   };
   // ...or, with none, its placeholder, then its name or id (a box read by "q_123" has no words: `unworded` below)
-  const labelFor = el => ownLabel(el) || fieldLabel(el) || clean(el.placeholder || el.name || el.id);
+  // A label that's only "Type", "Number" or "Value" says what it is through its group: iCIMS's "Phones (1)" around
+  // "Type" and "Number". Its legend's words go in front ("Phones Type"), without the count and "* required."
+  const GENERIC = /^(type|number|value)$/i;
+  const inGroup = (el, t) => { if (!GENERIC.test(t)) return t;
+    const lg = el.closest('fieldset')?.querySelector('legend');
+    const g = lg ? clean(lg.innerText.replace(/\(\d+\)|\*?\s*required\.?/gi, ' ')) : '';
+    return g ? `${g} ${t}` : t; };
+  const labelFor = el => inGroup(el, ownLabel(el) || fieldLabel(el) || clean(el.placeholder || el.name || el.id));
   const unworded = el => !ownLabel(el) && !fieldLabel(el) && !clean(el.placeholder || '');
   // the section each field sits in ("Employment", "Education"), from the nearest heading above it
   const heads = [...all('h1, h2, h3, h4, legend, [role="heading"]')].filter(h => clean(h.innerText));
@@ -107,6 +114,19 @@ SCAN_JS = r"""
     return clean((el.getAttribute('aria-label') || '').replace(el.innerText, ' ').replace(/\bSelect One\b|\bRequired\s*$/g, ' '));
   };
   const CHOICE_TYPES = ['checkbox', 'radio', 'select-one', 'select-multiple', 'file', 'range', 'color'];
+  // a choice that isn't one: "Select…", "-- Select --", "Please choose", iCIMS's "— Make a Selection —"
+  const PLACEHOLDER = /^(select\b|--|please\b|—\s*make a selection)/i;
+  // a <select>'s answer is the words of the choice it shows: none when that's blank or a placeholder (iCIMS's
+  // Month has a blank choice whose value is "0")
+  const selectValue = el => { const o = el.selectedOptions[0]; const t = o ? clean(o.text) : '';
+    return t && !PLACEHOLDER.test(t) ? t : ''; };
+  // A page that makes your account: its boxes are yours, never read (rule 5): the password boxes (left out above),
+  // every box in the group around one (iCIMS's "Create a login": Login, Password, Password again), and a box named
+  // for signing in (Login, Username, User ID, Sign-in email) on a page with a password box
+  const pwBoxes = all('input[type="password"]');
+  const pwGroups = pwBoxes.map(p => p.closest('[role="group"], fieldset')).filter(Boolean);
+  const accountBox = el => pwBoxes.length > 0 && (pwGroups.some(g => g.contains(el)) ||
+    /^(log ?in|log ?in (id|name|email)|user ?(name|id)|sign[ -]?in (email|name|id))$/i.test(ownLabel(el)));
   const out = []; const seenGroups = new Set();      // by key: the same name in another component is another group
   for (const el of all('input, textarea, select')) {
     const type = (el.type || el.tagName).toLowerCase();
@@ -121,7 +141,7 @@ SCAN_JS = r"""
         [el.name, el.id].some(n => /(^|[_-])pwd$/i.test(n || '')) ||
         /\bpass(word|wd)\b/i.test(labelFor(el)))) continue;
     if (!vis(el) && type !== 'file') continue;
-    if (besideDropdown(el)) continue;
+    if (besideDropdown(el) || accountBox(el)) continue;
     const auto = el.getAttribute('data-automation-id');
     const plain = el.id ? byId(el.id, el) : (el.name ? `[name="${el.name}"]` : (auto ? `[data-automation-id="${auto}"]` : null));
     if (!plain) continue;
@@ -158,10 +178,10 @@ SCAN_JS = r"""
     const comboValue = () => { const c = el.closest('[class*=control]'); let t = c ? c.innerText : '';
       if (!c && el.parentElement) { const sv = el.parentElement.querySelector('[class*="single-value"], [class*="singleValue"]'); t = sv ? sv.innerText : ''; }
       t = clean(t); return /^select\b/i.test(t) ? '' : t; };
-    out.push({ field: key, label: dateLabel(el) || labelFor(el), ...(unworded(el) ? { unworded: true } : {}), value: type === 'file' ? (el.files && el.files.length ? 'file' : '') : (el.value || (role === 'combobox' ? comboValue() : '')),
+    out.push({ field: key, label: dateLabel(el) || labelFor(el), ...(unworded(el) ? { unworded: true } : {}), value: type === 'file' ? (el.files && el.files.length ? 'file' : '') : el.tagName === 'SELECT' ? selectValue(el) : (el.value || (role === 'combobox' ? comboValue() : '')),
       qtype: type === 'file' ? 'file' : el.tagName === 'SELECT' ? 'select' : el.tagName === 'TEXTAREA' ? 'textarea' : role === 'combobox' ? 'select' : 'text',
       required: el.required || el.getAttribute('aria-required') === 'true' || starred(el),
-      options: el.tagName === 'SELECT' ? [...el.options].map(o => clean(o.text)).filter(t => t && !/^select|^--|^please/i.test(t)) : [],
+      options: el.tagName === 'SELECT' ? [...el.options].map(o => clean(o.text)).filter(t => t && !PLACEHOLDER.test(t)) : [],
       description: '', group: groupFor(el) });
   }
   // Yes/No buttons (Ashby): two buttons that toggle aria-pressed, and often a hidden checkbox holding the answer.
@@ -191,6 +211,18 @@ SCAN_JS = r"""
                value: /^select/i.test(txt) ? '' : txt,
                required: el.getAttribute('aria-required') === 'true' || /\bRequired\s*$/.test(el.getAttribute('aria-label') || '') ||
                  starred(el), options: [], description: '', group: groupFor(el) });
+  }
+  // iCIMS's search dropdowns: the <select> is hidden; a link beside it (role="combobox") shows the choice and opens
+  // its list (li[role="option"], each choice's words in its title)
+  for (const el of all('a.dropdown-select[role="combobox"]')) {
+    if (!vis(el) || !el.id) continue;
+    const list = byIdIn(el, el.id.replace(/_icimsDropdown$/, '_dropdown-results'));
+    const txt = clean(el.innerText);
+    out.push({ field: unique(el, byId(el.id, el)), label: dropdownLabel(el), ...(dropdownLabel(el) ? {} : { unworded: true }),
+               qtype: 'listbox', value: PLACEHOLDER.test(txt) ? '' : txt,
+               required: el.getAttribute('aria-required') === 'true', description: '', group: groupFor(el),
+               options: list ? [...list.querySelectorAll('li[role="option"]')].map(o => clean(o.getAttribute('title') || o.innerText))
+                 .filter(t => t && !PLACEHOLDER.test(t) && !/^no results$/i.test(t)) : [] });
   }
   return out;
 }
@@ -422,15 +454,13 @@ async def fill_select(page: Page, selector: str, value: str) -> bool:
     loc = page.locator(selector).first
     tag = (await loc.evaluate("e => e.tagName")).lower()
     if tag == "select":
-        try:
-            await loc.select_option(label=value, timeout=5000)
-        except Exception:
-            opts = await loc.evaluate("e => [...e.options].map(o => o.text.trim())")
-            match = next((o for o in opts if o.lower() == value.lower()), None) or \
-                next((o for o in opts if value.lower() in o.lower()), None)
-            if not match:
-                return False
-            await loc.select_option(label=match, timeout=5000)
+        # the choice by its words: exactly, else one that holds them; none, and it's left (no wait for one)
+        opts = await loc.evaluate("e => [...e.options].map(o => o.text.trim())")
+        match = next((o for o in opts if o.lower() == value.lower()), None) or \
+            next((o for o in opts if value.lower() in o.lower()), None)
+        if not match:
+            return False
+        await loc.select_option(label=match, timeout=5000)
         return True
     return await fill_combobox(page, selector, value)
 
@@ -482,7 +512,11 @@ async def fill_listbox(page: Page, selector: str, value: str) -> bool:
     if idx is None:
         await page.keyboard.press("Escape")
         return False
-    await opts.nth(idx).click()
+    try:
+        await opts.nth(idx).click(timeout=5000)
+    except PWTimeout:
+        await page.keyboard.press("Escape")
+        return False
     await page.wait_for_timeout(300)
     return _option_shown(texts[idx], await btn.inner_text())
 

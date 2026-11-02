@@ -159,8 +159,9 @@ You're responsible for what's submitted in your name.
 
 **Does it cost anything?** No. Gemini's free tier covers most days; smith and the voice skill cost nothing at all.
 
-**Which sites?** Greenhouse, Ashby and Lever end to end; most other single-page forms filled generically. Workday, iCIMS
-and other multi-page sites are filled page by page and stop at review; you sign in yourself.
+**Which sites?** Greenhouse, Ashby and Lever end to end; most other single-page forms filled generically. Workday is
+filled page by page and stops at review; you sign in yourself. On iCIMS, Jobsmith fills the profile page and you make
+the account; its later pages aren't tested yet. On SmartRecruiters it fills the first page and the rest is yours.
 
 **Will it heat up my laptop?** Only smith does real work on your machine, and only when you're plugged in. Battery
 saver (on by default on battery) fills one application at a time and keeps smith off.

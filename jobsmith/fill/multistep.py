@@ -71,6 +71,57 @@ async def needs_sign_in(page: Page) -> bool:
         return False
 
 
+# A page that asks for your profile and makes your account on it (iCIMS's Candidate Profile: "Create a login"
+# beside your name and address). Jobsmith fills the profile and never the account's boxes (the reader leaves them
+# out); the login, the password and the button that makes the account are yours (rule 5)
+PROFILE_QUESTIONS = 3
+_ACCOUNT_BUTTON_JS = r"""() => {
+  const shown = e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  const pw = [...document.querySelectorAll('input[type="password"]')].find(shown);
+  if (!pw) return '';
+  const box = pw.form || pw.closest('form') || document;
+  const b = [...box.querySelectorAll('button[type="submit"], input[type="submit"], button:not([type])')].find(shown);
+  return b ? (b.innerText || b.value || '').trim() : '';
+}"""
+
+
+async def makes_account(view) -> str:
+    """When this page asks for your profile and makes your account, the words on the button that makes the account
+    ("Submit Profile"); '' for a sign-in alone or any other page."""
+    try:
+        if not await view.locator('input[type="password"]:visible').count():
+            return ""
+        asked = [f for f in await scan_form(view) if f["qtype"] not in ("hidden", "file")]
+        if len(asked) < PROFILE_QUESTIONS:
+            return ""
+        return await view.evaluate(_ACCOUNT_BUTTON_JS) or "its button"
+    except Exception:
+        return ""
+
+
+# A site that reads the resume you attach and puts what it read into the form ("Parsing resume, please wait...":
+# iCIMS says what it reads replaces what's there): the resume goes first, then the form is read once it's done
+READING = r"/parsing (your )?resume|reading your resume|processing your resume/i"
+
+
+async def _wait_while_reading(view, timeout_ms: int = 30000) -> None:
+    await view.wait_for_timeout(300)
+    busy = view.locator(f"text={READING}")
+    for _ in range(timeout_ms // 250):
+        shown = False
+        for i in range(await busy.count()):
+            shown = shown or await busy.nth(i).is_visible()
+        if not shown:
+            return
+        await view.wait_for_timeout(250)
+
+
+def _file_for(f: dict, files: dict) -> str | None:
+    t = (f["label"] + f["field"]).lower()
+    fp = files.get("transcript" if "transcript" in t else "cover_letter" if "cover" in t else "resume")
+    return None if not fp or ("transcript" in t and not f["required"]) else fp
+
+
 async def submit_button(page: Page):
     for el in await page.locator('button, input[type="submit"]').all():
         try:
@@ -138,7 +189,13 @@ async def run(page: Page, url: str, *, answer: Callable, files: dict, log: Calla
     for page_no in range(1, max_pages + 1):
         if wall := await bot_wall(page):        # never got past: the runner hands it to you
             raise BotWall(wall)
+        account = ""
         if await needs_sign_in(page):
+            account = await makes_account(form_view(page))
+        if account:
+            log("This page asks for your profile and makes your account. Jobsmith fills the profile; the login, "
+                f"the password and \"{account}\" are yours.")
+        elif await needs_sign_in(page):
             log("This site needs you to sign in or create an account. Do it in the Jobsmith browser window; "
                 "Jobsmith continues automatically (it never types passwords).")
             ok = await wait_for_user("Sign in to continue the application", lambda: needs_sign_in(page), negate=True)
@@ -155,23 +212,36 @@ async def run(page: Page, url: str, *, answer: Callable, files: dict, log: Calla
             view = form_view(page)                 # the click can bring a new page, or a new frame
 
         fields = [f for f in await scan_form(view) if f["qtype"] != "hidden"]
-        todo = [f for f in fields if not f.get("value")]
+        # files first: a site can read the resume and replace what's in the form with it
+        attached = 0
+        for f in [f for f in fields if f["qtype"] == "file" and not f.get("value")]:
+            fp = _file_for(f, files)
+            if not fp:
+                continue
+            try:
+                ok = await fill_field(view, css_for(f["field"]), "file", "", fp)
+            except Exception:
+                ok = False
+            attached += int(bool(ok))
+            if ok and on_filled:
+                on_filled(f["field"])
+            if not ok and f["required"]:
+                issues.append(f"{f['label']}: couldn't attach the file")
+        if attached:
+            filled_total += attached
+            await _wait_while_reading(view)
+            fields = [f for f in await scan_form(view) if f["qtype"] != "hidden"]
+        todo = [f for f in fields if not f.get("value") and f["qtype"] != "file"]
         log(f"Page {page_no}: {len(fields)} fields, {len(todo)} empty")
         answers = await answer(todo) if todo else {}
         for f in todo:
             val = answers.get(f["field"], "")
-            fp = None
-            if f["qtype"] == "file":
-                t = (f["label"] + f["field"]).lower()
-                fp = files.get("transcript" if "transcript" in t else "cover_letter" if "cover" in t else "resume")
-                if not fp or ("transcript" in t and not f["required"]):
-                    continue
-            elif not val:
+            if not val:
                 if f["required"]:
                     issues.append(f"{f['label']}: no answer")
                 continue
             try:
-                ok = await fill_field(view, css_for(f["field"]), f["qtype"], val, fp)
+                ok = await fill_field(view, css_for(f["field"]), f["qtype"], val)
                 filled_total += int(bool(ok))
                 if ok and on_filled:
                     on_filled(f["field"])
@@ -196,6 +266,11 @@ async def run(page: Page, url: str, *, answer: Callable, files: dict, log: Calla
                 on_nodes(await view.evaluate(PAGE_JS))
             except Exception:
                 pass
+
+        if account:          # filled; the account and its button are yours, and the run waits for you
+            log(f"Stopped: create your login and press {account} yourself.")
+            return {"status": "waiting_user", "filled": filled_total, "issues": issues,
+                    "hold": f"Create your login and press {account} yourself"}
 
         nxt = await _first_visible(view, NEXT_BUTTONS)
         sub = await submit_button(view)

@@ -106,3 +106,23 @@ def test_a_saved_smartrecruiters_form_loads_nothing_and_keeps_no_ids():
     assert "simplify" not in page.lower() and "chrome-extension" not in page
     assert "https://" not in page and "5f3c1d2e" not in page and "3fa85f64" not in page
     assert 'data-jobsmith-page="smartrecruiters"' in page
+
+
+def test_a_signed_in_icims_profile_is_emptied_and_keeps_no_keys():
+    """The Candidate Profile: the email iCIMS carried over becomes Alex's, iCIMS's per-field hashes, the hCaptcha
+    widget's id, the form's csrf address and any attribute holding a URL (OneDrive's app key, nonces) go, and
+    iCIMS's own section names stay. Anything typed is still refused."""
+    page = icims_fixture.build(
+        '<html><body><form id="profileForm" action="https://x.icims.com/jobs/1/candidate?csrf=C3FAD39A8D585A58&amp;'
+        'hashed=-625972524"><input type="email" id="PersonProfileFields.Email" value="someone@example.edu">'
+        '<select hash="c045c90f81a1476fda01d1aa1c6b41cb5b676df77c0f6e7fd55f66e7ea58470e"></select>'
+        '<textarea id="h-captcha-response-0f8gzil38uww"></textarea><div data-hcaptcha-widget-id="0f8gzil38uww"></div>'
+        '<button data-url="https://provider.icims.com/onedrive?app_key=94fee806-5cac-4582-9738-384a0f4ea6f9">x</button>'
+        '<input type="hidden" name="portalLabelPersonProfileFields.Phones-1" value="Phones (1)">'
+        '<input type="hidden" name="accountId" value="-1"></form></body></html>', "profile", "")
+    assert 'value="alex.rivera@example.edu"' in page and "someone@" not in page
+    assert "c045c90f" not in page and "0f8gzil38uww" not in page and "C3FAD39A" not in page and "94fee806" not in page
+    assert "https://" not in page and 'value="Phones (1)"' in page
+    with pytest.raises(SystemExit):
+        icims_fixture.build('<html><body><form><input id="PersonProfileFields.FirstName" value="Jane"></form></body>'
+                            '</html>', "profile", "")

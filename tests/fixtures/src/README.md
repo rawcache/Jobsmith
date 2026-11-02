@@ -137,6 +137,35 @@ address, a phone number, a typed value or a key left in it.
 
 The pages behind sign-in come from the maintainer's own browser: [docs/guides/save-icims-pages.md](../../../docs/guides/save-icims-pages.md).
 
+### Signed in: `icims_fixture.py --signed-in` → `../icims_idemia_profile_frame.html`
+
+Step 1 of 5 of the same posting's application, "Candidate Profile", saved on 2026-11-01 from the maintainer's
+Chrome (Simplify off) as the frame shows it, blank but for the email iCIMS carried over from its email step. It asks
+for your profile (resume, name, email, phone, address, how you heard, education level, work history, education) and
+makes your account on the same page ("Create a login": Login, Password, Password (Re-enter); Submit Profile makes
+it). Steps 2-5 weren't saved ([#31](https://github.com/rawcache/Jobsmith/issues/31)).
+
+```bash
+uv run python tests/fixtures/src/icims_fixture.py --signed-in ~/Desktop/jobsmith-pages/icims tests/fixtures
+```
+
+Besides the rules above, the builder sets the Email box to Alex's, blanks iCIMS's per-field hashes and the hCaptcha
+widget's id, drops every attribute holding a URL (OneDrive's app key, hCaptcha's nonces) and keeps iCIMS's own
+section names (`portalLabel…`: "Phones (1)").
+
+On this page `icims_flow.js` also stands in for:
+
+- iCIMS's search dropdowns (Country, State/Province, Highest Level of Education, School, Degree, Major…): the
+  `<select>` is hidden, a link shows the choice and opens its list, and picking from the list fills the `<select>`.
+  iCIMS loads each choice's value as you pick, so here a choice's value is its words; the lists are the 25 entries
+  saved, and a country's State list is a short one of ours (the saved one was empty);
+- the resume read: choosing a file shows "Parsing resume, please wait..." for a moment, then what was read replaces
+  the form's boxes, as the page says it does. Here nothing is read, so they come back empty (`window.__resumeRead`
+  counts it), which shows whether Jobsmith filled the form before or after the read;
+- Submit Profile, which makes the account: it sends nothing, and `window.__signInPresses` counts it;
+- iCIMS's stylesheet rules its widgets need (hidden `<select>`, closed lists, the reading notice) and no-ops for the
+  page's inline handlers (`icimsChangeParent`).
+
 To rebuild, walk the posting again with a read-only capture (save `1_posting_top.html`, the frame's `1_posting.html`,
 the frame's `2_email.html` after Apply, and `3_auth0_top.html` after "Log back in!"), then:
 
