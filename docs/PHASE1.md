@@ -230,12 +230,25 @@ then `ats.SUPPORTED` and the README.
       private choice, never Accept (`tests/test_banners.py`, Lever's saved banner plus eight written examples). Then
       `ats.SUPPORTED`, README and site. [CI run](https://github.com/rawcache/Jobsmith/actions/runs/41241943968)
       (Linux, macOS, Windows).
-- [ ] c. SmartRecruiters: the good-first-issue adapter ([#1](https://github.com/rawcache/Jobsmith/issues/1)),
+- [x] c. SmartRecruiters: the good-first-issue adapter ([#1](https://github.com/rawcache/Jobsmith/issues/1)),
       only if nobody has claimed it.
-      Status (2026-10-31): unclaimed. Read-only, SmartRecruiters shows DataDome's bot check ("Access is temporarily
-      restricted") in place of the form, and getting past it is not ours to do, so the form is to be saved from the
-      maintainer's own Chrome ([docs/guides/save-smartrecruiters-form.md](guides/save-smartrecruiters-form.md)).
-      Meanwhile autopilot treats that page as a stop and hands it to the user (`tests/test_bot_walls.py`).
+      Evidence: [19c5002](https://github.com/rawcache/Jobsmith/commit/19c5002),
+      [e3422f3](https://github.com/rawcache/Jobsmith/commit/e3422f3),
+      [e291446](https://github.com/rawcache/Jobsmith/commit/e291446),
+      [2d96fd0](https://github.com/rawcache/Jobsmith/commit/2d96fd0),
+      [80f6995](https://github.com/rawcache/Jobsmith/commit/80f6995),
+      [7d9bcc8](https://github.com/rawcache/Jobsmith/commit/7d9bcc8). #1 was unclaimed. Read-only, SmartRecruiters
+      shows DataDome's bot check in place of the form, and getting past it is not ours to do, so Bosch's Application
+      Engineer form was saved blank from the maintainer's own Chrome
+      ([docs/guides/save-smartrecruiters-form.md](guides/save-smartrecruiters-form.md)) as
+      `tests/fixtures/smartrecruiters_bosch_form.html`. Its boxes live in web components' shadow roots; each is read
+      by its own words. Autopilot: `test_smartrecruiters_saved_bosch_form_is_filled_and_held_before_next` (the
+      resume in the Resume box, never the "autocomplete your application" upload; Next, Submit, Apply With Indeed
+      and SEEK never pressed). Extension, submit watcher on:
+      `test_autofill_fills_smartrecruiters_form_inside_its_components_and_never_moves_on`. The bot check still
+      hands the page to the user (`tests/test_bot_walls.py`).
+      [CI run](https://github.com/rawcache/Jobsmith/actions/runs/41393247644) (Linux, macOS, Windows). Known gap:
+      SmartRecruiters asks more after Next, and those pages weren't saved, so it stays out of `ats.SUPPORTED`.
 - [x] d. Workday: page by page, stopping at review; the sign-in and account step is handed to the user. Public
       pages captured read-only; a short guide for the maintainer to save the signed-in steps, which are then
       sanitized.
@@ -268,13 +281,28 @@ then `ats.SUPPORTED` and the README.
       ([#29](https://github.com/rawcache/Jobsmith/issues/29)); a page showing errors after Next wasn't saved
       ([#28](https://github.com/rawcache/Jobsmith/issues/28)). Workday stays out of `ats.SUPPORTED`: it stops at
       Review.
-- [ ] e. iCIMS: page by page, including multi-step forms in frames.
-      Status (2026-10-31): public pages saved read-only from IDEMIA's internship posting up to sign-in
-      (`tests/fixtures/icims_idemia_*.html`). iCIMS draws the application in its page's `icims_content_iframe`
-      frame; the page-by-page filler now reads, fills and clicks inside that frame (`base.InFrame`), shown on a
-      written two-page framed form. Jobsmith presses "Apply for this job online" (never "Log back in!") and hands
-      iCIMS's email step and its login to the user, in autopilot and the extension. Waiting on the signed-in pages
-      ([docs/guides/save-icims-pages.md](guides/save-icims-pages.md)).
+- [x] e. iCIMS: page by page, including multi-step forms in frames.
+      Evidence: [4376649](https://github.com/rawcache/Jobsmith/commit/4376649),
+      [9d3d77f](https://github.com/rawcache/Jobsmith/commit/9d3d77f),
+      [30e2d99](https://github.com/rawcache/Jobsmith/commit/30e2d99),
+      [2fa4707](https://github.com/rawcache/Jobsmith/commit/2fa4707),
+      [286d091](https://github.com/rawcache/Jobsmith/commit/286d091). iCIMS draws the application in its
+      `icims_content_iframe` frame; the page-by-page filler reads, fills and clicks inside it (`base.InFrame`).
+      Public pages saved read-only from IDEMIA's internship posting; the signed-in Candidate Profile saved by the
+      maintainer with other extensions off and emptied to Alex Rivera (`tests/fixtures/icims_idemia_*.html`).
+      Jobsmith presses "Apply for this job online", hands the email step and the login to the user, and on the
+      Candidate Profile (profile and account on one page) fills only the profile: never the Login, Password or
+      Password (Re-enter) boxes, never Submit Profile, and the application waits under "Needs you" with "Create
+      your login and press Submit Profile yourself". The resume is attached first and the rest is filled after
+      iCIMS has read it; a read that takes too long holds the application, and boxes the read draws again get only
+      their own answers. Autopilot: `test_icims_saved_pages_draw_the_application_in_a_frame_and_its_sign_in_is_yours`,
+      `test_icims_from_the_saved_posting_to_sign_in_is_handed_to_you`,
+      `test_icims_profile_page_fills_your_profile_and_leaves_the_login_to_you`. Extension, submit watcher on:
+      `test_autofill_fills_nothing_on_icims_sign_in`, `test_autofill_fills_icims_profile_and_leaves_the_login_to_you`,
+      and the redraw tests (`test_boxes_drawn_again_are_matched_only_when_sure` and others). Known gaps: only step 1
+      of 5 is saved ([#31](https://github.com/rawcache/Jobsmith/issues/31)); iCIMS's search dropdowns were closed
+      when saved, so their open lists are a stand-in. iCIMS stays out of `ats.SUPPORTED`.
+      [CI run](https://github.com/rawcache/Jobsmith/actions/runs/41401933961) (Linux, macOS, Windows).
 
 ## 8. Frames
 
