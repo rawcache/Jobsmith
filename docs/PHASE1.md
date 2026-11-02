@@ -231,7 +231,8 @@ then `ats.SUPPORTED` and the README.
       `ats.SUPPORTED`, README and site. [CI run](https://github.com/rawcache/Jobsmith/actions/runs/41241943968)
       (Linux, macOS, Windows).
 - [x] c. SmartRecruiters: the good-first-issue adapter ([#1](https://github.com/rawcache/Jobsmith/issues/1)),
-      only if nobody has claimed it.
+      only if nobody has claimed it. **Partial:** the first page only; the pages after Next are
+      [#35](https://github.com/rawcache/Jobsmith/issues/35), and SmartRecruiters isn't in `ats.SUPPORTED`.
       Evidence: [19c5002](https://github.com/rawcache/Jobsmith/commit/19c5002),
       [e3422f3](https://github.com/rawcache/Jobsmith/commit/e3422f3),
       [e291446](https://github.com/rawcache/Jobsmith/commit/e291446),
@@ -248,7 +249,8 @@ then `ats.SUPPORTED` and the README.
       `test_autofill_fills_smartrecruiters_form_inside_its_components_and_never_moves_on`. The bot check still
       hands the page to the user (`tests/test_bot_walls.py`).
       [CI run](https://github.com/rawcache/Jobsmith/actions/runs/41393247644) (Linux, macOS, Windows). Known gap:
-      SmartRecruiters asks more after Next, and those pages weren't saved, so it stays out of `ats.SUPPORTED`.
+      SmartRecruiters asks more after Next, and those pages weren't saved
+      ([#35](https://github.com/rawcache/Jobsmith/issues/35)), so it stays out of `ats.SUPPORTED`.
 - [x] d. Workday: page by page, stopping at review; the sign-in and account step is handed to the user. Public
       pages captured read-only; a short guide for the maintainer to save the signed-in steps, which are then
       sanitized.
@@ -281,7 +283,9 @@ then `ats.SUPPORTED` and the README.
       ([#29](https://github.com/rawcache/Jobsmith/issues/29)); a page showing errors after Next wasn't saved
       ([#28](https://github.com/rawcache/Jobsmith/issues/28)). Workday stays out of `ats.SUPPORTED`: it stops at
       Review.
-- [x] e. iCIMS: page by page, including multi-step forms in frames.
+- [x] e. iCIMS: page by page, including multi-step forms in frames. **Partial:** step 1 of 5 (the Candidate
+      Profile) only; steps 2-5 and the real dropdown lists are [#31](https://github.com/rawcache/Jobsmith/issues/31),
+      and iCIMS isn't in `ats.SUPPORTED`.
       Evidence: [4376649](https://github.com/rawcache/Jobsmith/commit/4376649),
       [9d3d77f](https://github.com/rawcache/Jobsmith/commit/9d3d77f),
       [30e2d99](https://github.com/rawcache/Jobsmith/commit/30e2d99),
