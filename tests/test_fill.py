@@ -9,7 +9,7 @@ import pytest
 from jobsmith import db, draft, jobdetail, profile, runner, sources
 from jobsmith.fill import base, generic, greenhouse
 from jobsmith.fill.base import page_confirms_submission, scan_form
-from conftest import FIXTURES, trust
+from conftest import FIXTURES, TWIN_COMPONENTS, trust
 
 def _browser_available():
     from playwright.sync_api import sync_playwright
@@ -322,6 +322,26 @@ async def test_smartrecruiters_saved_bosch_form_is_filled_and_held_before_next(f
     assert job["status"] == "filled" and "asks more after its Next button" in job["hold_reason"], job["hold_reason"]
     assert not db.q("SELECT 1 FROM runs WHERE job_id=? AND kind='submit'", (jid,))
     assert not [a for a in asked if "Phone" in a or "Country code" in a], asked
+
+
+async def test_boxes_inside_two_copies_of_a_component_are_each_their_own(page):
+    """Components reuse the same ids and radio names inside each copy. Each box and each radio group is read as its
+    own question, and each gets its own answer, never the first copy's."""
+    from jobsmith.fill.base import fill_field
+    await page.set_content(TWIN_COMPONENTS)
+    fields = {f["label"]: f for f in await scan_form(page)}
+    assert {"First name", "Last name", "City", "Over 18?", "Willing to relocate?"} <= set(fields), sorted(fields)
+    assert len({f["field"] for f in fields.values()}) == len(fields)                  # a key names one box
+    for label, value in (("First name", "Alex"), ("Last name", "Rivera"), ("City", "Boston"),
+                         ("Over 18?", "Yes"), ("Willing to relocate?", "No")):
+        f = fields[label]
+        assert await fill_field(page, base.css_for(f["field"]), f["qtype"], value), label
+    inside = lambda host, sel, js: page.evaluate(
+        f"document.querySelector('{host}').shadowRoot.querySelector('{sel}').{js}")
+    assert await inside("#first", "#box", "value") == "Alex" and await inside("#last", "#box", "value") == "Rivera"
+    assert await inside("x-field:not([id])", "#box", "value") == "Boston"
+    assert await inside("#first", "[value=Y]", "checked") and await inside("#last", "[value=N]", "checked")
+    assert not await inside("#first", "[value=N]", "checked") and not await inside("#last", "[value=Y]", "checked")
 
 
 async def test_lever_asks_about_the_jobs_own_country_so_a_london_job_waits_for_you(fake_llm, tmp_path, monkeypatch):
