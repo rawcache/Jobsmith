@@ -192,7 +192,11 @@ def test_an_application_that_loads_after_you_moved_to_a_fix_is_not_shown(engine)
             assert await _until(pilot, lambda: screen.fix is not None)
             screen.show_job(late)
             assert screen.job == {} and screen.fix["id"] == "resume_pdf" and screen.approval is None
+            await pilot.press("s")                          # submit, on a fix: nothing to send
+            await pilot.pause(0.5)
     asyncio.run(go())
+    assert not db.q("SELECT 1 FROM runs WHERE job_id='j1'")
+    assert db.q1("SELECT status FROM jobs WHERE id='j1'")["status"] == "filled"
 
 
 def test_plain_review_shows_the_missing_resume_pdf_with_nothing_held(capsys):
