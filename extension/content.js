@@ -656,25 +656,20 @@
     }
     return false;
   }
-  // After the read, the site may have drawn its boxes again: new elements for the same questions. Each answer's box
-  // is found again: the same element if it's still there, else the one with its name (id) if exactly one has it,
-  // else by its question (kind, label, which of them) only if that question has as many boxes as before. Anything
-  // less sure is left for you: an answer never goes into a box that may be another question's
+  // After the read, the site may have drawn its boxes again: new elements for the same questions. A box still there
+  // keeps its answer. A box the read took away passes its answer only to a box the read drew that asks the same
+  // question (same kind, label and name), and only when as many such boxes were taken away as drawn, in the same
+  // order. A box still there is never anyone else's, and anything less sure is left for you: an answer never goes
+  // into a box that may be another question's
   function redrawn(before) {
-    const key = f => `${f.type}|${f.label}`;
     const now = scan();
-    const ids = new Set(now.map(f => f.id));
-    const count = (list, k) => list.filter(f => key(f) === k).length;
-    const nthOf = (list, f) => list.filter(x => key(x) === key(f)).indexOf(f);
+    const ids = new Set(now.map(f => f.id)), was = new Set(before.map(f => f.id));
+    const lost = before.filter(f => !ids.has(f.id)), drawn = now.filter(f => !was.has(f.id));
+    const sig = f => `${f.type}|${f.label}|${f.name || ""}`;
     const alias = new Map();
-    for (const f of before) {
-      if (ids.has(f.id)) continue;                                   // the same box, still there
-      const named = f.name ? now.filter(x => x.name === f.name && x.type === f.type) : [];
-      if (named.length === 1) { alias.set(f.id, named[0]); continue; }
-      if (named.length > 1 || count(before, key(f)) !== count(now, key(f))) continue;   // unsure: yours
-      const same = now.filter(x => key(x) === key(f));
-      const g = same[nthOf(before, f)];
-      if (g) alias.set(f.id, g);
+    for (const f of lost) {
+      const gone = lost.filter(x => sig(x) === sig(f)), fresh = drawn.filter(x => sig(x) === sig(f));
+      if (gone.length === fresh.length) alias.set(f.id, fresh[gone.indexOf(f)]);
     }
     return alias;
   }
