@@ -255,11 +255,12 @@ def pick_option(answer: str, options: list[str]) -> str | None:
     for o in options:
         if len(al) > 3 and (al in o.lower() or o.lower() in al):
             return o
-    # best word overlap, if it's unambiguous and covers at least half the answer's words: one shared word
-    # ("Technology") never makes "Example Institute of Technology" into "Academy of Careers and Technology"
+    # best word overlap, if it's unambiguous and covers most of the answer's words: one shared word never makes
+    # "Example Institute of Technology" into "Academy of Careers and Technology", or "Example University" into
+    # "Eastern University"
     stop = {"and", "the", "for", "with", "from"}
     words = set(re.findall(r"[a-z]{3,}", expanded)) - stop
-    need = max(1, -(-len(set(re.findall(r"[a-z]{3,}", al)) - stop) // 2))
+    need = len(set(re.findall(r"[a-z]{3,}", al)) - stop) // 2 + 1
     scored = sorted(((len(words & set(re.findall(r"[a-z]{3,}", o.lower()))), o) for o in options
                      if not DECLINE.search(o)), reverse=True)
     if scored and scored[0][0] >= need and (len(scored) == 1 or scored[0][0] > scored[1][0]):

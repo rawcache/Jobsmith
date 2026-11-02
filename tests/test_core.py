@@ -1588,6 +1588,10 @@ def test_one_shared_word_never_picks_a_name_from_a_list():
     from jobsmith.classify import pick_option
     schools = ["Elm High School", "Eastern University", "Virginia Tech", "Academy of Careers and Technology", "Other"]
     assert pick_option("Example Institute of Technology", schools) is None
+    assert pick_option("Example University", schools) is None                          # not Eastern University
+    assert pick_option("The Example Institute", ["Academy Institute", "The Other School"]) is None
     assert pick_option("Example Institute of Technology", schools + ["Example Institute Tech"]) == "Example Institute Tech"
     assert pick_option("Computer Engineering", ["Engineering, Computer", "Computer Science"]) == "Engineering, Computer"
     assert pick_option("Mobile", ["Home", "Mobile phone"]) == "Mobile phone"
+    from jobsmith.classify import canon_for
+    assert canon_for("Phones Type") == canon_for("Phone device type") == "phone_type"
