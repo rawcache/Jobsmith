@@ -257,3 +257,26 @@ def test_saved_drafts_keep_the_note_under_their_question():
     assert draft.readiness(jid)["items"]
     got = json.loads(mcp_server.jobsmith_save_answers(jid, [{"field": "q", "text": "F-1.", "fact_ids": []}]))
     assert "error" in got["saved"][0]
+
+
+@pytest.mark.parametrize("f", [field("Password", "text", name="#password"),
+                               field("Confirm password", "text", name="confirm"),
+                               field("Create a PIN", "text", name="#pin")], ids=lambda f: f["label"])
+def test_a_password_box_is_never_drafted(f):
+    got = draft.offline(f, profile.answers(), JOB)
+    assert got is not None and got["answer"] == ""                  # never AI's to write (rule 5)
+    assert got["issues"]
+
+
+def test_a_site_password_for_your_portfolio_is_still_asked():
+    # "Portfolio, Video, or Website Password": the password to your own work, which only you know
+    profile.set_answer("website", "https://alexrivera.example", confirmed=True)
+    got = draft.offline(field("Portfolio, Video, or Website Password", "text", required=False), profile.answers(), JOB)
+    assert got is not None and got["answer"] == ""
+
+
+@pytest.mark.parametrize("label", ["Portfolio PIN code", "Enter the PIN code sent to your email address",
+                                   "Portfolio access\nPIN code", "Postal / PIN code"])
+def test_every_pin_waits_for_you(label):
+    got = draft.offline(field(label, "text"), profile.answers(), JOB)
+    assert got is not None and got["answer"] == "" and got["issues"]

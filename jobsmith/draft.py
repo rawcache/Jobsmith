@@ -572,8 +572,18 @@ def deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | Non
     return _plain_yes_no(field, ans, job) or _yours_to_answer(field, classify.canon_for(field["label"]))
 
 
+# A password or PIN (a sign-in's, or the one to your portfolio) is never Jobsmith's to type (rule 5). Any "PIN" is
+# taken for one, even India's postal "PIN code": when in doubt, it waits for you.
+PASSWORD = re.compile(r"\bpass(word|wd|code|phrase)s?\b|\bpin\b", re.I)
+PASSWORD_NAME = re.compile(r"pass(word|wd)|(^|[\s#_-])pwd($|\s)", re.I)
+
+
 def _deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | None:
     where = f"{field['field']} {field.get('name') or ''}"       # the extension's ids are its own; name is the page's
+    if PASSWORD.search(field["label"]) or PASSWORD_NAME.search(where):
+        return {"kind": "answer_bank", "canon": None, "answer": "", "confidence": 0.0 if field["required"] else 1.0,
+                "issues": ["Asks for a password; Jobsmith never types passwords, so enter it yourself"]
+                if field["required"] else [], "rationale": "A password: left for you"}
     if SIGNATURE.search(f"{where} {field['label']}"):
         return {"kind": "answer_bank", "canon": None, "answer": "", "confidence": 0.0 if field["required"] else 1.0,
                 "issues": ["Asks for your signature; Jobsmith never signs for you, so sign it yourself"]
