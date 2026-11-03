@@ -7,8 +7,8 @@ import re
 RULES: list[tuple[str, str]] = [
     # Citizenship of somewhere else (sanctions, Part 810, dual citizenship, "a citizen of any country listed"): your
     # US answers don't say, so it's yours to answer. First: these often mention export controls or the US too.
-    (r"sanction|embargo|part 810|dual citizen|citizen(ship)? of (an)?other country|other citizenships?|citizen(ship)? (of|in) (any|a|"
-     r"specific|certain|one of|the following|the countries)\b|citizen\w*\b.{0,60}\bcountr(y|ies) (listed|designated|below)",
+    (r"sanction|embargo|part 810|dual citizen|citizen(ship)? of (an)?other country|other citizenships?|(citizen(ship)?|national|resident) (of|in) (any|a|"
+     r"specific|certain|one of|the following|the countries)\b|(citizen|national|resident)\w*\b.{0,60}\bcountr(y|ies) (listed|designated|below)",
      "other_citizenship"),
     # Whether you need an export licence isn't answered by citizenship
     (r"export\b.{0,40}\blicen[cs]e|licen[cs]e\b.{0,40}\bexport", "export_license"),
@@ -55,7 +55,7 @@ RULES: list[tuple[str, str]] = [
     (r"lgbt|sexual orientation", "lgbtq"),
     (r"first[- ]generation", "first_gen"),
     (r"\bgender\b|\bsex\b", "gender"),
-    (r"\brac(e|ial)\b|ethnicity|ethnic (background|group|origin|identity)", "race"),
+    (r"\brac(e|ial)\b|ethnicity|ethnic (background|group|origin|identity|heritage|category)", "race"),
     (r"veteran", "veteran_status"),
     (r"disabilit|\bpwds?\b", "disability_status"),     # PWD: a person with a disability (password boxes never get here)
     (r"pronoun", "pronouns"),

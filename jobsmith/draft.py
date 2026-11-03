@@ -456,15 +456,17 @@ def _disability_detail(label: str) -> bool:
 PROFILE_ONLY = re.compile(r"citizen|nationality|\bnational of\b|export (control|compliance|regulat|law|administration)|"
                           r"sanction|embargo|\bitar\b|\bear\b|part 810|"
                           r"clearance|authori[sz]\w* to work|work authori|\bvisas?\b|sponsor|immigration|green card|"
-                          r"permanent resident|asyl|refugee|\brac(e|ial)\b|ethnicity|ethnic (background|group|origin|"
-                          r"identity)|transgender|gender|sexual orientation|"
+                          r"permanent resident|asyl|refugee|\brac(e|ial)\b|\bethnic(ity)?\b|transgender|gender|sexual orientation|"
                           r"lgbt|veteran|disabilit|hispanic|latin[aox]|pronoun", re.I)
 PROFILE_ONLY_OPTION = re.compile(r"citizen|green card|permanent resident|u\.?s\.? person|\b(wo)?man\b|non-?binary|"
                                  r"veteran|disabilit|hispanic|latin[aox]|african american|\basian\b|\bwhite\b|"
                                  r"pacific islander|alaska native|transgender|cisgender", re.I)
 YES_NO_FACTS = {"work_authorized_us", "needs_sponsorship", "us_citizen", "us_person"}
+# A question about work authorization that wants more than yes or no: its date, type or status
+ASKS_MORE = re.compile(r"^\W*(what|which|when|where|how|list|describe|explain|provide|enter|specify)\b|"
+                       r"\b(expir\w*|dates?|types?|kinds?|numbers?|status)\b", re.I)
 VOLUNTARY = ("gender", "race", "hispanic_latino", "veteran_status", "disability_status", "lgbtq")
-DEMOGRAPHIC = re.compile(r"\brac(e|ial)\b|ethnicity|ethnic (background|group|origin|identity)|transgender|gender|"
+DEMOGRAPHIC = re.compile(r"\brac(e|ial)\b|\bethnic(ity)?\b|transgender|gender|"
                          r"sexual orientation|lgbt|veteran|disabilit|hispanic|"
                          r"latin[aox]|pronoun", re.I)
 
@@ -566,7 +568,7 @@ def _deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | No
         # Your profile answers for the US; another country's citizenship, or whether you need an export licence,
         # is yours to say
         return _yours_to_answer(field, canon, ans)
-    if canon in YES_NO_FACTS and not field["options"] and not classify.YES_NO_Q.search(field["label"].strip()):
+    if canon in YES_NO_FACTS and not field["options"] and ASKS_MORE.search(field["label"]):
         # "What is your work authorization expiration date?" isn't answered by your "Yes"
         return _yours_to_answer(field, canon, ans)
     if canon == "high_school":
