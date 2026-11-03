@@ -45,10 +45,12 @@ Detail: [PHASE1.md](PHASE1.md).
 
 Guardrails; posting traps; confirmed submissions + stats/audit; skill extraction fix (#20); public listing data;
 Greenhouse dropdowns; Ashby, Lever, SmartRecruiters, Workday, iCIMS; frames; weekly canary, "Report this form",
-behaviour page, no-AI CI proof.
+behaviour page, no-AI CI proof; ready for strangers (first-run setup, narrowed matches, a getting-started
+guide, a usability test, the Web Store listing prepared).
 
 **Gate (also the public launch):** 80% of good matches submitted without the user, zero invented facts in a
-50-application audit.
+50-application audit, and 3 people who aren't developers reach their first real application in under 15 minutes
+without help.
 
 ### Phase 2 · Applications that win (December 2026) — ai-job-search layer
 
