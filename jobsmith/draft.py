@@ -470,8 +470,8 @@ DIFFERENT = re.compile(r"\b(explain|describe|why|details?|elaborate)\b|\b(what|w
                        r"\b(document|card|receipt|permit|visa|alien|a)[- ]?numbers?\b", re.I)
 EXPIRES = re.compile(r"\bexpir", re.I)
 # Your history, not where you stand now: "Have you ever been denied work authorization?"
-HISTORY = re.compile(r"\b(ever|previously|in the past|denied|revoked|refused|rejected|overst\w+|violat\w*|deport\w*)\b",
-                     re.I)
+HISTORY = re.compile(r"\b(have|has|had|was|were)\b.{0,30}\bever\b|\bever (been|had|held|received)\b|\b(previously|in the "
+                     r"past|denied|revoked|refused|rejected|overst\w+|violat\w*|deport\w*)\b", re.I)
 NEEDS_SPONSOR = re.compile(r"\b(require|need)\w*\b.{0,60}\bsponsor", re.I)
 ASKS_YES_NO = re.compile(r"^\W*(please\s+)?((confirm|indicate|state)\s+)?((whether|if|that)\s+)?(are|do|does|did|have|"
                          r"has|will|would|can|could|is|were|you)\b", re.I)
