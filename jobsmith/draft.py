@@ -453,15 +453,19 @@ def _disability_detail(label: str) -> bool:
 # Questions only your confirmed profile may answer (rule 2): work authorization, citizenship, export control,
 # clearance and demographics. One Jobsmith can't map to your profile is left for you, never given to AI or filled
 # with an answer you approved for another job.
-PROFILE_ONLY = re.compile(r"citizen|nationality|\bnational of\b|export (control|compliance|regulat|law|administration)|sanction|embargo|\bitar\b|\bear\b|part 810|"
+PROFILE_ONLY = re.compile(r"citizen|nationality|\bnational of\b|export (control|compliance|regulat|law|administration)|"
+                          r"sanction|embargo|\bitar\b|\bear\b|part 810|"
                           r"clearance|authori[sz]\w* to work|work authori|\bvisas?\b|sponsor|immigration|green card|"
-                          r"permanent resident|asyl|refugee|\brac(e|ial)\b|ethnic|transgender|gender|sexual orientation|"
+                          r"permanent resident|asyl|refugee|\brac(e|ial)\b|ethnicity|ethnic (background|group|origin|"
+                          r"identity)|transgender|gender|sexual orientation|"
                           r"lgbt|veteran|disabilit|hispanic|latin[aox]|pronoun", re.I)
 PROFILE_ONLY_OPTION = re.compile(r"citizen|green card|permanent resident|u\.?s\.? person|\b(wo)?man\b|non-?binary|"
                                  r"veteran|disabilit|hispanic|latin[aox]|african american|\basian\b|\bwhite\b|"
                                  r"pacific islander|alaska native|transgender|cisgender", re.I)
+YES_NO_FACTS = {"work_authorized_us", "needs_sponsorship", "us_citizen", "us_person"}
 VOLUNTARY = ("gender", "race", "hispanic_latino", "veteran_status", "disability_status", "lgbtq")
-DEMOGRAPHIC = re.compile(r"\brac(e|ial)\b|ethnic|transgender|gender|sexual orientation|lgbt|veteran|disabilit|hispanic|"
+DEMOGRAPHIC = re.compile(r"\brac(e|ial)\b|ethnicity|ethnic (background|group|origin|identity)|transgender|gender|"
+                         r"sexual orientation|lgbt|veteran|disabilit|hispanic|"
                          r"latin[aox]|pronoun", re.I)
 
 
@@ -558,8 +562,12 @@ def _deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | No
         # A typed dialling code box: left as the site set it. A list of countries is answered from your country.
         return {"kind": "answer_bank", "canon": canon, "answer": "", "confidence": 1.0, "issues": [],
                 "rationale": "A dialling code box: left as the site set it"}
-    if canon == "other_citizenship":
-        # Your profile answers for the US; whether you hold another country's citizenship is yours to say
+    if canon in ("other_citizenship", "export_license"):
+        # Your profile answers for the US; another country's citizenship, or whether you need an export licence,
+        # is yours to say
+        return _yours_to_answer(field, canon, ans)
+    if canon in YES_NO_FACTS and not field["options"] and not classify.YES_NO_Q.search(field["label"].strip()):
+        # "What is your work authorization expiration date?" isn't answered by your "Yes"
         return _yours_to_answer(field, canon, ans)
     if canon == "high_school":
         # Your profile is about college and work; a high school's name or year would be a guess, AI's or ours
