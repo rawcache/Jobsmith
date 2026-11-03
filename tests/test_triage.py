@@ -111,6 +111,8 @@ def test_yes_no_profile_facts_never_answer_a_different_question():
               field("Please state whether you have ever been denied work authorization in the United States.", "text"),
               field("Have you ever been denied a U.S. visa?", options=["Yes", "No"]),
               field("Did you ever require visa sponsorship?", options=["Yes", "No"]),
+              field("Have you previously required sponsorship, or will you ever require it?", options=["Yes", "No"]),
+              field("Will you ever require sponsorship, given a visa that was revoked?", "text"),
               field("Have you, at any time during your professional career, ever required visa sponsorship?", "text"),
               field("Work authorization valid through date", "text"),
               field("Does your visa expire in the next two years?", options=["Yes", "No"]),
@@ -130,6 +132,7 @@ def test_yes_no_profile_facts_never_answer_a_different_question():
                   "Will you now or in the future require sponsorship for employment visa status?",
                   "Do you require visa sponsorship now or at a later date?",
                   "Will you require sponsorship when your current authorization expires?",
-                  "Will you now or ever require visa sponsorship?"):
+                  "Will you now or ever require visa sponsorship?",
+                  "Will you at any point during your employment ever require visa sponsorship?"):
         assert draft.offline(field(label, "text"), profile.answers(), JOB)["answer"] == "No", label
 

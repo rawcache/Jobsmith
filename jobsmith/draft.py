@@ -472,7 +472,8 @@ EXPIRES = re.compile(r"\bexpir", re.I)
 # Your history, not where you stand now: "Have you ever been denied work authorization?"
 HISTORY = re.compile(r"\b(ever|previously|in the past|denied|revoked|refused|rejected|overst\w+|violat\w*|deport\w*)\b",
                      re.I)
-FUTURE = re.compile(r"\b(will|would|now or)\b[^.?]{0,30}\bever\b", re.I)      # "Will you now or ever require sponsorship?"
+# "Will you now or ever require sponsorship?": that "ever" is the future, so it alone doesn't make it history
+FUTURE_EVER = re.compile(r"(\b(will|would|now or)\b[^.?,;]*?)\bever\b", re.I)
 NEEDS_SPONSOR = re.compile(r"\b(require|need)\w*\b.{0,60}\bsponsor", re.I)
 ASKS_YES_NO = re.compile(r"^\W*(please\s+)?((confirm|indicate|state)\s+)?((whether|if|that)\s+)?(are|do|does|did|have|"
                          r"has|will|would|can|could|is|were|you)\b", re.I)
@@ -482,7 +483,7 @@ def _asks_more(label: str, canon: str, has_options: bool) -> bool:
     """Not the question your yes or no answers. In a free-text box only a yes/no question is; "Will your visa
     expire?" never is, though "Will you need sponsorship when it expires?" is still the sponsorship question."""
     l = " ".join(label.split())
-    if DIFFERENT.search(l) or (HISTORY.search(l) and not FUTURE.search(l)):
+    if DIFFERENT.search(l) or HISTORY.search(FUTURE_EVER.sub(r"\1", l)):
         return True
     if EXPIRES.search(l) and not (canon == "needs_sponsorship" and NEEDS_SPONSOR.search(l)):
         return True
