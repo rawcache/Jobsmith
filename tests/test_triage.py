@@ -90,6 +90,8 @@ def test_demographic_options_under_a_vague_label_stay_yours(options):
                                    "Describe your experience working with ethnically diverse teams"])
 def test_ordinary_questions_are_not_profile_only(label):
     assert not draft._profile_only(field("Language Skill(s)", "multiselect", ["English", "Mandarin (MAN)", "German"]))
+    assert draft._profile_only(field("Please select your status", options=["I am a woman", "I am a man"]))
+    assert draft._profile_only(field("Please select your status", options=["Woman (F)", "Man (M)"]))
     assert classify.canon_for(label) not in ("other_citizenship", "race")
     assert not draft._profile_only(field(label, "textarea"))
 
@@ -115,7 +117,8 @@ def test_yes_no_profile_facts_never_answer_a_different_question():
         assert got is not None and got["answer"] == "", f["label"]
     for label in ("Are you legally authorized to work in the United States?",
                   "Please confirm you are legally authorized to work in the United States.",
-                  "* Are you legally authorized\nto work in the US?"):
+                  "* Are you legally authorized\nto work in the US?",
+                  "Please state whether you are legally authorized to work in the United States."):
         assert draft.offline(field(label, "text"), profile.answers(), JOB)["answer"] == "Yes", label
     for label in ("Do you require sponsorship for any type of work visa?",
                   "Will you now or in the future require sponsorship for employment visa status?",

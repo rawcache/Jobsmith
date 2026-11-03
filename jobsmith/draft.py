@@ -458,8 +458,8 @@ PROFILE_ONLY = re.compile(r"citizen|nationality|\bnational of\b|export (control|
                           r"clearance|authori[sz]\w* to work|work authori|\bvisas?\b|sponsor|immigration|green card|"
                           r"permanent resident|asyl|refugee|\brac(e|ial)\b|\bethnic(ity)?\b|transgender|gender|sexual orientation|"
                           r"lgbt|veteran|disabilit|hispanic|latin[aox]|pronoun", re.I)
-PROFILE_ONLY_OPTION = re.compile(r"citizen|green card|permanent resident|u\.?s\.? person|^\W*(wo)?m[ae]n\W*$|"
-                                 r"^\W*(fe)?male\W*$|non-?binary|"
+PROFILE_ONLY_OPTION = re.compile(r"citizen|green card|permanent resident|u\.?s\.? person|^\W*(i am an? )?(wo)?m[ae]n\b|"
+                                 r"^\W*(i am )?(fe)?male\b|non-?binary|"
                                  r"veteran|disabilit|hispanic|latin[aox]|african american|\basian\b|\bwhite\b|"
                                  r"pacific islander|alaska native|transgender|cisgender", re.I)
 YES_NO_FACTS = {"work_authorized_us", "needs_sponsorship", "us_citizen", "us_person"}
@@ -470,7 +470,7 @@ DIFFERENT = re.compile(r"\b(explain|describe|why|details?|elaborate)\b|\b(what|w
                        r"\b(document|card|receipt|permit|visa|alien|a)[- ]?numbers?\b", re.I)
 EXPIRES = re.compile(r"\bexpir", re.I)
 NEEDS_SPONSOR = re.compile(r"\b(require|need)\w*\b.{0,60}\bsponsor", re.I)
-ASKS_YES_NO = re.compile(r"^\W*(please\s+)?((confirm|indicate)\s+)?((whether|if|that)\s+)?(are|do|does|did|have|"
+ASKS_YES_NO = re.compile(r"^\W*(please\s+)?((confirm|indicate|state)\s+)?((whether|if|that)\s+)?(are|do|does|did|have|"
                          r"has|will|would|can|could|is|were|you)\b", re.I)
 
 
