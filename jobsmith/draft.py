@@ -463,9 +463,9 @@ PROFILE_ONLY_OPTION = re.compile(r"citizen|green card|permanent resident|u\.?s\.
                                  r"pacific islander|alaska native|transgender|cisgender", re.I)
 YES_NO_FACTS = {"work_authorized_us", "needs_sponsorship", "us_citizen", "us_person"}
 # A question about work authorization that wants more than yes or no: an explanation, or its date, type or status
-EXPLAIN = re.compile(r"\b(explain|describe|why|details?|elaborate)\b", re.I)
+EXPLAIN = re.compile(r"\b(explain|describe|why|details?|elaborate|expir\w*|dates?|numbers?)\b", re.I)
 ASKS_MORE = re.compile(r"^\W*(what|which|when|where|how|list|provide|enter|specify)\b|"
-                       r"\b(expir\w*|dates?|types?|kinds?|numbers?|status)\b", re.I)
+                       r"\b(types?|kinds?|status)\b", re.I)
 ASKS_YES_NO = re.compile(r"^\W*(please\s+)?((confirm|indicate|state)\s+)?((whether|if|that)\s+)?(are|do|does|did|have|"
                          r"has|will|would|can|could|is|were|you)\b", re.I)
 

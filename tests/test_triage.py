@@ -96,7 +96,10 @@ def test_ordinary_questions_are_not_profile_only(label):
 def test_yes_no_profile_facts_never_answer_a_different_question():
     profile.set_answer("work_authorized_us", "Yes", confirmed=True)
     profile.set_answer("us_citizen", "Yes", confirmed=True)
-    for f in (field("What is your work authorization expiration date?", "text"),
+    profile.set_answer("needs_sponsorship", "No", confirmed=True)
+    for f in (field("Can you provide your work authorization expiration date?", "text"),
+              field("Are you authorized to work in the US, and if so until what date?", "text"),
+              field("What is your work authorization expiration date?", "text"),
               field("What type of work authorization do you have?", "text"),
               field("Please describe your work authorization", "text"),
               field("Please explain why you need visa sponsorship", "text"),
@@ -109,7 +112,6 @@ def test_yes_no_profile_facts_never_answer_a_different_question():
                   "Please confirm you are legally authorized to work in the United States.",
                   "* Are you legally authorized\nto work in the US?"):
         assert draft.offline(field(label, "text"), profile.answers(), JOB)["answer"] == "Yes", label
-    profile.set_answer("needs_sponsorship", "No", confirmed=True)
     for label in ("Do you require sponsorship for any type of work visa?",
                   "Will you now or in the future require sponsorship for employment visa status?"):
         assert draft.offline(field(label, "text"), profile.answers(), JOB)["answer"] == "No", label
