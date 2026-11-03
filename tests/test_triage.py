@@ -82,7 +82,21 @@ def test_demographic_options_under_a_vague_label_stay_yours(options):
 
 
 @pytest.mark.parametrize("label", ["Are you willing to relocate to other countries?",
-                                   "Describe a project involving data export"])
+                                   "Are you willing to relocate to any of the countries listed below?",
+                                   "Describe a project involving data export",
+                                   "Describe your experience working with ethnically diverse teams"])
 def test_ordinary_questions_are_not_profile_only(label):
-    assert classify.canon_for(label) != "other_citizenship"
+    assert classify.canon_for(label) not in ("other_citizenship", "race")
     assert not draft._profile_only(field(label, "textarea"))
+
+
+def test_yes_no_profile_facts_never_answer_a_different_question():
+    profile.set_answer("work_authorized_us", "Yes", confirmed=True)
+    profile.set_answer("us_citizen", "Yes", confirmed=True)
+    for f in (field("What is your work authorization expiration date?", "text"),
+              field("What type of work authorization do you have?", "text"),
+              field("Do you require an export compliance license?", options=["Yes", "No"])):
+        got = draft.offline(f, profile.answers(), JOB)
+        assert got is not None and got["answer"] == "", f["label"]
+    got = draft.offline(field("Are you legally authorized to work in the United States?", "text"), profile.answers(), JOB)
+    assert got["answer"] == "Yes"
