@@ -30,6 +30,9 @@ PROFILE_ONLY = [
     field("If you selected a response to the prior question other than “none of the above,” please confirm "
           "whether any of the following apply", "multiselect", ["U.S. citizen", "U.S. permanent resident"]),
     field("Are you a citizen of any country that is NOT included in the list below?", options=["Yes", "No"]),
+    field("For export compliance, are you a national of any of the countries listed below?", options=["Yes", "No"]),
+    field("What is your ethnic heritage?", "text"),
+    field("Ethnic category", "text"),
     field("Please select the highest level security clearance and access you currently hold",
           options=["Secret", "Top Secret", "TS/SCI"]),
 ]
@@ -95,8 +98,12 @@ def test_yes_no_profile_facts_never_answer_a_different_question():
     profile.set_answer("us_citizen", "Yes", confirmed=True)
     for f in (field("What is your work authorization expiration date?", "text"),
               field("What type of work authorization do you have?", "text"),
-              field("Do you require an export compliance license?", options=["Yes", "No"])):
+              field("Do you require an export compliance license?", options=["Yes", "No"]),
+              field("For export compliance, are you a national of any of the countries listed below?",
+                    options=["Yes", "No"])):
         got = draft.offline(f, profile.answers(), JOB)
         assert got is not None and got["answer"] == "", f["label"]
-    got = draft.offline(field("Are you legally authorized to work in the United States?", "text"), profile.answers(), JOB)
-    assert got["answer"] == "Yes"
+    for label in ("Are you legally authorized to work in the United States?",
+                  "Please confirm you are legally authorized to work in the United States.",
+                  "* Are you legally authorized\nto work in the US?"):
+        assert draft.offline(field(label, "text"), profile.answers(), JOB)["answer"] == "Yes", label
