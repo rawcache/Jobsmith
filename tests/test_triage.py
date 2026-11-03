@@ -101,6 +101,7 @@ def test_yes_no_profile_facts_never_answer_a_different_question():
               field("Are you authorized to work in the US, and if so until what date?", "text"),
               field("What is your work authorization expiration date?", "text"),
               field("What type of work authorization do you have?", "text"),
+              field("Will your work authorization expire in the next two years?", "text"),
               field("Please describe your work authorization", "text"),
               field("Please explain why you need visa sponsorship", "text"),
               field("Do you require an export compliance license?", options=["Yes", "No"]),
@@ -113,5 +114,7 @@ def test_yes_no_profile_facts_never_answer_a_different_question():
                   "* Are you legally authorized\nto work in the US?"):
         assert draft.offline(field(label, "text"), profile.answers(), JOB)["answer"] == "Yes", label
     for label in ("Do you require sponsorship for any type of work visa?",
-                  "Will you now or in the future require sponsorship for employment visa status?"):
+                  "Will you now or in the future require sponsorship for employment visa status?",
+                  "Do you require visa sponsorship now or at a later date?",
+                  "Will you require sponsorship when your current authorization expires?"):
         assert draft.offline(field(label, "text"), profile.answers(), JOB)["answer"] == "No", label
