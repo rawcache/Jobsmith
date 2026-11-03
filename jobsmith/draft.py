@@ -469,6 +469,9 @@ DIFFERENT = re.compile(r"\b(explain|describe|why|details?|elaborate)\b|\b(what|w
                        r".{0,40}\b(dates?|expir\w*|numbers?)\b|\b(expiration|expiry|end|through|valid) date\b|"
                        r"\b(document|card|receipt|permit|visa|alien|a)[- ]?numbers?\b", re.I)
 EXPIRES = re.compile(r"\bexpir", re.I)
+# Your history, not where you stand now: "Have you ever been denied work authorization?"
+HISTORY = re.compile(r"\b(ever|previously|in the past|denied|revoked|refused|rejected|overst\w+|violat\w*|deport\w*)\b",
+                     re.I)
 NEEDS_SPONSOR = re.compile(r"\b(require|need)\w*\b.{0,60}\bsponsor", re.I)
 ASKS_YES_NO = re.compile(r"^\W*(please\s+)?((confirm|indicate|state)\s+)?((whether|if|that)\s+)?(are|do|does|did|have|"
                          r"has|will|would|can|could|is|were|you)\b", re.I)
@@ -478,7 +481,7 @@ def _asks_more(label: str, canon: str, has_options: bool) -> bool:
     """Not the question your yes or no answers. In a free-text box only a yes/no question is; "Will your visa
     expire?" never is, though "Will you need sponsorship when it expires?" is still the sponsorship question."""
     l = " ".join(label.split())
-    if DIFFERENT.search(l):
+    if DIFFERENT.search(l) or HISTORY.search(l):
         return True
     if EXPIRES.search(l) and not (canon == "needs_sponsorship" and NEEDS_SPONSOR.search(l)):
         return True
