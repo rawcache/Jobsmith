@@ -280,3 +280,22 @@ def test_a_site_password_for_your_portfolio_is_still_asked():
 def test_every_pin_waits_for_you(label):
     got = draft.offline(field(label, "text"), profile.answers(), JOB)
     assert got is not None and got["answer"] == "" and got["issues"]
+
+
+async def test_eu_greenhouse_postings_come_from_the_one_api_host():
+    import httpx
+    from jobsmith import jobdetail
+    asked = []
+
+    def handle(req):
+        asked.append(req.url.host)
+        if req.url.host != "boards-api.greenhouse.io":
+            raise httpx.ConnectError("nodename nor servname provided, or not known", request=req)
+        return httpx.Response(200, json={"id": 4962456101, "title": "Machine Learning Engineer Intern",
+                                         "absolute_url": "https://job-boards.eu.greenhouse.io/acme/jobs/4962456101",
+                                         "content": "", "questions": [], "location": {"name": "Amsterdam"}})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        got = await jobdetail.fetch_greenhouse("https://job-boards.eu.greenhouse.io/acme/jobs/4962456101", client)
+    assert asked == ["boards-api.greenhouse.io"]
+    assert got["title"] == "Machine Learning Engineer Intern"
+    assert "job-boards.eu.greenhouse.io" in got["apply_url"]           # the form is still the EU board's

@@ -113,9 +113,14 @@ def _board_guesses(company: str) -> list[str]:
     return out
 
 
+# One API host serves every Greenhouse board, EU ones included: "boards-api.eu.greenhouse.io" doesn't exist (its
+# job pages are on job-boards.eu.greenhouse.io; their data is here).
+API_HOST = "boards-api.greenhouse.io"
+
+
 async def _resolve_board(url: str, job_id: str, company: str, region: str, client: httpx.AsyncClient) -> str | None:
     """Embed links (boards.greenhouse.io/embed/job_app?token=ID) don't name the board. Find it."""
-    host = "boards-api.eu.greenhouse.io" if region == "eu" else "boards-api.greenhouse.io"
+    host = API_HOST
     # 1) the embed page usually references its board somewhere in the HTML
     try:
         r = await client.get(url)
@@ -146,7 +151,7 @@ async def fetch_greenhouse(url: str, client: httpx.AsyncClient, company: str = "
         board = await _resolve_board(url, job_id, company, region, client)
         if not board:
             raise BoardNotFound("Couldn't identify the Greenhouse board for this embed link")
-    host = "boards-api.eu.greenhouse.io" if region == "eu" else "boards-api.greenhouse.io"
+    host = API_HOST
     r = await client.get(f"https://{host}/v1/boards/{board}/jobs/{job_id}", params={"questions": "true"})
     if r.status_code == 404:
         raise ValueError("This posting is no longer on Greenhouse (it may have closed)")
