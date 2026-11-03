@@ -458,26 +458,31 @@ PROFILE_ONLY = re.compile(r"citizen|nationality|\bnational of\b|export (control|
                           r"clearance|authori[sz]\w* to work|work authori|\bvisas?\b|sponsor|immigration|green card|"
                           r"permanent resident|asyl|refugee|\brac(e|ial)\b|\bethnic(ity)?\b|transgender|gender|sexual orientation|"
                           r"lgbt|veteran|disabilit|hispanic|latin[aox]|pronoun", re.I)
-PROFILE_ONLY_OPTION = re.compile(r"citizen|green card|permanent resident|u\.?s\.? person|\b(wo)?man\b|non-?binary|"
+PROFILE_ONLY_OPTION = re.compile(r"citizen|green card|permanent resident|u\.?s\.? person|^\W*(wo)?m[ae]n\W*$|"
+                                 r"^\W*(fe)?male\W*$|non-?binary|"
                                  r"veteran|disabilit|hispanic|latin[aox]|african american|\basian\b|\bwhite\b|"
                                  r"pacific islander|alaska native|transgender|cisgender", re.I)
 YES_NO_FACTS = {"work_authorized_us", "needs_sponsorship", "us_citizen", "us_person"}
-# A question about work authorization that wants more than yes or no: an explanation, or its date, type or status
-EXPLAIN = re.compile(r"\b(explain|describe|why|details?|elaborate)\b|\b(what|which|provide|enter|give|list|state|"
-                     r"until)\b.{0,40}\b(dates?|expir\w*|numbers?)\b|\b(expiration|expiry|end) date\b", re.I)
+# A different question that only mentions work authorization, a visa or citizenship: it wants an explanation, a
+# date or a document number, or asks when something expires. Your yes or no doesn't answer it.
+DIFFERENT = re.compile(r"\b(explain|describe|why|details?|elaborate)\b|\b(what|which|provide|enter|give|list|until)\b"
+                       r".{0,40}\b(dates?|expir\w*|numbers?)\b|\b(expiration|expiry|end|through|valid) date\b|"
+                       r"\b(document|card|receipt|permit|visa|alien|a)[- ]?numbers?\b", re.I)
 EXPIRES = re.compile(r"\bexpir", re.I)
-ASKS_MORE = re.compile(r"^\W*(what|which|when|where|how|list|provide|enter|specify)\b|"
-                       r"\b(types?|kinds?|status)\b", re.I)
-ASKS_YES_NO = re.compile(r"^\W*(please\s+)?((confirm|indicate|state)\s+)?((whether|if|that)\s+)?(are|do|does|did|have|"
+NEEDS_SPONSOR = re.compile(r"\b(require|need)\w*\b.{0,60}\bsponsor", re.I)
+ASKS_YES_NO = re.compile(r"^\W*(please\s+)?((confirm|indicate)\s+)?((whether|if|that)\s+)?(are|do|does|did|have|"
                          r"has|will|would|can|could|is|were|you)\b", re.I)
 
 
-def _asks_more(label: str, canon: str) -> bool:
-    """Wants more than your yes or no. "Will your work authorization expire?" isn't "are you authorized", though
-    "Will you need sponsorship when it expires?" is still the sponsorship question."""
+def _asks_more(label: str, canon: str, has_options: bool) -> bool:
+    """Not the question your yes or no answers. In a free-text box only a yes/no question is; "Will your visa
+    expire?" never is, though "Will you need sponsorship when it expires?" is still the sponsorship question."""
     l = " ".join(label.split())
-    return bool(EXPLAIN.search(l) or (ASKS_MORE.search(l) and not ASKS_YES_NO.search(l)) or
-                (canon != "needs_sponsorship" and EXPIRES.search(l)))
+    if DIFFERENT.search(l):
+        return True
+    if EXPIRES.search(l) and not (canon == "needs_sponsorship" and NEEDS_SPONSOR.search(l)):
+        return True
+    return not has_options and not ASKS_YES_NO.search(l)
 
 
 VOLUNTARY = ("gender", "race", "hispanic_latino", "veteran_status", "disability_status", "lgbtq")
@@ -583,7 +588,7 @@ def _deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | No
         # Your profile answers for the US; another country's citizenship, or whether you need an export licence,
         # is yours to say
         return _yours_to_answer(field, canon, ans)
-    if canon in YES_NO_FACTS and not field["options"] and _asks_more(field["label"], canon):
+    if canon in YES_NO_FACTS and _asks_more(field["label"], canon, bool(field["options"])):
         # "What is your work authorization expiration date?" isn't answered by your "Yes"
         return _yours_to_answer(field, canon, ans)
     if canon == "high_school":
