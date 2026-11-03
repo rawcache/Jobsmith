@@ -127,6 +127,7 @@ def test_yes_no_profile_facts_never_answer_a_different_question():
     for label in ("Do you require sponsorship for any type of work visa?",
                   "Will you now or in the future require sponsorship for employment visa status?",
                   "Do you require visa sponsorship now or at a later date?",
-                  "Will you require sponsorship when your current authorization expires?"):
+                  "Will you require sponsorship when your current authorization expires?",
+                  "Will you now or ever require visa sponsorship?"):
         assert draft.offline(field(label, "text"), profile.answers(), JOB)["answer"] == "No", label
 
