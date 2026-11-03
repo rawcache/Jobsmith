@@ -89,6 +89,7 @@ def test_demographic_options_under_a_vague_label_stay_yours(options):
                                    "Describe a project involving data export",
                                    "Describe your experience working with ethnically diverse teams"])
 def test_ordinary_questions_are_not_profile_only(label):
+    assert not draft._profile_only(field("Language Skill(s)", "multiselect", ["English", "Mandarin (MAN)", "German"]))
     assert classify.canon_for(label) not in ("other_citizenship", "race")
     assert not draft._profile_only(field(label, "textarea"))
 
@@ -102,6 +103,9 @@ def test_yes_no_profile_facts_never_answer_a_different_question():
               field("What is your work authorization expiration date?", "text"),
               field("What type of work authorization do you have?", "text"),
               field("Will your work authorization expire in the next two years?", "text"),
+              field("Work authorization document number", "text"),
+              field("Work authorization valid through date", "text"),
+              field("Does your visa expire in the next two years?", options=["Yes", "No"]),
               field("Please describe your work authorization", "text"),
               field("Please explain why you need visa sponsorship", "text"),
               field("Do you require an export compliance license?", options=["Yes", "No"]),
@@ -118,3 +122,4 @@ def test_yes_no_profile_facts_never_answer_a_different_question():
                   "Do you require visa sponsorship now or at a later date?",
                   "Will you require sponsorship when your current authorization expires?"):
         assert draft.offline(field(label, "text"), profile.answers(), JOB)["answer"] == "No", label
+
