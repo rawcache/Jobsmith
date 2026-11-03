@@ -450,7 +450,50 @@ def _disability_detail(label: str) -> bool:
     return not DISABILITY_STATUS.search(rest)
 
 
+# Questions only your confirmed profile may answer (rule 2): work authorization, citizenship, export control,
+# clearance and demographics. One Jobsmith can't map to your profile is left for you, never given to AI or filled
+# with an answer you approved for another job.
+PROFILE_ONLY = re.compile(r"citizen|nationality|\bnational of\b|export (control|compliance|regulat|law|administration)|sanction|embargo|\bitar\b|\bear\b|part 810|"
+                          r"clearance|authori[sz]\w* to work|work authori|\bvisas?\b|sponsor|immigration|green card|"
+                          r"permanent resident|asyl|refugee|\brac(e|ial)\b|ethnic|transgender|gender|sexual orientation|"
+                          r"lgbt|veteran|disabilit|hispanic|latin[aox]|pronoun", re.I)
+PROFILE_ONLY_OPTION = re.compile(r"citizen|green card|permanent resident|u\.?s\.? person|\b(wo)?man\b|non-?binary|"
+                                 r"veteran|disabilit|hispanic|latin[aox]|african american|\basian\b|\bwhite\b|"
+                                 r"pacific islander|alaska native|transgender|cisgender", re.I)
+VOLUNTARY = ("gender", "race", "hispanic_latino", "veteran_status", "disability_status", "lgbtq")
+DEMOGRAPHIC = re.compile(r"\brac(e|ial)\b|ethnic|transgender|gender|sexual orientation|lgbt|veteran|disabilit|hispanic|"
+                         r"latin[aox]|pronoun", re.I)
+
+
+def _profile_only(field: dict) -> bool:
+    return bool(PROFILE_ONLY.search(field.get("label") or "") or
+                any(PROFILE_ONLY_OPTION.search(o) for o in field.get("options") or []))
+
+
+def _yours_to_answer(field: dict, canon: str | None, ans: dict) -> dict:
+    """A profile-only question Jobsmith can't answer from your profile: left for you. A demographic one is declined
+    only when you confirmed "decline" for every voluntary question and the form offers that."""
+    decline = next((o for o in field.get("options") or [] if classify.DECLINE.search(o)), None)
+    declined = all((r := ans.get(k) or {}).get("confirmed") and classify.DECLINE.search(r.get("value") or "")
+                   for k in VOLUNTARY)
+    if decline and declined and DEMOGRAPHIC.search(" ".join([field.get("label") or "", *(field.get("options") or [])])):
+        return {"kind": "answer_bank", "canon": canon, "answer": decline, "confidence": 1.0, "issues": [],
+                "rationale": "You chose to decline the voluntary questions"}
+    return {"kind": "answer_bank", "canon": canon, "answer": "", "confidence": 0.0 if field["required"] else 1.0,
+            "issues": ["Only you can answer this one (work authorization, citizenship or a voluntary question); "
+                       "answer it yourself"] if field["required"] else [],
+            "rationale": "Left for you: Jobsmith answers these only from your confirmed profile"}
+
+
 def deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | None:
+    """The answer from your profile alone, or None when AI (or a saved answer) may write it."""
+    got = _deterministic(field, ans, job)
+    if got is None and field["qtype"] != "file" and _profile_only(field):
+        return _yours_to_answer(field, classify.canon_for(field["label"]), ans)
+    return got
+
+
+def _deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | None:
     where = f"{field['field']} {field.get('name') or ''}"       # the extension's ids are its own; name is the page's
     if SIGNATURE.search(f"{where} {field['label']}"):
         return {"kind": "answer_bank", "canon": None, "answer": "", "confidence": 0.0 if field["required"] else 1.0,
@@ -515,6 +558,9 @@ def deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | Non
         # A typed dialling code box: left as the site set it. A list of countries is answered from your country.
         return {"kind": "answer_bank", "canon": canon, "answer": "", "confidence": 1.0, "issues": [],
                 "rationale": "A dialling code box: left as the site set it"}
+    if canon == "other_citizenship":
+        # Your profile answers for the US; whether you hold another country's citizenship is yours to say
+        return _yours_to_answer(field, canon, ans)
     if canon == "high_school":
         # Your profile is about college and work; a high school's name or year would be a guess, AI's or ours
         return {"kind": "answer_bank", "canon": canon, "answer": "", "confidence": 0.0 if field["required"] else 1.0,

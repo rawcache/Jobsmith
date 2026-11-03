@@ -5,6 +5,10 @@ import re
 
 # Order matters: first match wins.
 RULES: list[tuple[str, str]] = [
+    # Citizenship of somewhere else (sanctions, Part 810, dual citizenship, "a citizen of any country listed"): your
+    # US answers don't say, so it's yours to answer. First: these often mention export controls or the US too.
+    (r"sanction|embargo|part 810|dual citizen|citizen(ship)? of (an)?other country|other citizenships?|citizen(ship)? (of|in) (any|a|"
+     r"specific|certain|one of|the following|the countries)\b|countr(y|ies) (listed|designated|below)", "other_citizenship"),
     (r"preferred (first )?name|nickname", "preferred_name"),
     (r"^first name|^legal first name|given name", "first_name"),
     (r"^last name|^legal last name|surname|family name", "last_name"),
@@ -29,10 +33,10 @@ RULES: list[tuple[str, str]] = [
     (r"current (company|employer)|most recent (company|employer)|current organi[sz]ation", "current_company"),
     (r"which (u\.?s\.? )?state|state (or|/) ?(canadian )?province|state of residence|province.*reside|"
      r"state.*(reside|live)|^state$", "state"),
-    (r"u\.?s\.? person|export control|\bitar\b|\bear\b regulations|deemed export|international traffic in arms", "us_person"),
+    (r"u\.?s\.? person|export (control|compliance)|\bitar\b|\bear\b regulations|deemed export|international traffic in arms", "us_person"),
     (r"citizenship status|status of (your )?citizenship|^citizenship$|what is your citizenship", "citizenship_status"),
     (r"sponsor|visa|employer support to (obtain|maintain|get)", "needs_sponsorship"),
-    (r"authori[sz]ed to work|eligible to work|legally (able|permitted|authori)|right to work", "work_authorized_us"),
+    (r"authori[sz](ed|ation) to work|work authori[sz]ation|eligible to work|legally (able|permitted|authori)|right to work", "work_authorized_us"),
     (r"u\.?s\.? citizen|citizenship", "us_citizen"),
     (r"(confirm|acknowledge)( receipt)?.*(notice|polic|agreement|statement|terms)|privacy notice|\bccpa\b|\bgdpr\b|"
      r"arbitration agreement|i (have read|acknowledge|agree|consent|certify)|acknowledge,? (confirm|and)|"
@@ -48,7 +52,7 @@ RULES: list[tuple[str, str]] = [
     (r"lgbt|sexual orientation", "lgbtq"),
     (r"first[- ]generation", "first_gen"),
     (r"\bgender\b|\bsex\b", "gender"),
-    (r"\brace\b|ethnicity", "race"),
+    (r"\brac(e|ial)\b|ethnic", "race"),
     (r"veteran", "veteran_status"),
     (r"disabilit|\bpwds?\b", "disability_status"),     # PWD: a person with a disability (password boxes never get here)
     (r"pronoun", "pronouns"),
