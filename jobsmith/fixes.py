@@ -39,15 +39,7 @@ def question_id(label: str, options: list[str]) -> str:
     return "question:" + hashlib.sha1(f"{_norm(label)}|{'|'.join(options or [])}".encode()).hexdigest()[:12]
 
 
-_BY_NAME = re.compile(r'^\[name="(.+)"\]$')
-
-
-def _twin(field: str) -> str:
-    """A form's one question can be read as two boxes: "question_1" and "#question_1" (a dropdown and the box
-    behind it), or "question_2[]" and '[name="question_2[]"]' (a checkbox list). The same key for both."""
-    f = (field or "").lstrip("#")
-    m = _BY_NAME.match(f)
-    return m.group(1) if m else f
+_twin = draft.twin_key
 
 
 def _one_per_question(items: list[dict]) -> list[dict]:

@@ -299,3 +299,163 @@ async def test_eu_greenhouse_postings_come_from_the_one_api_host():
     assert asked == ["boards-api.greenhouse.io"]
     assert got["title"] == "Machine Learning Engineer Intern"
     assert "job-boards.eu.greenhouse.io" in got["apply_url"]           # the form is still the EU board's
+
+
+# One question, read twice: the posting's API calls it "question_7", the live page "#question_7". Each one is one
+# thing for you to do, and the answer you gave one is the answer to the other.
+TRANSGENDER = {"field": "question_7", "label": "Do you identify as transgender?", "qtype": "select", "required": True,
+               "options": ["Yes", "No", "I don't wish to answer"]}
+
+
+def _greenhouse_job() -> str:
+    from jobsmith import db, sources
+    jid = sources.add_job_url("https://job-boards.greenhouse.io/acme/jobs/1", "Acme Robotics", "Software Intern")
+    db.x("UPDATE jobs SET questions=? WHERE id=?", (db.enc([TRANSGENDER]), jid))
+    return jid
+
+
+def test_a_question_read_twice_is_one_thing_to_do():
+    jid = _greenhouse_job()
+    twin = dict(TRANSGENDER, field="#question_7")
+    blank = {"kind": "answer_bank", "answer": "", "confidence": 0, "issues": ["answer it yourself"]}
+    draft.save_results(jid, [TRANSGENDER], {"question_7": blank})
+    draft.save_results(jid, [twin], {"#question_7": blank})
+    assert len(draft.readiness(jid)["items"]) == 1
+
+
+async def test_the_second_pass_reuses_the_answer_to_its_twin(monkeypatch):
+    from jobsmith import db
+    from jobsmith.fill import sweep
+    jid = _greenhouse_job()
+    draft.save_results(jid, [TRANSGENDER], {"question_7": {"kind": "answer_bank", "answer": "", "confidence": 0,
+                                                           "issues": ["answer it yourself"]}})
+    db.x("UPDATE drafts SET final_answer='No' WHERE job_id=? AND field='question_7'", (jid,))   # you answered it
+    filled = []
+
+    async def scan(page):
+        return [dict(TRANSGENDER, field="#question_7", value="")]
+
+    async def fill(page, sel, qtype, val, *a):
+        filled.append((sel, val))
+        return True
+
+    async def no_ai(*a, **k):
+        raise AssertionError("asked again")
+    monkeypatch.setattr(sweep, "scan_form", scan)
+    monkeypatch.setattr(sweep, "fill_field", fill)
+    monkeypatch.setattr(sweep.draft, "answer_fields", no_ai)
+    job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,)))
+    await sweep.sweep(None, job)
+    assert filled == [("#question_7", "No")]
+    assert [d["field"] for d in draft.drafts_for(jid)] == ["question_7"]
+
+
+@pytest.mark.parametrize("pending_first", [True, False])
+def test_of_two_copies_the_one_that_needs_you_is_kept(pending_first):
+    jid = _greenhouse_job()
+    twin = dict(TRANSGENDER, field="#question_7")
+    pending = {"kind": "pending", "answer": "", "confidence": 0, "issues": [draft.PENDING_ISSUE]}
+    yours = {"kind": "answer_bank", "answer": "", "confidence": 0, "issues": ["answer it yourself"]}
+    first, second = (pending, yours) if pending_first else (yours, pending)
+    draft.save_results(jid, [TRANSGENDER], {"question_7": first})
+    draft.save_results(jid, [twin], {"#question_7": second})
+    [item] = draft.readiness(jid)["items"]
+    assert not item.get("pending")
+
+
+async def _sweep_once(monkeypatch, jid, live):
+    from jobsmith import db
+    from jobsmith.fill import sweep
+    filled = []
+
+    async def scan(page):
+        return [dict(live, value="")]
+
+    async def fill(page, sel, qtype, val, *a):
+        filled.append((sel, val))
+        return True
+    monkeypatch.setattr(sweep, "scan_form", scan)
+    monkeypatch.setattr(sweep, "fill_field", fill)
+    job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,)))
+    return filled, await sweep.sweep(None, job)
+
+
+async def test_a_turned_down_twin_stays_blank_and_a_filled_one_is_audited_by_its_saved_id(monkeypatch):
+    from jobsmith import db
+    jid = _greenhouse_job()
+    draft.save_results(jid, [TRANSGENDER], {"question_7": {"kind": "answer_bank", "answer": "", "confidence": 0,
+                                                           "issues": ["answer it yourself"]}})
+    db.x("UPDATE drafts SET final_answer='No' WHERE job_id=?", (jid,))
+    filled, res = await _sweep_once(monkeypatch, jid, dict(TRANSGENDER, field="#question_7"))
+    assert filled == [("#question_7", "No")] and res["sent"] == ["question_7"]
+    db.x("UPDATE drafts SET final_answer=NULL, answer='No', verdict='red' WHERE job_id=?", (jid,))
+    filled, res = await _sweep_once(monkeypatch, jid, dict(TRANSGENDER, field="#question_7"))
+    assert filled == [] and res["sent"] == []
+
+
+async def test_a_rule_2_twin_with_other_choices_on_the_page_gets_its_own_check(monkeypatch):
+    from jobsmith import db
+    profile.set_answer("hispanic_latino", "No", confirmed=True)
+    jid = _greenhouse_job()
+    api = {"field": "question_8", "label": "Are you Hispanic/Latino?", "qtype": "select", "required": True,
+           "options": ["Yes", "No"]}
+    draft.save_results(jid, [api], {"question_8": draft.deterministic(api, profile.answers(), {})})
+    live = dict(api, field="#question_8", options=["Yes", "No", "Decline to self-identify"])
+    filled, res = await _sweep_once(monkeypatch, jid, live)
+    assert filled == [] and res["sent"] == []                       # not a plain Yes/No on the page: yours
+    assert db.q1("SELECT answer FROM drafts WHERE job_id=? AND field='question_8'", (jid,))["answer"] == "No"
+
+
+async def test_your_decision_on_a_twin_stands_even_when_the_page_shows_other_choices(monkeypatch):
+    from jobsmith import db
+    profile.set_answer("hispanic_latino", "No", confirmed=True)
+    jid = _greenhouse_job()
+    api = {"field": "question_8", "label": "Are you Hispanic/Latino?", "qtype": "select", "required": True,
+           "options": ["Yes", "No", "Decline to self-identify"]}
+    draft.save_results(jid, [api], {"question_8": draft.deterministic(api, profile.answers(), {})})
+    live = dict(api, field="#question_8", options=["Yes", "No"])
+    db.x("UPDATE drafts SET final_answer='Yes' WHERE job_id=?", (jid,))              # your own answer
+    filled, _ = await _sweep_once(monkeypatch, jid, live)
+    assert filled == [("#question_8", "Yes")]
+    db.x("UPDATE drafts SET final_answer=NULL, answer='No', verdict='red' WHERE job_id=?", (jid,))   # turned down
+    filled, _ = await _sweep_once(monkeypatch, jid, live)
+    assert filled == []
+
+
+async def test_a_rule_2_answer_the_page_doesnt_offer_exactly_isnt_swapped_for_another(monkeypatch):
+    from jobsmith import db
+    jid = _greenhouse_job()
+    draft.save_results(jid, [TRANSGENDER], {"question_7": {"kind": "answer_bank", "answer": "", "confidence": 0,
+                                                           "issues": ["answer it yourself"]}})
+    db.x("UPDATE drafts SET final_answer='No' WHERE job_id=?", (jid,))
+    live = dict(TRANSGENDER, field="#question_7", options=["Yes", "Prefer not to answer"])
+    filled, res = await _sweep_once(monkeypatch, jid, live)
+    assert filled == [] and res["sent"] == []
+
+
+@pytest.mark.parametrize("answer,filled", [("Asian; White", True), ("Asian\nWhite", True), ("Asian; Other", False)])
+async def test_each_of_several_rule_2_choices_must_be_offered(monkeypatch, answer, filled):
+    from jobsmith import db
+    jid = _greenhouse_job()
+    race = {"field": "question_9", "label": "Race", "qtype": "multiselect", "required": True,
+            "options": ["Asian", "White", "Black"]}
+    draft.save_results(jid, [race], {"question_9": {"kind": "answer_bank", "answer": "", "confidence": 0,
+                                                    "issues": ["answer it yourself"]}})
+    db.x("UPDATE drafts SET final_answer=? WHERE job_id=?", (answer, jid))
+    got, _ = await _sweep_once(monkeypatch, jid, dict(race, field="#question_9"))
+    assert bool(got) == filled
+
+
+async def test_one_choice_fields_take_one_rule_2_answer(monkeypatch):
+    from jobsmith import db
+    jid = _greenhouse_job()
+    race = {"field": "question_10", "label": "Race", "qtype": "radio", "required": True,
+            "options": ["Asian", "White", "Two or more; please specify"]}
+    draft.save_results(jid, [race], {"question_10": {"kind": "answer_bank", "answer": "", "confidence": 0,
+                                                     "issues": ["answer it yourself"]}})
+    db.x("UPDATE drafts SET final_answer='Asian; White' WHERE job_id=?", (jid,))
+    got, res = await _sweep_once(monkeypatch, jid, dict(race, field="#question_10"))
+    assert got == [] and res["sent"] == []
+    db.x("UPDATE drafts SET final_answer='Two or more; please specify' WHERE job_id=?", (jid,))   # exact, whole
+    got, _ = await _sweep_once(monkeypatch, jid, dict(race, field="#question_10"))
+    assert got == [("#question_10", "Two or more; please specify")]
