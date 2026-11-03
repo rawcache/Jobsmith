@@ -77,6 +77,8 @@ def test_unmapped_demographic_declined_only_when_you_declined_them_all():
 
 
 @pytest.mark.parametrize("options", [["Woman", "Man", "Non-binary", "Decline to self-identify"],
+                                     ["I am a woman", "I am a man"], ["Woman (F)", "Man (M)"],
+                                     ["I am female", "I am male"],
                                      ["Protected veteran", "Not a protected veteran"],
                                      ["Asian", "Black", "White", "Decline to self-identify"]])
 def test_demographic_options_under_a_vague_label_stay_yours(options):
@@ -106,6 +108,8 @@ def test_yes_no_profile_facts_never_answer_a_different_question():
               field("What type of work authorization do you have?", "text"),
               field("Will your work authorization expire in the next two years?", "text"),
               field("Work authorization document number", "text"),
+              field("Please state whether you have ever been denied work authorization in the United States.", "text"),
+              field("Have you ever been denied a U.S. visa?", options=["Yes", "No"]),
               field("Work authorization valid through date", "text"),
               field("Does your visa expire in the next two years?", options=["Yes", "No"]),
               field("Please describe your work authorization", "text"),
