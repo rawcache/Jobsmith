@@ -16,7 +16,8 @@ def _job(company: str, n: int, ats_url: str = "https://job-boards.greenhouse.io/
 def _sent(company: str, n: int, made_up: bool = False) -> str:
     jid = _job(company, n)
     profile.set_answer("work_authorized_us", "Yes", confirmed=True)
-    fields = [{"field": "auth", "label": "Are you authorized to work in the US?", "qtype": "select"},
+    fields = [{"field": "auth", "label": "Are you authorized to work in the US?", "qtype": "select",
+               "options": ["Yes", "No"]},
               {"field": "why", "label": "Why us?", "qtype": "textarea"}]
     draft.save_results(jid, fields, {
         "auth": {"kind": "answer_bank", "canon": "work_authorized_us", "answer": "Yes", "confidence": 1},

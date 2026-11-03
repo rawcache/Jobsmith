@@ -794,10 +794,10 @@ async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None
                 ans = profile.answers()
                 v = lambda k: (ans.get(k) or {}).get("value", "")
                 loc = v("location")
-                # Country (from citizenship) and Hispanic/Latino come only from answers you confirmed (rule 2).
+                # The phone's country comes only from answers you confirmed. Greenhouse's own Hispanic/Latino box
+                # (Yes, No, Decline) isn't a plain Yes/No, so it's never filled for you (rule 2).
                 ok = lambda k: v(k) if (ans.get(k) or {}).get("confirmed") else ""
                 extras = {"country": ok("country") or ("United States" if ok("us_citizen").lower() == "yes" else ""),
-                          "hispanic_latino": ok("hispanic_latino"),
                           "location_full": draft.location_full(loc) or loc}
                 result = await adapter.fill(page, drafts_, files, extras)
                 live_set(job_id, phase="filling", note="checking the page for anything else")

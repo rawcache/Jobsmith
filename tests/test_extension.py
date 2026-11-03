@@ -1031,7 +1031,9 @@ async def test_engine_holds_worked_here_before_and_says_where_legal_answers_came
     """"Worked for <company> before?" with nothing confirmed is held (under Needs you), not a guessed "No"; a
     work-authorization answer carries its source for the panel."""
     profile.set_answer("work_authorized_us", "Yes", True)
-    fields = [{"id": "auth", "label": "Are you authorized to work in the US?", "type": "combobox", "required": True},
+    # a plain Yes/No only when its choices are known (rule 2): a dropdown whose list the page hasn't shown waits
+    fields = [{"id": "auth", "label": "Are you authorized to work in the US?", "type": "combobox", "required": True,
+               "options": ["Yes", "No"]},
               {"id": "worked", "label": "Have you ever worked for Figma before?", "type": "combobox", "required": True}]
     r = await extension.answers("https://job-boards.greenhouse.io/figma/jobs/11", fields, title="Intern", company="Figma")
     by = {a["id"]: a for a in r["answers"]}

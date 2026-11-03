@@ -456,72 +456,120 @@ def _disability_detail(label: str) -> bool:
 PROFILE_ONLY = re.compile(r"citizen|nationality|\bnational of\b|export (control|compliance|regulat|law|administration)|"
                           r"sanction|embargo|\bitar\b|\bear\b|part 810|"
                           r"clearance|authori[sz]\w* to work|work authori|\bvisas?\b|sponsor|immigration|green card|"
+                          r"work permit|right to work|eligib\w* to work|legally (able|allowed|permitted) to work|"
+                          r"national origin|country of (birth|origin)|place of birth|permission to work|"
+                          r"non-?binary|cisgender|\bblack\b|african american|\basian\b|pacific islander|"
+                          r"alaska native|native american|indigenous|"
                           r"permanent resident|asyl|refugee|\brac(e|ial)\b|\bethnic(ity)?\b|transgender|gender|sexual orientation|"
                           r"lgbt|veteran|disabilit|hispanic|latin[aox]|pronoun", re.I)
 PROFILE_ONLY_OPTION = re.compile(r"citizen|green card|permanent resident|u\.?s\.? person|^\W*(i am an? )?(wo)?m[ae]n\b|"
                                  r"^\W*(i am )?(fe)?male\b|non-?binary|"
                                  r"veteran|disabilit|hispanic|latin[aox]|african american|\basian\b|\bwhite\b|"
                                  r"pacific islander|alaska native|transgender|cisgender", re.I)
-YES_NO_FACTS = {"work_authorized_us", "needs_sponsorship", "us_citizen", "us_person"}
-# A different question that only mentions work authorization, a visa or citizenship: it wants an explanation, a
-# date or a document number, or asks when something expires. Your yes or no doesn't answer it.
-DIFFERENT = re.compile(r"\b(explain|describe|why|details?|elaborate)\b|\b(what|which|provide|enter|give|list|until)\b"
-                       r".{0,40}\b(dates?|expir\w*|numbers?)\b|\b(expiration|expiry|end|through|valid) date\b|"
-                       r"\b(document|card|receipt|permit|visa|alien|a)[- ]?numbers?\b", re.I)
-EXPIRES = re.compile(r"\bexpir", re.I)
-# Your history, not where you stand now: "Have you ever been denied work authorization?"
-HISTORY = re.compile(r"\b(ever|previously|in the past|denied|revoked|refused|rejected|overst\w+|violat\w*|deport\w*)\b",
-                     re.I)
-# "Will you now or ever require sponsorship?": that "ever" is the future, so it alone doesn't make it history
-FUTURE_EVER = re.compile(r"(\b(will|would|now or)\b[^.?,;]*?)\bever\b", re.I)
-NEEDS_SPONSOR = re.compile(r"\b(require|need)\w*\b.{0,60}\bsponsor", re.I)
-ASKS_YES_NO = re.compile(r"^\W*(please\s+)?((confirm|indicate|state)\s+)?((whether|if|that)\s+)?(are|do|does|did|have|"
-                         r"has|will|would|can|could|is|were|you)\b", re.I)
+# The profile keys and classifier answers that put a question under rule 2, whatever its wording
+RULE2_CANONS = {"work_authorized_us", "needs_sponsorship", "us_citizen", "us_person", "citizenship_status",
+                "other_citizenship", "export_license", "security_clearance", "citizenships", "work_authorized_other",
+                *profile.EEO_KEYS}
 
 
-def _asks_more(label: str, canon: str, has_options: bool) -> bool:
-    """Not the question your yes or no answers. In a free-text box only a yes/no question is; "Will your visa
-    expire?" never is, though "Will you need sponsorship when it expires?" is still the sponsorship question."""
-    l = " ".join(label.split())
-    if DIFFERENT.search(l) or HISTORY.search(FUTURE_EVER.sub(r"\1", l)):
-        return True
-    if EXPIRES.search(l) and not (canon == "needs_sponsorship" and NEEDS_SPONSOR.search(l)):
-        return True
-    return not has_options and not ASKS_YES_NO.search(l)
-
-
-VOLUNTARY = ("gender", "race", "hispanic_latino", "veteran_status", "disability_status", "lgbtq")
-DEMOGRAPHIC = re.compile(r"\brac(e|ial)\b|\bethnic(ity)?\b|transgender|gender|"
-                         r"sexual orientation|lgbt|veteran|disabilit|hispanic|"
-                         r"latin[aox]|pronoun", re.I)
+# Rule 2, as one rule: a question on any of these topics gets your confirmed profile answer only when it is a plain
+# Yes/No question about exactly that fact. Anything else waits for you. "Plain" is decided by an allowlist, so an
+# unfamiliar word ("ever required", "denied", "explain", "Canada", "without") means it waits rather than guesses.
+_ASKING = "are you do will please confirm indicate whether currently a an the to of in for at this that any position role job"
+_US = "us u s usa united states america"
+# "...in the country for which you are applying?": the job's own country, which counts only when every place the
+# posting lists is in the US (see _plain_yes_no)
+_JOBS_COUNTRY = "country which where applying applied located based"
+PLAIN_YES_NO = {
+    "work_authorized_us": f"{_ASKING} {_US} {_JOBS_COUNTRY} legally lawfully authorized authorised eligible "
+                          "permitted have lawful "
+                          "work authorization authorisation employer",
+    "needs_sponsorship": f"{_ASKING} {_US} {_JOBS_COUNTRY} now or ever future point time later date require need "
+                         "sponsorship sponsor "
+                         "visa immigration employment work status maintain obtain authorization would legally "
+                         "continue continued working in order our company from by with type employer etc "
+                         "e g i h 1b h1 h1b b tn o 1 j f 3 stem opt cpt",
+    "us_citizen": f"{_ASKING} {_US} citizen",
+    "hispanic_latino": f"{_ASKING} identify as hispanic latino latina latinx or origin",
+    "veteran_status": f"{_ASKING} veteran",
+    "disability_status": f"{_ASKING} have disability status your",
+    "first_gen": f"{_ASKING} first generation college student",
+}
+PLAIN_YES_NO = {k: set(v.split()) for k, v in PLAIN_YES_NO.items()}
+# ...and it must name the fact itself: "working in the US with a visa?" uses sponsorship's words but asks another thing
+PLAIN_CORE = {"work_authorized_us": [{"authorized", "authorised", "eligible", "authorization", "authorisation"}],
+              "needs_sponsorship": [{"require", "need"}, {"sponsorship", "sponsor"}],
+              "us_citizen": [{"citizen"}], "hispanic_latino": [{"hispanic", "latino", "latina", "latinx"}],
+              "veteran_status": [{"veteran"}], "disability_status": [{"disability"}],
+              "first_gen": [{"first"}, {"generation"}]}
+US_ONLY = {"work_authorized_us", "needs_sponsorship"}      # your profile answers these for the US
+# Your "Yes, I need sponsorship" means now or later, for whichever visa: a question about only now, or about one
+# visa type, may have another answer, so a Yes answers only one that asks about the future and names no visa
+LATER = {"future", "ever", "later", "point", "time", "will", "would"}
+VISA_TYPES = {"h", "1b", "h1", "h1b", "tn", "o", "1", "j", "f", "e", "3", "stem", "opt", "cpt"}
+_PLACEHOLDER = re.compile(r"^\W*((please )?(select|choose)\b.*)?$", re.I)
 
 
 def _profile_only(field: dict) -> bool:
-    return bool(PROFILE_ONLY.search(field.get("label") or "") or
-                any(PROFILE_ONLY_OPTION.search(o) for o in field.get("options") or []))
+    return bool(PROFILE_ONLY.search(f"{field.get('label') or ''} {field.get('description') or ''}") or
+                any(PROFILE_ONLY_OPTION.search(o) for o in field.get("options") or []) or
+                classify.canon_for(field.get("label") or "") in RULE2_CANONS)
 
 
-def _yours_to_answer(field: dict, canon: str | None, ans: dict) -> dict:
-    """A profile-only question Jobsmith can't answer from your profile: left for you. A demographic one is declined
-    only when you confirmed "decline" for every voluntary question and the form offers that."""
-    decline = next((o for o in field.get("options") or [] if classify.DECLINE.search(o)), None)
-    declined = all((r := ans.get(k) or {}).get("confirmed") and classify.DECLINE.search(r.get("value") or "")
-                   for k in VOLUNTARY)
-    if decline and declined and DEMOGRAPHIC.search(" ".join([field.get("label") or "", *(field.get("options") or [])])):
-        return {"kind": "answer_bank", "canon": canon, "answer": decline, "confidence": 1.0, "issues": [],
-                "rationale": "You chose to decline the voluntary questions"}
+def _plain_yes_no(field: dict, ans: dict, job: dict | None) -> dict | None:
+    """Your confirmed Yes or No, when the field offers exactly Yes and No, uses only the plain words for one fact,
+    and (for work authorization and sponsorship) is about the US. None in every other case."""
+    canon = classify.canon_for(field["label"])
+    company = " ".join(re.findall(r"[a-z0-9]+", ((job or {}).get("company") or "").lower()))
+
+    def words(text: str) -> set[str]:
+        t = " ".join(re.findall(r"[a-z0-9]+", (text or "").lower()))
+        if company:          # "for Affirm", "at Graham Capital": the whole name, only where a company goes
+            t = re.sub(rf"\b(for|at|with|by|from|join) {re.escape(company)}\b", r"\1", t)
+        return set(t.split())
+    asked = words(field["label"])
+    if canon not in PLAIN_YES_NO or not asked or not all(asked & core for core in PLAIN_CORE[canon]):
+        return None
+    if (asked | words(field.get("description") or "")) - PLAIN_YES_NO[canon]:       # a note under it counts too
+        return None
+    if field["qtype"] not in ("select", "radio", "listbox"):       # one choice from a list
+        return None
+    options = {o.strip(" .").lower(): o for o in field.get("options") or [] if not _PLACEHOLDER.match(o)}
+    if set(options) != {"yes", "no"}:
+        return None
+    row = ans.get(canon) or {}
+    value = (row.get("value") or "").strip().lower()
+    if value not in ("yes", "no") or not row.get("confirmed"):
+        return None
+    if canon == "needs_sponsorship" and value == "yes" and (not asked & LATER or asked & VISA_TYPES):
+        return None
+    if canon in US_ONLY and not NAMES_US.search(field["label"]):
+        # names no country: it means the job's, which is the US only when every place the posting lists is
+        locs = [l for l in (job or {}).get("locations") or [] if l.strip()]
+        if not locs or not all(_names_us(l) for l in locs):
+            return None
+    return {"kind": "answer_bank", "canon": canon, "answer": options[value], "confidence": 1.0, "issues": [],
+            "rationale": source_line(canon, ans, job, field["label"]) or f"Profile: {row.get('label') or canon}"}
+
+
+def _yours_to_answer(field: dict, canon: str | None) -> dict:
+    """A rule-2 question that isn't a plain Yes/No about one fact in your confirmed profile: left for you."""
     return {"kind": "answer_bank", "canon": canon, "answer": "", "confidence": 0.0 if field["required"] else 1.0,
             "issues": ["Only you can answer this one (work authorization, citizenship or a voluntary question); "
                        "answer it yourself"] if field["required"] else [],
-            "rationale": "Left for you: Jobsmith answers these only from your confirmed profile"}
+            "rationale": "Left for you: Jobsmith answers these only with your confirmed Yes or No to a plain question"}
 
 
 def deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | None:
     """The answer from your profile alone, or None when AI (or a saved answer) may write it."""
     got = _deterministic(field, ans, job)
-    if got is None and field["qtype"] != "file" and _profile_only(field):
-        return _yours_to_answer(field, classify.canon_for(field["label"]), ans)
-    return got
+    if not _profile_only(field):
+        return got
+    if field["qtype"] == "file":             # "Cover letter explaining your visa status": never AI's to write
+        return dict(_yours_to_answer(field, None), kind="file")
+    if got is not None and not (got.get("answer") or "").strip():
+        return got          # already left for you, with its own reason (a signature, a place outside the US)
+    return _plain_yes_no(field, ans, job) or _yours_to_answer(field, classify.canon_for(field["label"]))
 
 
 def _deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | None:
@@ -592,10 +640,7 @@ def _deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | No
     if canon in ("other_citizenship", "export_license"):
         # Your profile answers for the US; another country's citizenship, or whether you need an export licence,
         # is yours to say
-        return _yours_to_answer(field, canon, ans)
-    if canon in YES_NO_FACTS and _asks_more(field["label"], canon, bool(field["options"])):
-        # "What is your work authorization expiration date?" isn't answered by your "Yes"
-        return _yours_to_answer(field, canon, ans)
+        return _yours_to_answer(field, canon)
     if canon == "high_school":
         # Your profile is about college and work; a high school's name or year would be a guess, AI's or ours
         return {"kind": "answer_bank", "canon": canon, "answer": "", "confidence": 0.0 if field["required"] else 1.0,
@@ -1203,9 +1248,11 @@ def _blocker(d: dict, job: dict, ans: dict, autopilot: bool | None = None) -> di
         return item(issues[0] if issues and d.get("kind") == "answer_bank" else "required and empty")
     if d.get("verdict") == "green" or d.get("final_answer"):
         return None
-    if d.get("canon") in LEGAL_YES_NO and d.get("kind") == "answer_bank" and val:
-        # Drafted earlier (an old blanket "No" for "worked here before?", or a profile answer you've changed
-        # since): only sent if your profile and resume give the same answer today.
+    if val and (d.get("canon") in LEGAL_YES_NO and d.get("kind") == "answer_bank" or
+                _profile_only(dict(d, description=description_of(job, d.get("field"))))):
+        # Drafted earlier (an old blanket "No" for "worked here before?", a profile answer you've changed since, or
+        # an answer AI wrote to a rule-2 question before it was kept from AI): only sent if your profile and resume
+        # give the same answer today.
         now = deterministic(dict(d, required=bool(d.get("required"))), ans, job)
         if now is None or norm(now.get("answer")) != norm(val) or now.get("issues"):
             return item("your profile doesn't give this answer now; check it")
@@ -1221,6 +1268,13 @@ def _blocker(d: dict, job: dict, ans: dict, autopilot: bool | None = None) -> di
     if d.get("kind") == "learned" and (d.get("confidence") or 0) < (0.6 if autopilot else 0.8):
         return item("reused answer has little support yet")
     return None
+
+
+def description_of(job: dict | None, field: str | None) -> str:
+    """The note under a question, from the posting's saved questions (draft rows don't keep it)."""
+    key = (field or "").lstrip("#")
+    return next((q.get("description") or "" for q in (job or {}).get("questions") or []
+                 if (q.get("field") or "").lstrip("#") == key), "")
 
 
 def readiness(job_id: str) -> dict:

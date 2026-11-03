@@ -32,8 +32,9 @@ async def _job_with_drafts(fake_llm, tmp_path):
     data = json.loads((FIXTURES / "greenhouse_job.json").read_text())
     url = (FIXTURES / "mock_greenhouse.html").resolve().as_uri()
     jid = sources.add_job_url("https://job-boards.greenhouse.io/acme/jobs/123", "Acme Robotics", "SWE Intern")
-    db.x("UPDATE jobs SET url=?, description='Jetson', questions=? WHERE id=?",
-         (url, db.enc(jobdetail.normalize_greenhouse(data)), jid))
+    db.x("UPDATE jobs SET url=?, description='Jetson', questions=?, locations=? WHERE id=?",
+         (url, db.enc(jobdetail.normalize_greenhouse(data)), db.enc([data["location"]["name"]]), jid))
+    profile.set_answer("needs_sponsorship", "No", confirmed=True)       # only a confirmed answer is used (rule 2)
     jetson = [f["id"] for f in profile.facts() if "Jetson" in f["text"]]
     fake_llm(lambda s, p: {"answers": [
         {"field": "question_1004", "answer": "I deployed a fire/smoke detection model on NVIDIA Jetson Nano.",
@@ -71,7 +72,7 @@ async def test_greenhouse_fill_stops_before_submit(fake_llm, tmp_path, page):
     failed = dict(res["failed"])
     # The audit trail's "sent" is exactly the fields that filled: one id per success, none for a failure.
     assert len(res["sent"]) + len(res["implicit"]) == len(res["filled"]) and len(set(res["sent"])) == len(res["sent"])
-    assert {i["label"] for i in res["implicit"]} == {"Phone country", "Hispanic/Latino"}
+    assert {i["label"] for i in res["implicit"]} == {"Phone country"}
     assert not set(res["sent"]) & {d["field"] for d in drafts if d["label"] in failed}
     assert await page.input_value("#first_name") == "Alex"
     assert await page.input_value("#email") == "alex.rivera@example.edu"
@@ -86,8 +87,9 @@ async def test_greenhouse_fill_stops_before_submit(fake_llm, tmp_path, page):
     assert await _shown(page, "#discipline--0") == "Computer Engineering"
     assert await _shown(page, "#start-month--0") == "August" and await page.input_value("#start-year--0") == "2023"
     assert await _shown(page, "#end-month--0") == "May" and await page.input_value("#end-year--0") == "2027"
-    assert await _shown(page, '[id="4028769003"]') == "South Asian"
-    assert await _shown(page, "#hispanic_ethnicity") == "No"
+    # demographic picks from a list wait for Alex (rule 2), even given extras from an older caller
+    assert await _shown(page, '[id="4028769003"]') in ("", "Select...")
+    assert await _shown(page, "#hispanic_ethnicity") in ("", "Select...")
     assert await page.evaluate("document.querySelector('#resume').files.length") == 1
     assert await page.evaluate("document.querySelector('#cover_letter').files.length") == 1
     assert "Gender" in failed or await _shown(page, "#gender") == ""    # EEO left for the user
@@ -243,7 +245,7 @@ async def test_lever_saved_palantir_form_is_filled_and_held_before_submit(fake_l
         assert await page.input_value(HIGH_SCHOOL) == "" and await page.input_value(HIGH_SCHOOL_YEAR) == ""
         assert await _checked(page, NOTETAKER) == []
         assert await page.eval_on_selector('[name="eeo[veteran]"]', "e => e.selectedOptions[0].text") == \
-            "I am not a protected veteran"
+            "Select ..."                                    # a pick from a list, not a plain Yes/No: Alex's (rule 2)
         assert await page.input_value("#disabilitySelectElement") == ""
         assert not await page.is_visible('[name="eeo[disabilitySignature]"]')
         assert await page.input_value('[name="eeo[disabilitySignature]"]') == ""
@@ -488,7 +490,7 @@ async def test_runner_fill_and_detect_submission(fake_llm, tmp_path):
     untraced = [f for f in sub["fields"] if not f["traces"]]
     assert [(f["field"], f["source"], f["approved"]) for f in untraced] == [("question_1005", "none", True)]
     implicit = {f["label"]: f for f in sub["fields"] if f["field"] in ("country", "hispanic_ethnicity")}
-    assert implicit["Hispanic/Latino"]["detail"][0]["ref"].startswith("Profile: ") and implicit["Hispanic/Latino"]["traces"]
+    assert "Hispanic/Latino" not in implicit                 # Greenhouse's Yes/No/Decline box is Alex's (rule 2)
     assert implicit["Phone country"]["answer"] == "United States +1"          # what the box shows
 
 
@@ -565,6 +567,8 @@ async def test_multistep_signin_handoff_and_review(fake_llm, tmp_path, page):
     await profile.ingest_document(FIXTURES / "sample_resume.tex")
     profile.set_answer("how_heard", "LinkedIn")
     jid = sources.add_job_url("https://acme.wd1.myworkdayjobs.com/x/job/1", "Acme", "Hardware Intern")
+    profile.set_answer("needs_sponsorship", "No", confirmed=True)       # only a confirmed answer is used (rule 2)
+    db.x("UPDATE jobs SET locations=? WHERE id=?", (json.dumps(["Santa Clara, CA"]), jid))
     job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,)))
     jetson = [f["id"] for f in profile.facts() if "Jetson" in f["text"]]
 
@@ -685,6 +689,8 @@ async def test_autopilot_sends_the_saved_ashby_form_once_everything_is_answered(
     await runner.prepare(jid, research=False)
     for d in draft.drafts_for(jid):                       # you approved every answer
         db.x("UPDATE drafts SET verdict='green' WHERE id=?", (d["id"],))
+        if d["label"].startswith("Are you currently based in the U.S."):    # more than a plain Yes/No: yours
+            db.x("UPDATE drafts SET final_answer='Yes' WHERE id=?", (d["id"],))
     assert draft.readiness(jid)["ready"], draft.readiness(jid)["blockers"]
     try:
         await runner.fill(jid, submit=True)
@@ -698,14 +704,15 @@ async def test_autopilot_sends_the_saved_ashby_form_once_everything_is_answered(
     [proof] = sub["confirmations"]
     assert "Your application was successfully submitted" in proof["text"]
     auth = next(f for f in sub["fields"] if f["label"].startswith("Are you currently based in the U.S."))
-    assert auth["answer"] == "Yes" and auth["traces"]
+    assert auth["answer"] == "Yes" and auth["source"] == "you"
 
 
 async def test_ashby_saved_ramp_form_is_filled_and_held_before_submit(fake_llm, tmp_path, monkeypatch):
     """The saved Ramp form (tests/fixtures/ashby_ramp_form.html, captured read-only from jobs.ashbyhq.com) through
     the whole autopilot path: scan, draft, fill, hold. Ashby's Yes/No questions are buttons beside a hidden
-    checkbox. Work authorization comes from the confirmed profile; the questions only Alex can answer (a
-    take-home, whether Ramp may text them) land under Needs you; Submit is never pressed."""
+    checkbox. Ramp's work-authorization question names Canada and LATAM too, so it isn't a plain Yes/No about the
+    US and waits for Alex (rule 2), like the other questions only Alex can answer (a take-home, whether Ramp may text
+    them); Submit is never pressed."""
     async def no_watch(*a):
         return None
     monkeypatch.setattr(runner, "watch_tab", no_watch)
@@ -738,7 +745,7 @@ async def test_ashby_saved_ramp_form_is_filled_and_held_before_submit(fake_llm, 
         assert await page.input_value("#_systemfield_email") == profile.answers()["email"]["value"]
         assert await page.evaluate("document.querySelector('#_systemfield_resume').files.length") == 1
         assert "Jetson" in await page.input_value('[id="2143a185-34d7-46b3-97cd-eb849e81a0a2"]')
-        assert await _yes_no(page, WORK_AUTH) == ["Yes", True]            # your confirmed answer, pressed
+        assert await _yes_no(page, WORK_AUTH) == ["", False]              # more than a plain Yes/No: yours
         assert await _yes_no(page, TAKE_HOME) == ["", False]              # not an email question; yours
         assert not await page.locator('[name="smsConsent"]:checked, [name="whatsAppConsent"]:checked').count()
         assert await page.evaluate("window.__submits") == 0
@@ -747,14 +754,15 @@ async def test_ashby_saved_ramp_form_is_filled_and_held_before_submit(fake_llm, 
         await runner.browser.close()
     drafts = {d["label"]: d for d in draft.drafts_for(jid)}
     auth = next(d for l, d in drafts.items() if l.startswith("Are you currently based in the U.S."))
-    assert auth["answer"] == "Yes" and auth["rationale"].endswith("(you confirmed it)")
+    assert auth["answer"] == "" and auth["issues"]
     assert not any("authorized to work" in q or "SMS" in q for q in asked)   # never sent to the AI (rule 2)
     job = db.q1("SELECT status, hold_reason FROM jobs WHERE id=?", (jid,))
     assert job["status"] == "filled" and job["hold_reason"]
     needs_you = draft.readiness(jid)["blockers"]
     print(needs_you)
     assert any(b.startswith("Are you comfortable completing a frontend take-home") for b in needs_you)
-    assert not any(b.startswith(("SMS", "WhatsApp", "Are you currently based")) for b in needs_you)
+    assert any(b.startswith("Are you currently based") for b in needs_you)
+    assert not any(b.startswith(("SMS", "WhatsApp")) for b in needs_you)
     assert not db.q("SELECT 1 FROM runs WHERE job_id=? AND kind='submit'", (jid,))
 
 
@@ -991,6 +999,8 @@ async def test_multistep_shows_every_page_to_the_policy_check_before_submit(fake
     await profile.ingest_document(FIXTURES / "sample_resume.tex")
     profile.set_answer("how_heard", "LinkedIn")
     jid = sources.add_job_url("https://acme.wd1.myworkdayjobs.com/x/job/2", "Acme", "Hardware Intern")
+    profile.set_answer("needs_sponsorship", "No", confirmed=True)       # only a confirmed answer is used (rule 2)
+    db.x("UPDATE jobs SET locations=? WHERE id=?", (json.dumps(["Santa Clara, CA"]), jid))
     job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,)))
     jetson = [f["id"] for f in profile.facts() if "Jetson" in f["text"]]
     fake_llm(lambda s, p: {"answers": [{"field": "#why", "answer": "I deployed a detection model on NVIDIA Jetson Nano.",
@@ -1433,8 +1443,12 @@ async def test_workday_signed_in_page_by_page_to_review_and_never_submits(fake_l
     res = await multistep.run(page, _workday("my_information"), answer=answer, files={"resume": str(pdf)},
                               log=logs.append, wait_for_user=None, allow_submit=lambda: asked.append(1) or False)
     assert res["status"] == "review", (res, logs)
-    # the one thing left: the Websites entry open on the saved page asks for a URL, and Alex has no website
-    assert res["issues"] == ["URL: no answer"], res
+    # left: the Websites entry open on the saved page asks for a URL, and Alex has no website; and the rule-2
+    # questions, whose dropdowns don't show their choices until opened, so none is a plain Yes/No Jobsmith can see
+    assert res["issues"][0] == "URL: no answer", res
+    assert [i.split()[0:3] for i in res["issues"][1:]] == [["Are", "you", "legally"], ["Will", "you", "require"],
+                                                         ["What", "is", "your"], ["What", "is", "your"],
+                                                         ["Do", "you", "identify"]], res
     assert page.url.endswith("workday_nvidia_review.html") and asked == []       # held, so Submit isn't even asked
     assert await page.evaluate("window.__submitPresses") == 0
     held = json.loads(await page.evaluate("window.name"))
@@ -1455,10 +1469,9 @@ async def test_workday_signed_in_page_by_page_to_review_and_never_submits(fake_l
     assert info["candidateIsPreviousWorker"] == "No"                      # your resume lists every employer
     assert exp["socialNetworkAccounts--linkedInAccount"].startswith("https://www.linkedin.com/in/alex-rivera-test")
     qs = held["application_questions"]
-    assert sorted(v for k, v in qs.items() if k.startswith("primaryQuestionnaire--")) == ["No", "Yes"]
+    assert sorted(v for k, v in qs.items() if k.startswith("primaryQuestionnaire--")) == ["", ""]   # Alex's (rule 2)
     vol = held["voluntary_disclosures"]
-    assert vol["personalInfoUS--gender"] == "I do not wish to answer."
-    assert vol["personalInfoUS--veteranStatus"] == "I do not wish to self-identify"
+    assert not vol.get("personalInfoUS--gender") and not vol.get("personalInfoUS--veteranStatus"), vol
     assert vol["acceptTermsAndAgreements"] == "checked"
 
 

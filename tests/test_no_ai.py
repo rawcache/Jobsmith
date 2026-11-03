@@ -103,8 +103,9 @@ def _job(tmp_path, name: str, essay: bool = False, letter: bool = False) -> str:
     form = tmp_path / f"{name}.html"
     form.write_text(page, encoding="utf-8")
     jid = sources.add_job_url(f"https://job-boards.greenhouse.io/acme/jobs/{name}", "Acme Robotics", f"SWE Intern {name}")
-    db.x("UPDATE jobs SET url=?, description='Robotics software internship.', questions=?, fit_score=90 WHERE id=?",
-         (form.resolve().as_uri(), db.enc(jobdetail.normalize_greenhouse(data)), jid))
+    db.x("UPDATE jobs SET url=?, description='Robotics software internship.', questions=?, fit_score=90, locations=? "
+         "WHERE id=?", (form.resolve().as_uri(), db.enc(jobdetail.normalize_greenhouse(data)),
+                        db.enc([data["location"]["name"]]), jid))
     return jid
 
 
