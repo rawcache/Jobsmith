@@ -3,12 +3,14 @@
 **Goal:** autopilot applies on the six big job sites with guardrails people can see, and we can prove it doesn't
 invent facts.
 
-**Gate:** Phase 1 is done when both hold:
+**Gate (also the public launch):** Phase 1 is done when all three hold:
 
 - [ ] 80% of good matches (fit at or above the user's threshold) are submitted without the user doing anything,
       measured from the audit trail over at least 50 real applications (`jobsmith stats`).
 - [ ] Zero invented facts in a 50-application audit: every submitted answer traces to the resume, profile or the
       user's own writing (`jobsmith audit`).
+- [ ] 3 people who aren't developers reach their first real application in under 15 minutes without help, watched
+      with [docs/launch/usability-test.md](launch/usability-test.md) (item 10).
 
 Work top to bottom. Tick each box in this file as it's done, with a link to the evidence (commit, test, CI run or
 issue), and commit the tick with the work.
@@ -364,8 +366,40 @@ then `ats.SUPPORTED` and the README.
       Evidence: [2d19d9a](https://github.com/rawcache/Jobsmith/commit/2d19d9a). [README.md](../README.md#what-works-without-ai): each part of Jobsmith, what it does
       with no AI, and what waits for you.
 
+## 10. Ready for strangers
+
+The launch gate's third check: someone who isn't a developer installs Jobsmith and reaches a first real application
+in under 15 minutes without help.
+
+- [ ] First-run setup, in the dashboard and mirrored in the terminal, in this order: the resume PDF first; confirm
+      every value read from it; one list of every one-time question, each with a default (none for work
+      authorization, sponsorship or the employer-list claim, which only the user answers) and a one-line "why we
+      ask" (work authorization, sponsorship, "my resume lists every employer", in person or relocating "only in my
+      chosen locations", pay expectation, years of experience and whether internships count, start date, voluntary
+      questions "decline to answer", optional saved answers); preferences (level, role types from a picker,
+      locations); job lists from presets (SimplifyJobs internships, new grad) instead of board addresses.
+- [ ] Nothing is drafted and autopilot stays off until setup is done; then the supervised first run. No pile of
+      "Needs you" on day one: one application waits for approval at a time, one per job site.
+- [ ] Matches narrowed to the user's level, role types, locations and fit bar, with a live "N matches" count in
+      setup, aiming for tens to low hundreds. Find and fix why the maintainer's copy counted 3828 good matches and 75
+      needing them.
+- [ ] "Needs you" in two parts: "About you, answer once" and "About one job" (under that company and role, with
+      "Skip this job"). An answer for one job is never reused for another; questions many jobs ask become profile
+      answers.
+- [ ] Terminal: every line names the company and the role; repeated events collapse ("TikTok · 3 roles couldn't
+      finish"); start-up shows one summary line ("12 ready for you, 3 couldn't finish · /review"), not one line per
+      job; "couldn't finish" always says why; the log and the list always show the same status.
+- [ ] `docs/getting-started.md` with screenshots: install, setup, first approval, daily use, troubleshooting
+      (keychain prompt, a lost terminal, Gemini's free limit, a sleeping Mac and `caffeinate`). The README leads
+      with it; the extension is marked optional, with the developer-mode steps.
+- [ ] A CI test that walks first-run setup on a clean data folder through the dashboard, and
+      `docs/launch/usability-test.md`: a script for watching 3 non-developers set up, with the 15-minute target.
+- [ ] The Chrome Web Store listing prepared, not submitted: description, screenshots, privacy answers, permission
+      justifications from SECURITY.md. (Submitting stays in Phase 3.)
+
 Moved out of Phase 1: the full fit breakdown ([#6](https://github.com/rawcache/Jobsmith/issues/6)) and any
 OpenAI-compatible AI ([#7](https://github.com/rawcache/Jobsmith/issues/7)), both Phase 2. The whole plan is in
 [ROADMAP.md](ROADMAP.md).
 
-Phase 1 is done when every box is ticked and both gate checks pass on real applications.
+Phase 1 is done when every box is ticked and all three gate checks pass: the first two on real applications, the
+third with three people watched through the usability test.
