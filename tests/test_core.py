@@ -118,8 +118,9 @@ async def _setup_job():
     await _load_profile()
     data = json.loads((FIXTURES / "greenhouse_job.json").read_text())
     jid = sources.add_job_url("https://job-boards.greenhouse.io/acme/jobs/123", "Acme Robotics", "SWE Intern")
-    db.x("UPDATE jobs SET description=?, questions=? WHERE id=?",
-         (jobdetail.html_to_text(data["content"]), db.enc(jobdetail.normalize_greenhouse(data)), jid))
+    db.x("UPDATE jobs SET description=?, questions=?, locations=? WHERE id=?",
+         (jobdetail.html_to_text(data["content"]), db.enc(jobdetail.normalize_greenhouse(data)),
+          db.enc([data["location"]["name"]]), jid))
     return jid
 
 
@@ -129,6 +130,7 @@ def _facts_with(substr):
 
 async def test_draft_uses_answer_bank_and_validates_grounding(fake_llm):
     jid = await _setup_job()
+    profile.set_answer("needs_sponsorship", "No", confirmed=True)    # only a confirmed answer is used (rule 2)
     jetson = _facts_with("Jetson")
 
     def responder(system, prompt):
@@ -299,7 +301,7 @@ async def test_profile_json_import_and_attachment_name(tmp_path, monkeypatch):
     assert cur["answer"] == "Acme Data"
     usp = deterministic({"field": "q", "label": "Are you a U.S. person under export control regulations?",
                          "qtype": "select", "options": ["Yes", "No"], "required": True}, a)
-    assert usp["answer"] == "Yes"
+    assert usp["answer"] == "" and usp["issues"]           # export control: no profile fact says it exactly (rule 2)
     pdf = tmp_path / "Resume (30).pdf"
     from pypdf import PdfWriter
     w = PdfWriter(); w.add_blank_page(100, 100); w.write(str(pdf))
@@ -1320,7 +1322,7 @@ async def test_an_unanswered_worked_here_before_blocks_autopilot_even_when_optio
     ("Are you authorized to work in Canada?", "Yes", ""),
     # Ramp's: anywhere in the list will do, so your US "Yes" answers it; your US "No" doesn't
     ("Are you currently based in the U.S., Canada, LATAM, and/or currently authorized to work in one of these "
-     "locations?", "Yes", "Yes"),
+     "locations?", "Yes", ""),                     # more than a plain Yes/No about the US: waits (rule 2)
     ("Are you currently based in the U.S., Canada, LATAM, and/or currently authorized to work in one of these "
      "locations?", "No", ""),
     ("Are you authorized to work in the United Kingdom and the US?", "Yes", ""),
@@ -1345,8 +1347,9 @@ async def test_work_authorization_for_somewhere_else_is_left_for_you(label, auth
                                "required": True}, profile.answers(), FIGMA)
     assert got["answer"] == answer
     if not answer:
-        assert got["issues"] == ["Asks about working somewhere other than the US; your profile answers for the US, "
-                                 "so answer it yourself"]
+        held = draft._yours_to_answer(dict(required=True), None)["issues"][0]
+        assert got["issues"][0] in ("Asks about working somewhere other than the US; your profile answers for the "
+                                    "US, so answer it yourself", held)
 
 
 @pytest.mark.parametrize("required", [False, True])
@@ -1368,13 +1371,17 @@ async def test_legal_yes_no_answers_say_where_they_came_from():
     profile.set_answer("work_authorized_us", "Yes", confirmed=True)
     a = profile.answers()
     ask = lambda label: draft.deterministic({"field": "q", "label": label, "qtype": "select", "options": ["Yes", "No"],
-                                             "required": True}, a, FIGMA)
+                                             "required": True}, a, dict(FIGMA, locations=["San Francisco, CA"]))
     auth = ask("Are you legally authorized to work in the United States?")
     assert auth["canon"] == "work_authorized_us"
     assert auth["rationale"] == "Profile: Authorized to work in the US? (you confirmed it)"
     sponsor = ask("Will you now or in the future require visa sponsorship?")
+    assert sponsor["answer"] == "" and sponsor["issues"]           # read from the resume, not confirmed: waits
+    profile.set_answer("needs_sponsorship", "No", confirmed=True)
+    a = profile.answers()
+    sponsor = ask("Will you now or in the future require visa sponsorship?")
     assert sponsor["canon"] == "needs_sponsorship" and sponsor["answer"] == "No"
-    assert sponsor["rationale"] == "Profile: Need visa sponsorship now or later? (not confirmed yet)"
+    assert sponsor["rationale"] == "Profile: Need visa sponsorship now or later? (you confirmed it)"
     pay = draft.deterministic({"field": "q", "label": "Desired salary", "qtype": "text", "options": [],
                                "required": False}, a, FIGMA)
     assert pay is None or "rationale" not in pay                        # only legal and employment yes/no answers
@@ -1432,14 +1439,13 @@ async def test_an_old_drafted_no_isnt_sent_until_something_backs_it():
     assert draft.readiness(jid)["blockers"] == [f"{auth['label']}: your profile doesn't give this answer now; check it"]
 
 
-async def test_a_non_us_citizenship_cites_the_citizenships_field():
+async def test_a_citizenship_question_that_isnt_a_plain_yes_no_waits():
     await _load_profile()
     profile.set_answer("us_citizen", "No", confirmed=True)
     profile.set_answer("citizenships", "Canada", confirmed=True)
     r = draft.deterministic({"field": "q", "label": "What is your citizenship status?", "qtype": "text", "options": [],
                              "required": True}, profile.answers(), FIGMA)
-    assert r["canon"] == "citizenship_status" and r["answer"] == "Canada"
-    assert r["rationale"] == "Profile: Citizenship(s) (you confirmed it)"
+    assert r["answer"] == "" and r["issues"]                    # only a plain Yes/No gets your answer (rule 2)
 
 
 @pytest.mark.parametrize("label,answer", [
@@ -1482,7 +1488,7 @@ async def test_an_answer_you_unconfirm_after_drafting_isnt_sent_or_traced():
     assert draft.readiness(jid)["blockers"] == [f"{auth['label']}: your profile doesn't give this answer now; check it"]
     runner.mark_submitted(jid)
     [sent] = audit.for_job(jid)[0]["fields"]
-    assert sent["traces"] is False and sent["detail"][0]["ref"].endswith("(not confirmed yet)")
+    assert sent["traces"] is False and "(not confirmed yet)" in sent["detail"][0]["ref"]
 
 
 @pytest.mark.parametrize("label,canon", [

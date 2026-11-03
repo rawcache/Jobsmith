@@ -55,16 +55,14 @@ def _file_key(d: dict) -> str:
 
 
 async def fill_implicit(page: Page, extras: dict) -> list[tuple[str, str]]:
-    """Fields the live form has but the job-board API doesn't list (phone country, Hispanic/Latino)."""
+    """Fields the live form has but the job-board API doesn't list (the phone's country). Its Hispanic/Latino box is
+    never filled for you: Yes, No or Decline isn't a plain Yes/No (rule 2)."""
     done = []
     if extras.get("country") and await page.locator('#country').count():
         cur = await combobox_text(page, '#country')
         if not cur or cur.lower().startswith("select"):
             if await fill_combobox(page, '#country', extras["country"]):
                 done.append(("Phone country", "ok"))
-    if extras.get("hispanic_latino") and await page.locator('#hispanic_ethnicity').count():
-        if await fill_combobox(page, '#hispanic_ethnicity', extras["hispanic_latino"]):
-            done.append(("Hispanic/Latino", "ok"))
     return done
 
 
@@ -75,8 +73,7 @@ async def fill(page: Page, drafts: list[dict], files: dict[str, str], extras: di
     done = await fill_implicit(page, extras or {})
     filled += done
     implicit = [{"field": control, "label": label, "canon": canon, "profile": (extras or {}).get(canon, "")}
-                for label, canon, control in (("Phone country", "country", "country"),
-                                              ("Hispanic/Latino", "hispanic_latino", "hispanic_ethnicity"))
+                for label, canon, control in (("Phone country", "country", "country"),)
                 if (label, "ok") in done]
     for d in drafts:
         value = d["value"]

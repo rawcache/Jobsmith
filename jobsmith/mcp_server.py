@@ -157,7 +157,8 @@ def jobsmith_save_answers(job_id: str, answers: list[dict]) -> str:
         if not d:
             report.append({"field": a.get("field"), "error": "No such question on this job"})
             continue
-        if d["kind"] not in ("generated", "voice", "agent"):
+        if d["kind"] not in ("generated", "voice", "agent") or \
+                draft._profile_only(dict(d, description=draft.description_of(job, d["field"]))):
             # Profile answers (work authorization, sponsorship, "worked here before?", demographics) and files come
             # only from the user, never an agent (rule 2).
             report.append({"field": d["field"], "error": "This one comes from the user's profile; agents can't answer it"})

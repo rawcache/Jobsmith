@@ -18,6 +18,7 @@ async def _job_with_every_kind_of_answer() -> str:
         ("story", "Tell us about a project you're proud of", "textarea"), ("heard", "How did you hear about us?", "text"),
         ("edited", "What's your favorite robot?", "text"), ("made_up", "Describe your leadership style", "textarea"),
         ("blank", "Anything else?", "textarea"), ("resume", "Resume", "file"), ("nope", "Pronouns", "text"))]
+    fields[0]["options"] = ["Yes", "No"]          # a plain Yes/No: the only kind your profile answers (rule 2)
     draft.save_results(jid, fields, {
         "auth": {"kind": "answer_bank", "canon": "work_authorized_us", "answer": "Yes", "confidence": 1.0},
         "why": {"kind": "generated", "answer": "I deployed a detection model on NVIDIA Jetson Nano.",
@@ -193,13 +194,16 @@ def test_country_traces_to_confirmed_citizenship_over_an_unconfirmed_country():
 def test_an_unconfirmed_demographic_answer_is_never_drafted():
     profile.set_answer("hispanic_latino", "No", confirmed=False)
     job = {"id": "x", "company": "Acme", "description": ""}
-    r = draft.deterministic({"field": "q", "label": "Are you Hispanic/Latino?", "qtype": "select",
-                             "options": ["Yes", "No", "Decline to self-identify"], "required": True}, profile.answers(), job)
-    assert r["answer"] == "" and "Confirm your demographic answers" in r["issues"][0]
+    q = {"field": "q", "label": "Are you Hispanic/Latino?", "qtype": "select", "options": ["Yes", "No"],
+         "required": True}
+    r = draft.deterministic(q, profile.answers(), job)
+    assert r["answer"] == "" and r["issues"]
     profile.set_answer("hispanic_latino", "No", confirmed=True)
-    r = draft.deterministic({"field": "q", "label": "Are you Hispanic/Latino?", "qtype": "select",
-                             "options": ["Yes", "No", "Decline to self-identify"], "required": True}, profile.answers(), job)
+    r = draft.deterministic(q, profile.answers(), job)
     assert r["answer"] == "No" and not r["issues"]
+    # a third choice makes it more than a plain Yes/No (rule 2): it waits for you
+    r = draft.deterministic(dict(q, options=["Yes", "No", "Decline to self-identify"]), profile.answers(), job)
+    assert r["answer"] == "" and r["issues"]
 
 
 PWD = [{"field": "a", "label": "Are you a PWD?", "qtype": "select", "options": ["Yes", "No"], "required": True},
@@ -244,17 +248,19 @@ async def test_a_pwd_question_is_never_the_ais_and_its_details_are_yours(fake_ll
     got, _ = await draft.answer_fields(db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,))),
                                        [dict(f) for f in PWD])
     assert not [p for p in asked if re.search(r"PWD|disabilit|accommodat", str(p), re.I)], asked
-    assert {k: got[k]["answer"] for k in "cdefghinopqr"} == dict.fromkeys("cdefghinopqr", "")
-    assert all(got[k]["issues"] for k in "cefghinopqr") and not got["d"]["issues"]  # required ones block autopilot
-    for k in "ajklm":                                                                 # "do you have one": your answer
+    # rule 2: only a plain "do you have one" gets your confirmed Yes or No; "a PWD?" or "or had one in the past?"
+    # isn't that plain question, so it waits too
+    assert {k: got[k]["answer"] for k in "acdefghimnopqr"} == dict.fromkeys("acdefghimnopqr", "")
+    assert all(got[k]["issues"] for k in "acefghimnopqr") and not got["d"]["issues"]  # required ones block autopilot
+    for k in "jkl":                                                                   # "do you have one": your answer
         assert got[k]["answer"] == ("Yes" if confirmed else ""), (k, got[k])
     assert got["b"]["canon"] == "disability_status"
     fields = [dict(f) for f in PWD]
     draft.save_results(jid, fields, got)
     blockers = " ".join(draft.readiness(jid)["blockers"])
-    assert all(f["label"] in blockers for f in fields if f["field"] in "cefghinopqr"), blockers
+    assert all(f["label"] in blockers for f in fields if f["field"] in "acefghimnopqr"), blockers
     if not confirmed:
-        assert got["a"]["issues"]
+        assert got["k"]["issues"]
 
 
 @pytest.mark.parametrize("label", ["How would you accommodate changing requirements?",
@@ -306,15 +312,18 @@ async def test_a_worked_here_no_that_nothing_backs_doesnt_trace():
     assert worked["traces"] is False and worked["detail"][0]["ref"] == "Nothing you've confirmed says this"
 
 
-async def test_an_unconfirmed_legal_answer_traces_only_when_you_approved_it_and_it_still_matches():
+async def test_a_legal_answer_read_from_the_resume_waits_until_you_confirm_it_and_traces_while_it_matches():
     await profile.ingest_document(FIXTURES / "sample_resume.tex")        # sponsorship "No", read from the resume
     jid = sources.add_job_url("https://job-boards.greenhouse.io/acme/jobs/3", "Acme Robotics", "Intern")
     f = {"field": "spons", "label": "Will you now or in the future require visa sponsorship?", "qtype": "select",
          "options": ["Yes", "No"], "required": True}
-    draft.save_results(jid, [f], {"spons": draft.deterministic(f, profile.answers(), {"company": "Acme Robotics"})})
+    job = {"company": "Acme Robotics", "locations": ["Boston, MA"]}
+    held = draft.deterministic(f, profile.answers(), job)
+    assert held["answer"] == "" and held["issues"]                                 # only a confirmed answer (rule 2)
+    profile.set_answer("needs_sponsorship", "No", confirmed=True)
+    draft.save_results(jid, [f], {"spons": draft.deterministic(f, profile.answers(), job)})
+    db.x("UPDATE jobs SET locations=? WHERE id=?", (db.enc(["Boston, MA"]), jid))
     trail = lambda: next(x for x in audit.snapshot(jid) if x["field"] == "spons")
-    assert trail()["answer"] == "No" and trail()["traces"] is False
-    db.x("UPDATE drafts SET verdict='green' WHERE job_id=?", (jid,))                 # you approved it here
-    assert trail()["traces"] is True
+    assert trail()["answer"] == "No" and trail()["traces"] is True
     profile.set_answer("needs_sponsorship", "Yes", confirmed=True)                 # and then your profile changed
     assert trail()["traces"] is False and trail()["detail"][0]["ref"].endswith("says something else")

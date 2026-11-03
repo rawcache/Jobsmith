@@ -19,7 +19,8 @@ def _job(company: str, n: int, fit: float = 80) -> str:
 
 def _answers(jid: str, made_up: bool = False) -> None:
     profile.set_answer("work_authorized_us", "Yes", confirmed=True)
-    fields = [{"field": "auth", "label": "Are you authorized to work in the US?", "qtype": "select"},
+    fields = [{"field": "auth", "label": "Are you authorized to work in the US?", "qtype": "select",
+               "options": ["Yes", "No"]},
               {"field": "why", "label": "Why us?", "qtype": "textarea"}]
     draft.save_results(jid, fields, {
         "auth": {"kind": "answer_bank", "canon": "work_authorized_us", "answer": "Yes", "confidence": 1},
