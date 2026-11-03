@@ -1280,11 +1280,22 @@ def _blocker(d: dict, job: dict, ans: dict, autopilot: bool | None = None) -> di
     return None
 
 
+_BY_NAME = re.compile(r'^\[name="(.+)"\]$')
+
+
+def twin_key(field: str) -> str:
+    """A form's one question can be read as two boxes: "question_1" (the posting's API) and "#question_1" (the live
+    page), or "question_2[]" and '[name="question_2[]"]' (a checkbox list). The same key for both."""
+    f = (field or "").lstrip("#")
+    m = _BY_NAME.match(f)
+    return m.group(1) if m else f
+
+
 def description_of(job: dict | None, field: str | None) -> str:
     """The note under a question, from the posting's saved questions (draft rows don't keep it)."""
-    key = (field or "").lstrip("#")
+    key = twin_key(field or "")
     return next((q.get("description") or "" for q in (job or {}).get("questions") or []
-                 if (q.get("field") or "").lstrip("#") == key), "")
+                 if twin_key(q.get("field") or "") == key), "")
 
 
 def readiness(job_id: str) -> dict:
@@ -1293,6 +1304,15 @@ def readiness(job_id: str) -> dict:
     job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (job_id,))) or {}
     ans = profile.answers()
     autopilot = db.get_setting("autonomy") in ("autopilot", "autonomous")
-    items = [b for d in drafts_for(job_id) if (b := _blocker(d, job, ans, autopilot))]
+    items, at = [], {}
+    for d in drafts_for(job_id):                  # one per question, the one that needs you over one waiting for AI
+        if not (b := _blocker(d, job, ans, autopilot)):
+            continue
+        key = twin_key(d["field"])
+        if key not in at:
+            at[key] = len(items)
+            items.append(b)
+        elif items[at[key]].get("pending") and not b.get("pending"):
+            items[at[key]] = b
     return {"ready": not items, "blockers": [b["text"] for b in items], "items": items,
             "only_ai": bool(items) and all(b.get("pending") for b in items)}
