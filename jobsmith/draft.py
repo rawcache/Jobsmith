@@ -462,9 +462,19 @@ PROFILE_ONLY_OPTION = re.compile(r"citizen|green card|permanent resident|u\.?s\.
                                  r"veteran|disabilit|hispanic|latin[aox]|african american|\basian\b|\bwhite\b|"
                                  r"pacific islander|alaska native|transgender|cisgender", re.I)
 YES_NO_FACTS = {"work_authorized_us", "needs_sponsorship", "us_citizen", "us_person"}
-# A question about work authorization that wants more than yes or no: its date, type or status
-ASKS_MORE = re.compile(r"^\W*(what|which|when|where|how|list|describe|explain|provide|enter|specify)\b|"
+# A question about work authorization that wants more than yes or no: an explanation, or its date, type or status
+EXPLAIN = re.compile(r"\b(explain|describe|why|details?|elaborate)\b", re.I)
+ASKS_MORE = re.compile(r"^\W*(what|which|when|where|how|list|provide|enter|specify)\b|"
                        r"\b(expir\w*|dates?|types?|kinds?|numbers?|status)\b", re.I)
+ASKS_YES_NO = re.compile(r"^\W*(please\s+)?((confirm|indicate|state)\s+)?((whether|if|that)\s+)?(are|do|does|did|have|"
+                         r"has|will|would|can|could|is|were|you)\b", re.I)
+
+
+def _asks_more(label: str) -> bool:
+    l = " ".join(label.split())
+    return bool(EXPLAIN.search(l) or (ASKS_MORE.search(l) and not ASKS_YES_NO.search(l)))
+
+
 VOLUNTARY = ("gender", "race", "hispanic_latino", "veteran_status", "disability_status", "lgbtq")
 DEMOGRAPHIC = re.compile(r"\brac(e|ial)\b|\bethnic(ity)?\b|transgender|gender|"
                          r"sexual orientation|lgbt|veteran|disabilit|hispanic|"
@@ -568,7 +578,7 @@ def _deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | No
         # Your profile answers for the US; another country's citizenship, or whether you need an export licence,
         # is yours to say
         return _yours_to_answer(field, canon, ans)
-    if canon in YES_NO_FACTS and not field["options"] and ASKS_MORE.search(field["label"]):
+    if canon in YES_NO_FACTS and not field["options"] and _asks_more(field["label"]):
         # "What is your work authorization expiration date?" isn't answered by your "Yes"
         return _yours_to_answer(field, canon, ans)
     if canon == "high_school":
