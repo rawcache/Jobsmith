@@ -64,9 +64,9 @@ def test_export_compliance_is_us_person():
 
 
 def test_a_demographic_question_that_isnt_a_plain_yes_no_waits_for_you():
-    # Rule 2 as one rule: only your confirmed Yes or No to a plain Yes/No question. A pick from a list waits, even
-    # one your profile answers ("Male") and even when you chose to decline them all.
-    profile.set_answer("gender", "Male", confirmed=True)
+    # Rule 2 as one rule: your confirmed answer to a plain question about that one fact. A question your profile
+    # has no answer to waits, even when you chose to decline every voluntary one.
+    profile.set_answer("gender", "Male", confirmed=False)                      # read from somewhere, not confirmed
     got = draft.offline(field("Gender", options=["Male", "Female", "Decline to self-identify"]), profile.answers(), JOB)
     assert got["answer"] == "" and got["issues"]
     for k in ("gender", "race", "hispanic_latino", "veteran_status", "disability_status", "lgbtq"):
@@ -84,7 +84,7 @@ def test_a_plain_demographic_yes_no_gets_your_confirmed_answer():
     profile.set_answer("hispanic_latino", "No", confirmed=True)
     assert draft.offline(f, profile.answers(), JOB)["answer"] == "No"
     three = field("Do you identify as Hispanic/Latino?", options=["Yes", "No", "Decline to self-identify"])
-    assert draft.offline(three, profile.answers(), JOB)["answer"] == ""         # not a plain Yes/No
+    assert draft.offline(three, profile.answers(), JOB)["answer"] == "No"       # your No, among three choices
 
 
 @pytest.mark.parametrize("options", [["Woman", "Man", "Non-binary", "Decline to self-identify"],
@@ -400,9 +400,9 @@ async def test_a_rule_2_twin_with_other_choices_on_the_page_gets_its_own_check(m
     api = {"field": "question_8", "label": "Are you Hispanic/Latino?", "qtype": "select", "required": True,
            "options": ["Yes", "No"]}
     draft.save_results(jid, [api], {"question_8": draft.deterministic(api, profile.answers(), {})})
-    live = dict(api, field="#question_8", options=["Yes", "No", "Decline to self-identify"])
+    live = dict(api, field="#question_8", options=["Mexican", "Puerto Rican", "Cuban"])
     filled, res = await _sweep_once(monkeypatch, jid, live)
-    assert filled == [] and res["sent"] == []                       # not a plain Yes/No on the page: yours
+    assert filled == [] and res["sent"] == []                       # no choice on the page means your No: yours
     assert db.q1("SELECT answer FROM drafts WHERE job_id=? AND field='question_8'", (jid,))["answer"] == "No"
 
 
@@ -487,3 +487,100 @@ async def test_one_choice_fields_take_one_rule_2_answer(monkeypatch):
 def test_triage_misreads(label, want):
     assert classify.canon_for(label) == want, label
 
+
+def test_a_degree_spelled_without_its_apostrophe_is_picked():
+    assert classify.pick_option("Bachelor's", ["Associates", "Bachelors", "Masters", "PhD"]) == "Bachelors"
+    assert classify.pick_option("Master's", ["Bachelor's Degree", "Master's Degree"]) == "Master's Degree"
+
+
+def test_male_is_man_but_never_cisgender_man():
+    assert classify.pick_option("Male", ["Woman", "Man", "Non-binary"]) == "Man"
+    assert classify.pick_option("Female", ["Man", "Woman"]) == "Woman"
+    assert classify.pick_option("Man", ["Male", "Female"]) == "Male"
+    assert classify.pick_option("Male", ["Cisgender woman", "Cisgender man", "Transgender man", "Non-binary"]) is None
+
+
+def test_asian_indian_is_asian_never_american_indian():
+    eeo = ["Hispanic or Latino A person of Cuban, Mexican, Puerto Rican, South or Central American origin.",
+           "White (Not Hispanic or Latino) A person having origins in Europe, the Middle East, or North Africa.",
+           "Asian (Not Hispanic or Latino) A person having origins in the Far East, Southeast Asia, or the Indian "
+           "Subcontinent, including, for example, China, India, Japan and Korea.",
+           "American Indian or Alaska Native (Not Hispanic or Latino) A person having origins in any of the original "
+           "peoples of North and South America."]
+    assert classify.pick_option("Asian (Indian)", eeo) == eeo[2]
+    assert classify.pick_option("Asian (Indian)", ["White\xa0", "Asian\xa0", "Black\xa0"]) == "Asian\xa0"
+    assert classify.pick_option("Asian (Indian)", ["American Indian or Alaska Native", "White"]) is None
+
+
+def test_none_is_the_no_clearance_choice():
+    assert classify.pick_option("None", ["No Clearance", "Secret", "Top Secret"]) == "No Clearance"
+    assert classify.pick_option("None", ["Secret", "Top Secret", "TS/SCI"]) is None
+    assert classify.pick_option("None", ["None", "No Clearance"]) == "None"
+
+
+EXPORT_LISTS = [
+    ["A United States citizen or national", "A person lawfully admitted for permanent residence of the United States "
+     "(i.e., “Green Card” holder)", "A person admitted as a refugee to the United States under 8 U.S.C. 1157",
+     "None of the above"],
+    ["US citizen or national", 'US permanent resident (i.e., "green card holder")', "None of the above"],
+    ["U.S. Citizen", "U.S. lawful permanent resident - Green card", "None of the above"],
+    ["U.S. citizen", "U.S. non-citizen national", "U.S. permanent resident (Green Card holder)",
+     "Individual granted citizenship in a country other than Cuba, Iran, North Korea, or Syria"],
+]
+
+
+@pytest.mark.parametrize("options", EXPORT_LISTS, ids=lambda o: o[0])
+def test_a_confirmed_citizen_gets_the_citizen_choice_on_an_export_control_list(options):
+    f = field("This position requires access to information and technology that is subject to US export controls. "
+              "Are you any of the following?", options=options)
+    assert draft.offline(f, profile.answers(), JOB)["answer"] == ""             # nothing confirmed: yours
+    profile.set_answer("us_citizen", "Yes", confirmed=False)
+    assert draft.offline(f, profile.answers(), JOB)["answer"] == ""             # read from a resume isn't confirmed
+    profile.set_answer("us_citizen", "Yes", confirmed=True)
+    got = draft.offline(f, profile.answers(), JOB)
+    assert got["answer"] == options[0] and not got["issues"]
+    profile.set_answer("us_citizen", "No", confirmed=True)                      # which status then is yours to say
+    assert draft.offline(f, profile.answers(), JOB)["answer"] == ""
+
+
+def test_the_country_specified_for_a_us_job_is_the_us():
+    profile.set_answer("work_authorized_us", "Yes", confirmed=True)
+    f = field("Are you legally authorized to work in the Country specified for this position?", options=["Yes", "No"])
+    assert draft.offline(f, profile.answers(), dict(JOB, locations=["New York, NY"]))["answer"] == "Yes"
+    assert draft.offline(f, profile.answers(), dict(JOB, locations=["London, UK"]))["answer"] == ""
+    assert draft.offline(f, profile.answers(), dict(JOB, locations=[]))["answer"] == ""
+
+
+def test_legal_name_and_privacy_policy_of_something_else():
+    assert classify.canon_for("Please enter legal name for your previous employer") is None
+    assert classify.canon_for("Privacy Policy effective date") is None
+
+
+GENDER = ["Woman", "Man", "Non-binary", "Decline to self-identify"]
+
+
+@pytest.mark.parametrize("key,value,label,options,want", [
+    ("gender", "Male", "Gender", GENDER, "Man"),
+    ("gender", "Male", "What is your gender identity?", GENDER, "Man"),
+    ("gender", "Male", "What is your gender identity?", ["Cisgender woman", "Cisgender man", "Two-spirit"], ""),
+    ("gender", "Male", "Which gender were you assigned at birth?", GENDER, ""),          # another question
+    ("gender", "Decline to self-identify", "Gender", GENDER, "Decline to self-identify"),
+    ("race", "Asian (Indian)", "Race", ["White", "Asian (Not Hispanic or Latino)", "American Indian or Alaska Native"],
+     "Asian (Not Hispanic or Latino)"),
+    ("race", "Asian (Indian)", "How would you describe your racial/ethnic background?",
+     ["East Asian", "South Asian", "White"], ""),                                         # which one is yours to say
+    ("race", "Asian (Indian)", "Race", ["American Indian or Alaska Native", "White"], ""),
+    ("veteran_status", "No", "Protected Veteran Status",
+     ["I am not a protected veteran", "I identify as a protected veteran", "I don't wish to answer"],
+     "I am not a protected veteran"),
+    ("security_clearance", "None", "Do you currently hold a security clearance?", ["No Clearance", "Secret"],
+     "No Clearance"),
+    ("security_clearance", "None", "Please select the highest level security clearance you currently hold",
+     ["Secret", "Top Secret", "TS/SCI"], ""),
+])
+def test_a_confirmed_answer_is_picked_only_from_a_plain_question_and_one_matching_choice(key, value, label, options, want):
+    profile.set_answer(key, value, confirmed=True)
+    got = draft.offline(field(label, options=options), profile.answers(), JOB)
+    assert got["answer"] == want and bool(got["issues"]) == (not want)
+    profile.set_answer(key, value, confirmed=False)
+    assert draft.offline(field(label, options=options), profile.answers(), JOB)["answer"] == ""

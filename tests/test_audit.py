@@ -201,9 +201,13 @@ def test_an_unconfirmed_demographic_answer_is_never_drafted():
     profile.set_answer("hispanic_latino", "No", confirmed=True)
     r = draft.deterministic(q, profile.answers(), job)
     assert r["answer"] == "No" and not r["issues"]
-    # a third choice makes it more than a plain Yes/No (rule 2): it waits for you
+    # with a third choice, your confirmed No is still the one choice that says it (rule 2: strict_pick)
     r = draft.deterministic(dict(q, options=["Yes", "No", "Decline to self-identify"]), profile.answers(), job)
-    assert r["answer"] == "" and r["issues"]
+    assert r["answer"] == "No" and not r["issues"]
+    r = draft.deterministic(dict(q, options=["No", "No, but of Spanish origin", "Yes"]), profile.answers(), job)
+    assert r["answer"] == "No"                                    # the same words, not the nearest
+    r = draft.deterministic(dict(q, options=["Mexican", "Cuban", "Other"]), profile.answers(), job)
+    assert r["answer"] == "" and r["issues"]                      # no choice means your No: it waits for you
 
 
 PWD = [{"field": "a", "label": "Are you a PWD?", "qtype": "select", "options": ["Yes", "No"], "required": True},
