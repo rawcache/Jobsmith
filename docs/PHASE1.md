@@ -406,9 +406,10 @@ in under 15 minutes without help.
       Done: `jobsmith/words.py` (one wording and one plain reason for the log, the Review list and the API),
       `tuiapp._paint_state`, `Review.show_jobs`; `tests/test_tuiapp.py` (`test_every_log_line_names…`,
       `test_couldnt_finish_always_says_why…`, `test_start_up_says_one_summary_line…`).
-- [ ] `docs/getting-started.md` with screenshots: install, setup, first approval, daily use, troubleshooting
+- [x] `docs/getting-started.md` with screenshots: install, setup, first approval, daily use, troubleshooting
       (keychain prompt, a lost terminal, Gemini's free limit, a sleeping Mac and `caffeinate`). The README leads
       with it; the extension is marked optional, with the developer-mode steps.
+      Done: [getting-started.md](getting-started.md); README "Quick start" and "Chrome extension (optional)".
 - [ ] A CI test that walks first-run setup on a clean data folder through the dashboard, and
       `docs/launch/usability-test.md`: a script for watching 3 non-developers set up, with the 15-minute target.
 - [ ] The Chrome Web Store listing prepared, not submitted: description, screenshots, privacy answers, permission

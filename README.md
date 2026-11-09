@@ -37,6 +37,9 @@ Local, free, and built for students applying to software, hardware, data and AI 
 
 ## Quick start
 
+**New here? Follow [Getting started](docs/getting-started.md):** install, set up and your first application in
+about 15 minutes, with pictures and what to do if something goes wrong. No coding needed.
+
 ### Use the terminal
 
 Install with one line. On macOS or Linux, paste into Terminal:
@@ -196,8 +199,10 @@ It only runs when you're plugged in (by default), one answer at a time, and unlo
 
 - **Dashboard** at http://127.0.0.1:8765, for when you'd rather click: matches beside the posting, a sortable
   Applications table, the bell, your voice, outreach and follow-ups. Same data as the terminal.
-- **Chrome extension** (`jobsmith extension` opens it for you): the panel on job postings described above. It never
-  submits by itself. Load it unpacked from `extension/` until it's in the Chrome Web Store.
+- **Chrome extension (optional)**: autopilot doesn't need it. It adds the panel on job postings described above,
+  for forms you open and send yourself; it never submits by itself. Until it's in the Chrome Web Store: run
+  `jobsmith extension` (it opens Chrome's extensions page and the folder), turn on **Developer mode** there, click
+  **Load unpacked** and pick that folder.
 
 ## FAQ
 
@@ -220,7 +225,8 @@ The full plan, with each phase's gate, is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 - **Phase 0 · Go public** (October 2026): done except the demo video.
 - **Phase 1 · Autopilot you can trust** (November 2026): built; its gate (80% of good matches sent without you, zero
-  invented facts in a 50-application audit) is being measured on real applications.
+  invented facts in a 50-application audit, and three people who aren't developers reaching a first application
+  in 15 minutes) is being measured.
 - **Phase 2 · Applications that win** (December 2026): fit evaluation, tailored resumes and reviewed cover letters.
 - **Phase 3 · Every job and every reply** (January 2027): Chrome Web Store, job board, more sources, inbox tracking.
 - **Phase 4 · Interviews and offers** (February 2027): prep packs, notes, mock interviews, offer comparison.
