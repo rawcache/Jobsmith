@@ -152,8 +152,10 @@ SCAN_JS = r"""
       // boxes of one fieldset are one question, keyed by what their ids share. Never each choice a question, and
       // never "Other" in two questions taken for one.
       const boxes = type === 'checkbox' && fs ? [...fs.querySelectorAll('input[type="checkbox"]')] : [];
+      // only under a question of their own, and never boxes each required by itself (separate consents)
+      const titled = legend || (fs && [...fs.querySelectorAll('label')].some(l => !boxes.some(x => x.id === l.htmlFor || l.contains(x))));
       let shared = '';
-      if (boxes.length > 1 && new Set(boxes.map(x => x.name)).size === boxes.length && boxes.every(x => x.id)) {
+      if (titled && boxes.length > 1 && new Set(boxes.map(x => x.name)).size === boxes.length && boxes.every(x => x.id && !x.required)) {
         shared = boxes[0].id; for (const x of boxes) while (!x.id.startsWith(shared)) shared = shared.slice(0, -1);
         if (shared.length < 6 || rootOf(el).querySelectorAll(`input[type="checkbox"][id^="${CSS.escape(shared)}"]`).length !== boxes.length) shared = '';
       }
