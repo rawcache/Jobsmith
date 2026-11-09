@@ -662,7 +662,7 @@ async def do_scan(job: dict, run: Run) -> list[dict]:
 async def prepare(job_id: str, research: bool | None = None, hold_first: bool = False) -> None:
     """fetch -> (scan) -> research -> draft. hold_first (autopilot): what needs no AI first, and no AI at all for an
     application that waits for you anyway (draft.draft_job)."""
-    from .fill.base import BotWall
+    from .fill.base import BotWall, NeedsYou
     run = Run(job_id, "draft")
     try:
         job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (job_id,)))
@@ -688,6 +688,9 @@ async def prepare(job_id: str, research: bool | None = None, hold_first: bool = 
                     await do_scan(job, run)
                 except BotWall as e:
                     _held_by_bot_wall(job, run, str(e))
+                    return
+                except NeedsYou as e:            # no AI spent on a form that's behind your sign-in
+                    _held_for_you(job, run, str(e))
                     return
                 except Exception as e:
                     run.log(f"Scan failed ({e}); drafting common questions instead")
@@ -718,6 +721,20 @@ def _held_by_bot_wall(job: dict, run: "Run", wall: str) -> None:
     notify("Jobsmith needs you", f"{job['company']}: the site asked whether you're a person. Apply there yourself.")
 
 
+def _held_for_you(job: dict, run: "Run", why: str) -> None:
+    """Something only you can do stands before the form (a sign-in, an Apply button Jobsmith can't press): stop, and
+    say which. `why` goes after the site's name."""
+    from .scheduler import notify
+    site = guardrails.site_name(guardrails.site_of(job))
+    text = (f"{site} {why}. Jobsmith never signs in for you or works around a page: take over in the Jobsmith "
+            "window to do it yourself, or open the posting and apply there.")
+    run.log(text)
+    db.x("UPDATE jobs SET hold_reason=? WHERE id=?", (text[:500], job["id"]))
+    _set_status(job["id"], "error", text[:500])
+    run.done("waiting_user")
+    notify("Jobsmith needs you", f"{job['company']}: {job['title']} needs you before its form opens.")
+
+
 def _drafts_for_fill(job_id: str) -> list[dict]:
     job = db.decode(db.q1("SELECT questions FROM jobs WHERE id=?", (job_id,)))
     meta = {q["field"]: q for q in job["questions"] or []}
@@ -735,7 +752,7 @@ def _drafts_for_fill(job_id: str) -> list[dict]:
 async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None:
     """Fill the form in a visible browser tab. Submits only if `submit` and the job is ready."""
     from .fill import greenhouse
-    from .fill.base import SUBMIT_SELECTORS, BotWall, bot_wall, captcha_visible, page_confirms_submission
+    from .fill.base import SUBMIT_SELECTORS, BotWall, NeedsYou, bot_wall, captcha_visible, page_confirms_submission
     job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (job_id,)))
     run = Run(job_id, "fill")
     if not can_fill(job["ats"]):
@@ -898,6 +915,10 @@ async def fill(job_id: str, submit: bool = False, visible: bool = False) -> None
             live_set(job_id, phase="review", note="a bot check: take over to apply yourself")
             _held_by_bot_wall(job, run, str(e))
             watch = True        # if you finish it in the Jobsmith window, its confirmation is still recorded
+        except NeedsYou as e:
+            live_set(job_id, phase="review", note="needs you first: take over to carry on yourself")
+            _held_for_you(job, run, str(e))
+            watch = True
         except asyncio.CancelledError:
             _abandon(job_id, "stopped while submitting")
             raise

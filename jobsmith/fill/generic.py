@@ -2,12 +2,18 @@
 Fields were discovered by scan_form, so each field key is already a CSS selector."""
 from __future__ import annotations
 
-from playwright.async_api import Page
+import re
 
-from .base import css_for, dismiss_banners, fill_field, scan_form
+from playwright.async_api import Page
+from playwright.async_api import TimeoutError as PlaywrightTimeout
+
+from .base import NeedsYou, css_for, dismiss_banners, fill_field, scan_form
 
 APPLY_BUTTONS = ['a:has-text("Apply for this job")', 'a:has-text("Apply now")', 'button:has-text("Apply now")',
                  'a:has-text("Apply")', 'button:has-text("Apply")']
+
+
+APPLY_EXACT = re.compile(r"^\s*apply(\s+now|\s+(for|to)\s+(this|the)\s+(job|role|position))?\s*$", re.I)
 
 
 async def open_form(page: Page, url: str) -> list[str]:
@@ -29,14 +35,34 @@ async def _open(page: Page, url: str) -> list[str]:
         return []
     if await page.locator("form input, form textarea").count() < 3:
         early = await dismiss_banners(page)      # it can cover the Apply button too
-        for sel in APPLY_BUTTONS:
-            btn = page.locator(sel).first
-            if await btn.count() and await btn.is_visible():
-                await btn.click()
-                await page.wait_for_timeout(2500)
-                break
+        await _press_apply(page)
         return early
     return []
+
+
+async def _press_apply(page: Page) -> None:
+    """Press the posting's Apply button, if it has one: first a button or link that says just that ("Apply", "Apply
+    to this job"), then one that merely has the word (a menu called "How to Apply" comes last). A press that
+    something on the page swallows moves on to the next after a few seconds; when none works, or the site then asks
+    for a sign-in, that's yours (NeedsYou) and says so, instead of a browser's timeout."""
+    from .multistep import needs_sign_in
+    tried = False
+    exact = [page.get_by_role(role, name=APPLY_EXACT) for role in ("button", "link")]
+    for btn in exact + [page.locator(sel) for sel in APPLY_BUTTONS]:
+        btn = btn.first
+        if not (await btn.count() and await btn.is_visible()):
+            continue
+        tried = True
+        try:
+            await btn.click(timeout=4000)
+        except PlaywrightTimeout:
+            continue
+        await page.wait_for_timeout(2500)
+        if await needs_sign_in(page):
+            raise NeedsYou("asks you to sign in before it shows its application form")
+        return
+    if tried:
+        raise NeedsYou("has an Apply button Jobsmith couldn't press (something on the page covers it)")
 
 
 async def scan(page: Page, url: str) -> list[dict]:
