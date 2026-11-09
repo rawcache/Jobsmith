@@ -234,13 +234,37 @@ def in_your_places(job: dict) -> bool:
     return match.place_matches(job, tl) if tl else any(match._in_us(l) for l in job["locations"])
 
 
+# A place a question names itself: "on-site in London", "relocate to Austin, TX", "our Golden, Colorado office"
+ASKED_PLACE = re.compile(r"\b(?:in|at|to|near|from|around)\s+(?:the\s+|our\s+)?((?:[A-Z][\w.'’-]*)(?:,?\s+(?:[A-Z][\w.'’-]*|of|de|del))*)")
+NOT_PLACES = re.compile(r"^(?:Summer|Fall|Spring|Winter|Monday|Tuesday|Wednesday|Thursday|Friday|January|February|March|"
+                        r"April|May|June|July|August|September|October|November|December|HQ|Headquarters|Office)\b")
+
+
+def _asked_elsewhere(label: str, job: dict) -> str:
+    """A place the question names that isn't one of your places (or '', when it names none or only yours). The
+    posting being in your places doesn't answer "would you work on-site in London?"."""
+    from . import match
+    tl = db.get_settings().get("target_locations") or []
+    company = (job.get("company") or "").lower()
+    for named in ASKED_PLACE.findall(" ".join((label or "").split())):
+        named = named.strip(" ,.")
+        if not named or NOT_PLACES.match(named) or named.lower() in company or company.startswith(named.lower()):
+            continue
+        one = {"locations": [named]}
+        if not (match.place_matches(one, tl) if tl else match._in_us(named)):
+            return named
+    return ""
+
+
 def _in_person(canon: str, field: dict, ans: dict, job: dict) -> dict:
     row = ans.get("willing_to_relocate") or {}
     pref, confirmed = (row.get("value") or "").strip(), bool(row.get("confirmed"))
     what = "relocating" if canon == "willing_to_relocate" else "working in person"
-    yes_no = "Yes" if pref.lower().startswith("yes") or (pref.lower().startswith("only") and in_your_places(job)) \
+    elsewhere = _asked_elsewhere(field["label"], job) if pref.lower().startswith("only") else ""
+    yes_no = "Yes" if pref.lower().startswith("yes") or (pref.lower().startswith("only") and in_your_places(job)
+                                                         and not elsewhere) \
         else "No" if pref.lower() == "no" else ""
-    where = ", ".join((job.get("locations") or [])[:2]) or "a place the posting doesn't name"
+    where = elsewhere or ", ".join((job.get("locations") or [])[:2]) or "a place the posting doesn't name"
     if not yes_no or not confirmed:
         why = (f"Asks about {what} for {where}, which isn't one of your places; answer it for this job"
                if pref.lower().startswith("only") and confirmed else
