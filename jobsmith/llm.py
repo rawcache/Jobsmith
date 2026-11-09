@@ -746,6 +746,11 @@ async def complete_json(system: str, prompt: str, schema: dict | None = None, we
         async with _local_sem:
             return await _call(b, system, prompt, schema, web)
     async with _sem:
+        until, said = _busy_until.get(b.name, (0, ""))
+        if until > time.time():             # it just said it's busy: not asked again (or charged to your budget) yet
+            e = BusyError(said)
+            e.not_sent = True
+            raise e
         try:
             with spend(b):
                 return await _call(b, system, prompt, schema, web)

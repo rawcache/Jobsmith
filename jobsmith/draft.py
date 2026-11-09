@@ -1130,6 +1130,9 @@ def offline(field: dict, ans: dict, job: dict, blank_optional: bool | None = Non
     return None
 
 
+NO_AI_ISSUES = ("Needs your AI connected", "Your AI couldn't write this")
+
+
 def _no_ai_issue(e: Exception) -> str:
     """Why AI wrote nothing, in the answer's own "Needs you" line: no AI connected at all, or what your AI said (a
     key that isn't valid, a model that doesn't exist), so you fix the right thing."""
@@ -1333,7 +1336,9 @@ def _blocker(d: dict, job: dict, ans: dict, autopilot: bool | None = None) -> di
     if d.get("kind") == "pending" and not val:
         return item(PENDING_ISSUE, pending=True)
     if d.get("required") and not val and d["qtype"] != "file":
-        return item(issues[0] if issues and d.get("kind") == "answer_bank" else "required and empty")
+        # your own reason when there is one: a profile answer to add, or why your AI couldn't write it
+        says = issues and (d.get("kind") == "answer_bank" or issues[0].startswith(NO_AI_ISSUES))
+        return item(issues[0] if says else "required and empty")
     if d.get("verdict") == "green" or d.get("final_answer"):
         return None
     if val and (d.get("canon") in LEGAL_YES_NO and d.get("kind") == "answer_bank" or
