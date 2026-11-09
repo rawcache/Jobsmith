@@ -400,9 +400,12 @@ in under 15 minutes without help.
       `web/src/components/Fixes.tsx` ([picture](images/needs-you.png)), terminal `tui.review_fixes`;
       `tests/test_fixes.py` (`test_needs_you_is_about_you_once…`, `test_an_answer_for_one_job_is_never_reused…`,
       `test_skip_this_job…`).
-- [ ] Terminal: every line names the company and the role; repeated events collapse ("TikTok · 3 roles couldn't
+- [x] Terminal: every line names the company and the role; repeated events collapse ("TikTok · 3 roles couldn't
       finish"); start-up shows one summary line ("12 ready for you, 3 couldn't finish · /review"), not one line per
       job; "couldn't finish" always says why; the log and the list always show the same status.
+      Done: `jobsmith/words.py` (one wording and one plain reason for the log, the Review list and the API),
+      `tuiapp._paint_state`, `Review.show_jobs`; `tests/test_tuiapp.py` (`test_every_log_line_names…`,
+      `test_couldnt_finish_always_says_why…`, `test_start_up_says_one_summary_line…`).
 - [ ] `docs/getting-started.md` with screenshots: install, setup, first approval, daily use, troubleshooting
       (keychain prompt, a lost terminal, Gemini's free limit, a sleeping Mac and `caffeinate`). The README leads
       with it; the extension is marked optional, with the developer-mode steps.

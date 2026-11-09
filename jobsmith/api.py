@@ -185,8 +185,11 @@ def notifications_seen():
 def _names(job_ids: list[str]) -> dict[str, dict]:
     if not job_ids:
         return {}
-    rows = db.q(f"SELECT id, company, title FROM jobs WHERE id IN ({','.join('?' * len(job_ids))})", tuple(job_ids))
-    return {r["id"]: {"company": r["company"], "title": r["title"]} for r in rows}
+    from . import words
+    rows = db.q(f"SELECT id, company, title, status, hold_reason, error FROM jobs WHERE id IN ({','.join('?' * len(job_ids))})",
+                tuple(job_ids))
+    # status and why from the job record: the terminal's log says what its Review list says
+    return {r["id"]: {"company": r["company"], "title": r["title"], "status": r["status"], "why": words.why(r)} for r in rows}
 
 
 @app.get("/api/status")
@@ -237,6 +240,8 @@ async def status():
                      "last_summary": scheduler.state["last_summary"]},
             # a posting taken down since can't be sent: it isn't waiting on you
             "needs_you": db.q1("SELECT COUNT(*) n FROM jobs WHERE active=1 AND status IN ('filled','error')")["n"],
+            "held": {"ready": db.q1("SELECT COUNT(*) n FROM jobs WHERE active=1 AND status='filled'")["n"],
+                     "failed": db.q1("SELECT COUNT(*) n FROM jobs WHERE active=1 AND status='error'")["n"]},
             "tokens_today": _usage_rows("at > ?", (db.now() - 86400,))["tokens"],
             "ai_today": llm.ai_today(),
             "onboarded": bool(s_.get("onboarded")) or bool(db.q1("SELECT 1 FROM runs WHERE kind='submit' LIMIT 1")),
@@ -1198,8 +1203,11 @@ async def home():
     review = [db.decode(r) for r in db.q("""SELECT id, company, title, ats, status, hold_reason, error, fit_score, updated_at
                                              FROM jobs WHERE active=1 AND status IN ('filled','error') ORDER BY updated_at DESC LIMIT 30""")]
     waiting = {a["job_id"] for a in guardrails.awaiting_approval()}
+    from . import words
     for r in review:
         r["approve"] = r["id"] in waiting          # autopilot's first submission (on its site): yours to approve
+        r["why"] = "approve the first submission" if r["approve"] else words.why(r)
+        r["word"] = words.status_word(r["status"])
     recent = db.q("""SELECT j.id, j.company, j.title, j.outcome, r.finished_at FROM runs r JOIN jobs j ON j.id=r.job_id
                      WHERE r.kind='submit' AND r.status='done' ORDER BY r.finished_at DESC LIMIT 8""")
     srcs = db.q("SELECT id, url, kind, last_synced, last_count FROM sources WHERE active=1 ORDER BY id")
