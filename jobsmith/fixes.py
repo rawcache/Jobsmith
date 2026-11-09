@@ -26,7 +26,7 @@ PROFILE_FIX = re.compile(r"on (the|your) Profile page|your profile doesn't give 
 # "Have you worked for <company>?" that your confirming "My resume lists every employer…" would answer
 ALL_EMPLOYERS = re.compile(r"your resume lists every employer", re.I)
 # What AI would have written, or nobody did: answerable once for every form that asks it the same way
-UNANSWERED = re.compile(r"required and empty|Needs your AI connected|Model skipped this question|needs your answer", re.I)
+UNANSWERED = re.compile(r"required and empty|Needs your AI connected|Your AI couldn.t write this|Model skipped this question|needs your answer", re.I)
 STOPPED = re.compile(r"^Stopped by you", re.I)
 HELD = ("filled", "error")
 

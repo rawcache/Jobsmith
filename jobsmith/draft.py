@@ -18,7 +18,7 @@ import re
 from .skills import voice
 from . import classify, db, essays, jobdetail, learn, profile, traps
 from . import llm
-from .llm import LLMError, QuotaError, complete_json
+from .llm import BusyError, LLMError, QuotaError, complete_json
 
 # Written by AI once it's available (and, for a held application, once you've answered what it waits on)
 PENDING_ISSUE = "Waiting for AI: written once it's available"
@@ -1130,6 +1130,14 @@ def offline(field: dict, ans: dict, job: dict, blank_optional: bool | None = Non
     return None
 
 
+def _no_ai_issue(e: Exception) -> str:
+    """Why AI wrote nothing, in the answer's own "Needs you" line: no AI connected at all, or what your AI said (a
+    key that isn't valid, a model that doesn't exist), so you fix the right thing."""
+    if isinstance(llm.backend("write"), llm.NoLLM):
+        return "Needs your AI connected (Settings), or more of your writing (Voice), then Redraft"
+    return f"Your AI couldn't write this: {str(e).rstrip('.')[:160]}. Fix it in Settings, then Redraft"
+
+
 def pending(field: dict) -> dict:
     return {"kind": "pending", "answer": "", "confidence": 0, "issues": [PENDING_ISSUE]}
 
@@ -1180,7 +1188,7 @@ async def answer_fields(job: dict, fields: list[dict], skip_locked: bool = True,
     if to_generate and use_ai:
         try:
             results.update(await generate(job, to_generate))
-        except QuotaError as e:        # today's budget or a free limit: written later, not held for you
+        except (QuotaError, BusyError) as e:   # today's budget, a free limit, or a busy AI: written later, not held
             gen_error = str(e)
             for f in to_generate:
                 results[f["field"]] = pending(f)
@@ -1188,7 +1196,7 @@ async def answer_fields(job: dict, fields: list[dict], skip_locked: bool = True,
             gen_error = str(e)
             for f in to_generate:
                 results[f["field"]] = {"kind": "generated", "answer": "", "confidence": 0,
-                                       "issues": ["Needs your AI connected (Settings), or more of your writing (Voice), then Redraft"]}
+                                       "issues": [_no_ai_issue(e)]}
     else:
         for f in to_generate:
             results[f["field"]] = pending(f)
