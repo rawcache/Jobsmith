@@ -285,14 +285,16 @@ def _names_us(loc: str) -> bool:
     return True
 
 
-US_CITIZEN_OPTION = re.compile(r"\b(u\.?\s?s\.?|united states)\b.{0,12}\bcitizen(?!ship)", re.I)
-NOT_CITIZEN_OPTION = re.compile(r"non-?\s?citizen|\bnot\b|\bno\b|neither|none", re.I)
+# The whole choice, nothing added: "U.S. citizen", "A United States citizen or national". Not "Non-U.S. citizen" or
+# "U.S. citizen with an active clearance".
+US_CITIZEN_OPTION = re.compile(r"\W*(i am )?(an? )?(u\.?\s?s\.?(\s?a\.?)?|united states)( of america)? citizen"
+                               r"( or (u\.?\s?s\.? )?national( of the (u\.?\s?s\.?|united states))?)?\W*", re.I)
 
 
 def _citizen_option(options: list[str]) -> str:
     """The one choice that says "U.S. citizen" in a list of statuses (citizen, green card, refugee, none of the
     above), for someone who confirmed they are one. None when no single choice says it."""
-    mine = [o for o in options if US_CITIZEN_OPTION.search(o) and not NOT_CITIZEN_OPTION.search(o)]
+    mine = [o for o in options if US_CITIZEN_OPTION.fullmatch(" ".join(o.split()))]
     return mine[0] if len(mine) == 1 else ""
 
 
@@ -604,7 +606,9 @@ def _plain_pick(field: dict, ans: dict, job: dict | None) -> dict | None:
     if canon in CITIZEN_LISTS:
         out = _citizen_option(options) if value.lower() == "yes" else ""
     else:
-        out = classify.strict_pick(value, options) or ""
+        h = ans.get("hispanic_latino") or {}
+        out = classify.strict_pick(value, options, not_hispanic=bool(h.get("confirmed")) and
+                                   (h.get("value") or "").strip().lower() == "no") or ""
     if not out:
         return None
     return {"kind": "answer_bank", "canon": canon, "answer": out, "confidence": 1.0, "issues": [],

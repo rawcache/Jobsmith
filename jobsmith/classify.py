@@ -181,7 +181,7 @@ def canon_for(label: str) -> str | None:
     return None
 
 
-DECLINE = re.compile(r"decline|prefer not|don.?t wish|do not wish|choose not|not to (answer|disclose|say)|"
+DECLINE = re.compile(r"decline|prefer not|don.?t (wish|want) to|do not (wish|want) to|choose not|not to (answer|disclose|say)|"
                      r"rather not|wish not", re.I)
 
 
@@ -202,10 +202,19 @@ def _nums(s: str) -> list[float]:
     return [float(n) for n in re.findall(r"\d+(?:\.\d+)?", s)]
 
 
-def strict_pick(answer: str, options: list[str]) -> str | None:
+# What may follow the answer in a choice that still means only it: the EEO form's "(Not Hispanic or Latino)" (when
+# you've confirmed you aren't) and its definition ("A person having origins in…")
+_EEO_TAIL = re.compile(r"\s*(\(not hispanic or latino\))?\s*(a person (having|of|who)\b.*)?", re.I | re.S)
+_SAYS_NO = re.compile(r"\W*(no\b|i am not\b|i do not\b|i don.?t\b|not\b)", re.I)
+_SAYS_MORE = re.compile(r"\b(previous\w*|past|history|record|former\w*|but|unless|except)\b", re.I)
+
+
+def strict_pick(answer: str, options: list[str], not_hispanic: bool = False) -> str | None:
     """The one choice that means exactly this answer, or None: for answers only you may give (rule 2). The same
-    words, a decline for a decline, "Man" for "Male", the single "No…" choice for "None", or the single choice that
-    starts with the answer ("Asian (Not Hispanic or Latino)…" for "Asian (Indian)"). Never the nearest match."""
+    words, a decline for a decline, "Man" for "Male", the single "No…" choice for "No" or "None", the single
+    "Yes…" for "Yes", or the single choice that is the answer plus the EEO form's own wording ("Asian (Not Hispanic
+    or Latino) A person having origins in…" for "Asian (Indian)"). Never the nearest match, and never a choice that
+    says more ("Secret / SCI", "Previously had a disability")."""
     a = " ".join((answer or "").split())
     if not a or not options:
         return None
@@ -218,15 +227,20 @@ def strict_pick(answer: str, options: list[str]) -> str | None:
         return only([o for o in options if DECLINE.search(o)])
     if al in SAME_WORD:
         return only([o for o in options if re.sub(r"\W+", " ", o).strip().lower() == SAME_WORD[al]])
+    real = [o for o in options if not DECLINE.search(o) and not _SAYS_MORE.search(o)]
     if al in NONE:
-        return only([o for o in options if NO_OPTION.match(o)])
-    if al in ("yes", "no"):                             # "I am not a protected veteran": the one choice that says no
-        real = [o for o in options if not DECLINE.search(o)]
-        neg = [o for o in real if re.search(r"\bnot\b|\bno\b|don.?t|do not", o, re.I)]
-        return only(neg) if al == "no" else only([o for o in real if o not in neg])
+        return only([o for o in real if NO_OPTION.match(o)])
+    if al == "no":                                      # "I am not a protected veteran": the one choice that says no
+        return only([o for o in real if _SAYS_NO.match(o)])
+    if al == "yes":
+        return only([o for o in real if re.match(r"\W*yes\b", o, re.I)])
     head = al.split("(")[0].strip()
     if len(head) > 2:
-        return only([o for o in options if re.match(rf"\W*{re.escape(head)}\b", flat(o))])
+        def is_head(o: str) -> bool:
+            m = re.match(rf"\W*{re.escape(head)}\b(.*)", flat(o), re.S)
+            tail = _EEO_TAIL.fullmatch(m.group(1).strip()) if m else None
+            return bool(tail) and (not tail.group(1) or not_hispanic)
+        return only([o for o in options if is_head(o)])
     return None
 
 
