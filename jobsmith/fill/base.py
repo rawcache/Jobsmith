@@ -166,7 +166,8 @@ SCAN_JS = r"""
       const title = own && [...fs.querySelectorAll('label')].find(l => !boxes.some(x => x.id === l.htmlFor || l.contains(x)));
       let label = legend ? clean(legend.innerText) : title ? clean(title.innerText) : '';
       // one box of several in a fieldset, each its own question (consents): its own words, not the shared heading
-      if (group.length === 1 && boxes.length > 1 && labelFor(el)) label = labelFor(el);
+      // ...after that heading, which says what the box is about ("Sexual orientation: Straight" stays yours)
+      if (group.length === 1 && boxes.length > 1 && labelFor(el)) label = (label ? label + ': ' : '') + labelFor(el);
       const opts = group.map(x => labelFor(x));
       // the first line of the nearest box holding every option, unless that line is an option itself (Ashby's
       // SMS consent: "Yes - I consent…" first, the question "SMS" one box further out). A lone checkbox's own

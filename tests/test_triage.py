@@ -866,5 +866,22 @@ async def test_separate_consents_in_one_fieldset_stay_separate_questions(page):
     boxes = [f for f in fields if f["qtype"] in ("checkbox", "multiselect")]
     assert [f["qtype"] for f in boxes] == ["checkbox"] * 4 and [f["required"] for f in boxes] == [True, False, True, True]
     assert [f["label"] for f in boxes] == ["I accept the privacy notice", "Send me the newsletter",
-                                           "I agree to the terms", "I agree to data retention"]
+                                           "Before you apply: I agree to the terms",
+                                           "Before you apply: I agree to data retention"]
     assert len({f["field"] for f in boxes}) == 4
+
+
+async def test_a_demographic_fieldset_that_cant_be_grouped_keeps_its_heading(page):
+    from jobsmith.fill import base
+    await page.set_content("""<form><fieldset><legend>Sexual orientation</legend>
+      <input type="checkbox" id="a" name="straight"><label for="a">Straight</label>
+      <input type="checkbox" id="b" name="other"><label for="b">Other</label></fieldset>
+      <fieldset><legend>Agreements</legend>
+      <input type="checkbox" id="terms-1" name="t1" aria-required="true"><label for="terms-1">I agree to the terms</label>
+      <input type="checkbox" id="terms-2" name="t2"><label for="terms-2">Keep my data</label></fieldset></form>""")
+    fields = await base.scan_form(page)
+    assert [f["label"] for f in fields] == ["Sexual orientation: Straight", "Sexual orientation: Other",
+                                            "Agreements: I agree to the terms", "Agreements: Keep my data"]
+    for f in fields[:2]:
+        got = draft.offline(f, profile.answers(), JOB)
+        assert got is not None and got["answer"] == ""                 # still yours: never AI's (rule 2)
