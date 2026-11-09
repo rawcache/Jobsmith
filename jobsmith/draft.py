@@ -243,15 +243,22 @@ NOT_PLACES = re.compile(r"^(?:Summer|Fall|Spring|Winter|Monday|Tuesday|Wednesday
 def _asked_elsewhere(label: str, job: dict) -> str:
     """A place the question names that isn't one of your places (or '', when it names none or only yours). The
     posting being in your places doesn't answer "would you work on-site in London?"."""
-    from . import match
+    from . import match, onboarding
     tl = db.get_settings().get("target_locations") or []
     company = (job.get("company") or "").lower()
+    us_cities = {c.lower() for k, v in onboarding.LOCATIONS.items() if k not in onboarding.INTERNATIONAL for c in v}
+    theirs = " ".join(job.get("locations") or []).lower()
     for named in ASKED_PLACE.findall(" ".join((label or "").split())):
         named = named.strip(" ,.")
         if not named or NOT_PLACES.match(named) or named.lower() in company or company.startswith(named.lower()):
             continue
-        one = {"locations": [named]}
-        if not (match.place_matches(one, tl) if tl else match._in_us(named)):
+        city = named.split(",")[0].strip().lower()
+        if tl:
+            ok = match.place_matches({"locations": [named]}, tl)
+        else:           # anywhere in the US: the posting's own city, a US city Jobsmith knows, or "City, ST"
+            ok = match._in_us(named) or city in us_cities or (city and city in theirs and
+                                                              any(match._in_us(l) for l in job.get("locations") or []))
+        if not ok:
             return named
     return ""
 

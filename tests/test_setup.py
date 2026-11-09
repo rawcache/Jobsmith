@@ -320,8 +320,31 @@ def test_the_live_count_leaves_out_what_matching_rejects_and_senior_roles(monkey
     assert [r["id"] for r in db.q("SELECT id FROM jobs WHERE fit_score >= ? ORDER BY id", (bar,))] == ["ok"]
 
 
-def test_a_fresh_install_reads_its_lists_for_the_live_count():
-    assert onboarding.read_lists_early(["internship"])
-    on = [p["key"] for p in onboarding.presets_state() if p["on"]]
-    assert on == ["simplify_internships"]
-    assert not onboarding.read_lists_early(["internship"])              # once: step 5 decides from here
+async def test_a_fresh_install_starts_reading_its_lists_once_for_the_live_count(monkeypatch):
+    from jobsmith import api
+    started = []
+    monkeypatch.setattr(api, "spawn_sync", lambda: started.append(1))
+    monkeypatch.setattr(api, "_early_sync_at", 0.0)
+    look = api.LookIn(levels=["internship"], categories=["Software"])
+    for _ in range(3):                                                  # the count asks again every few seconds
+        out = await api.onboarding_preview(look)
+    assert started == [1] and out["matches"] == 0 and "syncing" in out
+    assert [p["key"] for p in onboarding.presets_state() if p["on"]] == ["simplify_internships"]
+
+
+def test_a_city_the_question_names_under_anywhere_in_the_us():
+    from jobsmith import draft
+    db.set_settings({"target_locations": []})
+    ans = _answers(willing_to_relocate="Only in my chosen locations")
+    seattle = {"company": "Acme", "locations": ["Seattle, WA"]}
+    for label in ("Are you willing to work on-site in Seattle?", "Are you willing to work on-site in Boston?",
+                  "Are you willing to relocate to Lehi, UT?"):
+        assert draft.deterministic(_field(label), ans, seattle)["answer"] == "Yes", label
+    assert draft.deterministic(_field("Are you willing to work on-site in London?"), ans, seattle)["answer"] == ""
+
+
+def test_the_early_read_covers_each_level_picked_and_stops_once_listings_are_in():
+    assert onboarding.read_lists_early(["internship"]) and onboarding.read_lists_early(["newgrad"])
+    assert {p["key"] for p in onboarding.presets_state() if p["on"]} == {"simplify_internships", "simplify_newgrad"}
+    _job("x")
+    assert not onboarding.read_lists_early(["internship"])
