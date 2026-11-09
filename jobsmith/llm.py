@@ -33,6 +33,15 @@ class BusyError(LLMError):
     a few minutes; nothing for you to fix, so what it would have written waits for it."""
 
 
+def _unreached(who: str, e: Exception) -> LLMError:
+    """A call that got no answer. One that timed out is a busy AI, waited for; one that never connected (offline, a
+    blocked address) may never come back, so it's yours to see: the application is filled and held with this."""
+    import httpx
+    if isinstance(e, httpx.TimeoutException) and not isinstance(e, httpx.ConnectTimeout):
+        return BusyError(f"{who} is busy just now (it didn't answer in time)")
+    return LLMError(f"Couldn't reach {who}: {e.__class__.__name__}")
+
+
 class BudgetError(QuotaError):
     """Your daily AI budget (Settings) is used up. Like a free limit: smith may stand in, nothing else is called."""
 
@@ -265,7 +274,7 @@ class AnthropicAPI(Backend):
                 r = await c.post("https://api.anthropic.com/v1/messages", json=body, headers={
                     "x-api-key": self.key, "anthropic-version": "2023-06-01", "content-type": "application/json"})
         except httpx.HTTPError as e:
-            raise BusyError(f"Anthropic is busy or unreachable just now ({e.__class__.__name__})") from e
+            raise _unreached("Anthropic", e) from e
         if r.status_code >= 500:
             raise BusyError(f"Anthropic is busy just now (its servers answered {r.status_code})")
         if r.status_code != 200:
@@ -307,7 +316,7 @@ class OpenAIAPI(Backend):
                 r = await c.post("https://api.openai.com/v1/responses", json=body,
                                  headers={"Authorization": f"Bearer {self.key}"})
         except httpx.HTTPError as e:
-            raise BusyError(f"OpenAI is busy or unreachable just now ({e.__class__.__name__})") from e
+            raise _unreached("OpenAI", e) from e
         if r.status_code >= 500:
             raise BusyError(f"OpenAI is busy just now (its servers answered {r.status_code})")
         if r.status_code != 200:
@@ -374,7 +383,7 @@ class GeminiAPI(Backend):
                 async with httpx.AsyncClient(timeout=timeout) as c:
                     r = await c.post(url, json=body, headers={"x-goog-api-key": self.key})
             except httpx.HTTPError as e:
-                raise BusyError(f"Gemini is busy or unreachable just now ({e.__class__.__name__})")
+                raise _unreached("Gemini", e)
             if r.status_code not in (429, 500, 503) or attempt == 3:
                 break
             if r.status_code == 429 and "PerDay" in r.text:
