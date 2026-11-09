@@ -613,6 +613,14 @@ def test_yes_and_no_in_the_forms_own_words():
     assert classify.strict_pick("Yes", opts) == opts[0] and classify.strict_pick("No", opts) == opts[1]
     # a protected veteran is more than a veteran: your Yes doesn't say which
     assert classify.strict_pick("Yes", ["I am a protected veteran", "I am not a protected veteran"]) is None
+    assert classify.strict_pick("Yes", ["I have a disability that requires accommodation", "I have no disability"]) is None
+    assert classify.strict_pick("No", ["I have no disability and have never had one", "I have a disability"]) is None
+    assert classify.strict_pick("No", ["I am not a protected veteran", "I am a protected veteran"]) == \
+        "I am not a protected veteran"
+    profile.set_answer("disability_status", "No", confirmed=True)
+    got = draft.offline(field("Disability Status", options=["I have no disability and have never had one",
+                                                           "I have a disability"]), profile.answers(), JOB)
+    assert got["answer"] == "" and got["issues"]
 
 
 @pytest.mark.parametrize("hispanic,confirmed,want", [("No", True, "Asian (Not Hispanic or Latino)"), ("No", False, ""),
