@@ -205,9 +205,13 @@ def _nums(s: str) -> list[float]:
 # What may follow the answer in a choice that still means only it: the EEO form's "(Not Hispanic or Latino)" (when
 # you've confirmed you aren't) and its definition ("A person having origins in…")
 _EEO_TAIL = re.compile(r"\s*(\(not hispanic or latino\))?\s*(a person (having|of|who)\b.*)?", re.I | re.S)
-_SAYS_NO = re.compile(r"\W*(no\b|i am not\b|i do not\b|i don.?t\b|i have no\b|not\b)", re.I)
-_SAYS_YES = re.compile(r"\W*(yes\b|i have an?\b(?! history| record))", re.I)
-_SAYS_MORE = re.compile(r"\b(previous\w*|past|history|record|former\w*|but|unless|except)\b", re.I)
+# The whole choice, word for word: a closed list, so a choice that adds anything ("…that requires accommodation",
+# "…and have never had one", "protected" for a veteran's Yes) waits for you.
+_YES_CHOICES = {"yes", "i have a disability", "yes i have a disability", "i am a veteran", "yes i am a veteran"}
+_NO_CHOICES = {"no", "i have no disability", "i do not have a disability", "i dont have a disability",
+               "no i do not have a disability", "no i dont have a disability", "i am not a veteran",
+               "no i am not a veteran", "not a veteran", "i am not a protected veteran", "not a protected veteran",
+               "no i am not a protected veteran"}
 
 
 def strict_pick(answer: str, options: list[str], not_hispanic: bool = False) -> str | None:
@@ -228,13 +232,11 @@ def strict_pick(answer: str, options: list[str], not_hispanic: bool = False) -> 
         return only([o for o in options if DECLINE.search(o)])
     if al in SAME_WORD:
         return only([o for o in options if re.sub(r"\W+", " ", o).strip().lower() == SAME_WORD[al]])
-    real = [o for o in options if not DECLINE.search(o) and not _SAYS_MORE.search(o)]
-    if al in NONE:
-        return only([o for o in real if NO_OPTION.match(o)])
-    if al == "no":                                      # "I am not a protected veteran": the one choice that says no
-        return only([o for o in real if _SAYS_NO.match(o)])
-    if al == "yes":
-        return only([o for o in real if _SAYS_YES.match(o)])
+    words = lambda o: " ".join(re.findall(r"[a-z0-9]+", flat(o)))
+    if al in NONE:                                      # "No Clearance", "None": one or two words, nothing added
+        return only([o for o in options if NO_OPTION.match(o) and len(words(o).split()) <= 2])
+    if al in ("yes", "no"):
+        return only([o for o in options if words(o) in (_YES_CHOICES if al == "yes" else _NO_CHOICES)])
     head = al.split("(")[0].strip()
     if len(head) > 2:
         def is_head(o: str) -> bool:
