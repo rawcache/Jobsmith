@@ -172,7 +172,9 @@
         // "Select all that apply" where every choice has a name of its own (Ashby: name="Gay", name="Parent"): the
         // boxes of one fieldset are one question, never each choice a question (same rule as fill/base.py)
         const boxes = type === "checkbox" && fs ? [...fs.querySelectorAll('input[type="checkbox"]')] : [];
-        const own = boxes.length > 1 && new Set(boxes.map(x => x.name)).size === boxes.length;
+        // only under a question of their own, and never boxes each required by itself (separate consents)
+        const titled = legend || (fs && [...fs.querySelectorAll("label")].some(l => !boxes.some(x => x.id === l.htmlFor || l.contains(x))));
+        const own = !!titled && boxes.length > 1 && new Set(boxes.map(x => x.name)).size === boxes.length && boxes.every(x => !x.required);
         const g = own ? boxes[0] : (el.name || el.id); if (!g) continue;
         const seen = groups.get(el.getRootNode()) || new Set(); groups.set(el.getRootNode(), seen);
         if (seen.has(g)) continue; seen.add(g);
