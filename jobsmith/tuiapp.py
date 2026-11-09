@@ -397,7 +397,8 @@ class Review(View):
             mark = Text("✗", style=BAD) if r["status"] == "error" else Text("!", style=WARN)
             why = r.get("why") or words.why(r)
             # both stay readable: a long company name never pushes the role off the row
-            name = Text.assemble((r["company"][:18], "bold"), " · ", ((r.get("title") or "")[:26], ""))
+            # (the list is about 40 columns wide; the reason is in full beside it once the row is picked)
+            name = Text.assemble((r["company"][:14], "bold"), " · ", ((r.get("title") or "")[:20], ""))
             t.add_row(mark, name, why[:60], key=r["id"])
         ready, failed = sum(r["status"] != "error" for r in rows), sum(r["status"] == "error" for r in rows)
         if held:                         # all of them, when there are more than the list shows
