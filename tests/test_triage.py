@@ -1000,3 +1000,29 @@ def test_two_facts_in_one_list_question_wait():
     got = draft.offline(field("Please select your gender identity and sex", options=["Male", "Female"]),
                         profile.answers(), US_JOB)
     assert got["answer"] == "" and got["issues"]
+
+
+# From the second look at held applications: boxes AI can't know the answer to were waiting for AI.
+@pytest.mark.parametrize("label", ["Twitter URL", "Twitter", "X (Twitter) profile", "Other URL", "Kaggle profile link"])
+def test_a_link_your_profile_doesnt_have_is_left_blank_never_written(label):
+    got = draft.offline(field(label, "text", required=False), profile.answers(), JOB)
+    assert got is not None and got["answer"] == "" and not got["issues"]           # optional: blank, no AI, no hold
+    need = draft.offline(field(label, "text", required=True), profile.answers(), JOB)
+    assert need["answer"] == "" and "link" in need["issues"][0]                    # required: yours, with the reason
+
+
+@pytest.mark.parametrize("label", ["If other, please specify", "If you selected Other, please specify below:",
+                                   "If yes, please provide name and relationship to current employee:",
+                                   "If \"Industry Conference\" or \"Other,\" please provide more details:"])
+def test_a_follow_up_to_another_question_is_never_ais_to_guess(label):
+    got = draft.offline(field(label, "text", required=False), profile.answers(), JOB)
+    assert got is not None and got["answer"] == "" and not got["issues"]
+    need = draft.offline(field(label, "text", required=True), profile.answers(), JOB)
+    assert need["answer"] == "" and "follow-up" in need["issues"][0]
+
+
+def test_an_ordinary_question_that_starts_with_if_is_still_written():
+    for label in ("If you could build anything, what would it be?", "Describe a project you're proud of"):
+        assert draft.deterministic(field(label, "textarea"), profile.answers(), JOB) is None
+    profile.set_answer("website", "https://alexrivera.example", confirmed=True)     # a link you do have still goes in
+    assert draft.offline(field("Website", "text"), profile.answers(), JOB)["answer"] == "https://alexrivera.example"
