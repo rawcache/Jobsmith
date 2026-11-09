@@ -675,6 +675,20 @@ async def test_a_busy_ai_is_waited_for_not_handed_to_you(monkeypatch):
     got, err = await draft.answer_fields(job, [dict(WHY)])
     assert got["q_why"]["kind"] == "pending" and "busy" in err          # the application waits for AI, not for you
     assert "busy" in (llm.out_of_ai() or "")                            # and autopilot doesn't hammer it meanwhile
+    sent = []
+    real_send = send
+
+    async def counted(self, req, *a, **k):
+        sent.append(req.url.host)
+        return await real_send(self, req, *a, **k)
+    monkeypatch.setattr(httpx.AsyncClient, "send", counted)
+    with pytest.raises(llm.BusyError):                                  # asked again right away: nothing is sent
+        await llm.complete_json("sys", "prompt")
+    assert sent == []
+    monkeypatch.setattr(llm, "_busy_until", {"gemini_api": (llm.time.time() - 1, "busy")})   # five minutes on
+    with pytest.raises(llm.BusyError):
+        await llm.complete_json("sys", "prompt")
+    assert sent                                                         # it's asked again
 
 
 async def test_an_ai_that_cant_be_used_says_why(fake_llm):
@@ -690,4 +704,9 @@ async def test_an_ai_that_cant_be_used_says_why(fake_llm):
     llm.set_backend_override(None)                                      # no AI at all: that is what it says
     got, _ = await draft.answer_fields(db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,))), [dict(WHY)])
     assert "Needs your AI connected" in got["q_why"]["issues"][0]
+    fields = [dict(WHY)]
+    fake_llm(refuse)
+    got, _ = await draft.answer_fields(db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,))), fields)
+    draft.save_results(jid, fields, got)
+    assert "key isn't valid" in draft.readiness(jid)["blockers"][0]     # Needs you says it too
 
