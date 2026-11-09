@@ -205,7 +205,8 @@ def _nums(s: str) -> list[float]:
 # What may follow the answer in a choice that still means only it: the EEO form's "(Not Hispanic or Latino)" (when
 # you've confirmed you aren't) and its definition ("A person having origins in…")
 _EEO_TAIL = re.compile(r"\s*(\(not hispanic or latino\))?\s*(a person (having|of|who)\b.*)?", re.I | re.S)
-_SAYS_NO = re.compile(r"\W*(no\b|i am not\b|i do not\b|i don.?t\b|not\b)", re.I)
+_SAYS_NO = re.compile(r"\W*(no\b|i am not\b|i do not\b|i don.?t\b|i have no\b|not\b)", re.I)
+_SAYS_YES = re.compile(r"\W*(yes\b|i have an?\b(?! history| record))", re.I)
 _SAYS_MORE = re.compile(r"\b(previous\w*|past|history|record|former\w*|but|unless|except)\b", re.I)
 
 
@@ -233,7 +234,7 @@ def strict_pick(answer: str, options: list[str], not_hispanic: bool = False) -> 
     if al == "no":                                      # "I am not a protected veteran": the one choice that says no
         return only([o for o in real if _SAYS_NO.match(o)])
     if al == "yes":
-        return only([o for o in real if re.match(r"\W*yes\b", o, re.I)])
+        return only([o for o in real if _SAYS_YES.match(o)])
     head = al.split("(")[0].strip()
     if len(head) > 2:
         def is_head(o: str) -> bool:

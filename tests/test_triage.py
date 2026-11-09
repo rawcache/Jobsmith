@@ -606,3 +606,20 @@ def test_a_confirmed_answer_is_picked_only_from_a_plain_question_and_one_matchin
     assert got["answer"] == want and bool(got["issues"]) == (not want)
     profile.set_answer(key, value, confirmed=False)
     assert draft.offline(field(label, options=options), profile.answers(), JOB)["answer"] == ""
+
+
+def test_yes_and_no_in_the_forms_own_words():
+    opts = ["I have a disability", "I have no disability", "Decline to answer"]
+    assert classify.strict_pick("Yes", opts) == opts[0] and classify.strict_pick("No", opts) == opts[1]
+    # a protected veteran is more than a veteran: your Yes doesn't say which
+    assert classify.strict_pick("Yes", ["I am a protected veteran", "I am not a protected veteran"]) is None
+
+
+@pytest.mark.parametrize("hispanic,confirmed,want", [("No", True, "Asian (Not Hispanic or Latino)"), ("No", False, ""),
+                                                     ("Yes", True, ""), (None, False, "")])
+def test_the_not_hispanic_race_choice_needs_that_confirmed_too(hispanic, confirmed, want):
+    profile.set_answer("race", "Asian (Indian)", confirmed=True)
+    if hispanic:
+        profile.set_answer("hispanic_latino", hispanic, confirmed=confirmed)
+    f = field("Race", options=["White (Not Hispanic or Latino)", "Asian (Not Hispanic or Latino)", "Hispanic or Latino"])
+    assert draft.offline(f, profile.answers(), JOB)["answer"] == want
