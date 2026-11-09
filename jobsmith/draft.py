@@ -764,16 +764,21 @@ _NETWORK = re.compile(r"(your )?(twitter|x \(twitter\)|x|instagram|facebook|yout
                       r"stack ?overflow|dribbble|behance|tiktok|bluesky|mastodon)( (profile|account|page|handle))?", re.I)
 
 
+_ASKS_POLITELY = re.compile(r"^(please\s+)?(tell us|share|provide|give us|enter|list|add|paste)\s+(us\s+)?(your|a|the)\s+", re.I)
+
+
 def _link_box(label: str) -> bool:
     l = " ".join((label or "").split()).strip(" :*?")
+    l = re.sub(r"\s*\((optional|if any|if applicable|if you have one)\)\s*$", "", l, flags=re.I)
+    l = _ASKS_POLITELY.sub("", l)            # "Please tell us your Twitter URL" asks for the same one thing
     if len(l.split()) > 7 or classify.ESSAY_Q.search(l) or classify.YES_NO_Q.search(l):
         return False
     return bool(_LINK_WORD.search(l) or _NETWORK.fullmatch(l))
 
 
 # "If other, please specify", "If yes, please provide…": the answer hangs on another question's
-FOLLOW_UP = re.compile(r"^if\b[^.?!]{0,60}?\b(other|yes|no|selected|answered|chose|checked|applicable|so|not)\b"
-                       r"[^.?!]{0,40}?\b(specify|explain|describe|provide|list|elaborate|indicate|tell us|share|state|"
+FOLLOW_UP = re.compile(r"^if\b[^?!]{0,60}?\b(other|yes|no|selected|answered|chose|checked|applicable|so|not)\b"
+                       r"[^?!]{0,40}?\b(specify|explain|describe|provide|list|elaborate|indicate|tell us|share|state|"
                        r"name)\b", re.I)
 
 
