@@ -21,8 +21,10 @@ Aim for at least one Windows and one Mac user among the three.
 ## Before they sit down
 
 - Ask them: "You'll install an app that fills in job applications, using your real resume, on your own laptop.
-  Nothing leaves your laptop except to the job sites you apply on. I'll watch and take notes on where the app is
-  confusing. I'm testing the app, not you. You can stop at any point." Go on only if they say yes.
+  Your resume and answers go to the job sites you apply on. If you choose to connect an AI service during setup,
+  it also gets the facts from your resume and the questions it helps answer; you can skip that step. Nothing goes
+  to the people who make the app. I'll watch and take notes on where the app is confusing. I'm testing the app,
+  not you. You can stop at any point." Go on only if they say yes.
 - Their resume and answers are theirs. Don't copy, photograph or keep anything from their screen. Notes record
   what was confusing, never what they typed. No screen recording unless they offer, and then it stays with them.
 - They decide whether anything is sent. If they'd rather not apply for real, stop the clock at the filled
