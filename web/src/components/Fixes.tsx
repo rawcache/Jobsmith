@@ -20,7 +20,7 @@ export default function Fixes({ onChange, onCount, limit = 6 }: { onChange?: () 
   // what you've typed, by fix: kept here, so a refresh that moves or hides a row never loses it
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const seq = useRef(0);       // only the newest answer is shown: a refresh sent before your answer landed is dropped
-  const show = (r: FixesData) => { setD(r); onCount?.(r.fixes.length); };
+  const show = (r: FixesData) => { setD(r); onCount?.(r.fixes.length + r.applications.length); };
   // kept fresh while you look: autopilot holds new applications as it works
   useEffect(() => {
     const get = () => {
@@ -29,7 +29,7 @@ export default function Fixes({ onChange, onCount, limit = 6 }: { onChange?: () 
     };
     get(); const t = poll(get, 15000); return () => t.stop();
   }, []);
-  if (!d || d.fixes.length === 0) return null;
+  if (!d || (d.fixes.length === 0 && d.applications.length === 0)) return null;
   const done = (r: Answered) => {
     seq.current++;
     show(r);
@@ -42,7 +42,8 @@ export default function Fixes({ onChange, onCount, limit = 6 }: { onChange?: () 
   // its company and role, with a way to skip the job instead.
   const you = d.fixes.filter(f => f.part !== "job");
   const byId = Object.fromEntries(d.fixes.map(f => [f.id, f]));
-  const jobs = d.applications.filter(a => a.questions.length > 0);
+  // every held application with something of its own: a question only it asks, or a problem on its site
+  const jobs = [...d.applications].sort((a, b) => b.questions.length - a.questions.length);
   // the first few, and any you've started typing in wherever a refresh put it
   const shownYou = you.filter((f, i) => i < limit || (drafts[f.id] ?? "") !== "");
   const shownJobs = jobs.filter((a, i) => i < limit || a.questions.some(q => (drafts[q] ?? "") !== ""));
@@ -68,13 +69,13 @@ export default function Fixes({ onChange, onCount, limit = 6 }: { onChange?: () 
         <ul className="fix-rows">{shownYou.map(row)}</ul>
       </section>)}
       {shownJobs.length > 0 && (<section aria-label="About one job">
-        <h3 className="fix-part">About one job <span className="muted">· asked by that application only, never reused</span></h3>
+        <h3 className="fix-part">About one job <span className="muted">· that application's own; an answer is never reused</span></h3>
         {shownJobs.map(a => (
           <div key={a.id} className="fix-job">
             <div className="fix-h"><a href={`#/job/${a.id}`}><strong>{a.company}</strong> · {a.title}</a>
               <button className="link small" onClick={() => skip(a)}>Skip this job</button></div>
             <ul className="fix-rows">{a.questions.map(q => byId[q]).filter(Boolean).map(row)}</ul>
-            {a.own.length > 0 && <p className="small muted">Also on this one: {a.own.slice(0, 2).join("; ").slice(0, 220)}</p>}
+            {a.own.length > 0 && <p className="small muted fix-own">{a.questions.length > 0 ? "Also on this one: " : ""}{a.own.slice(0, 2).join("; ").slice(0, 260)}</p>}
           </div>))}
       </section>)}
       {more > 0 && <p className="small muted">{more} more in <a href="#/tracker">Applications</a>.</p>}

@@ -447,11 +447,24 @@ def review_fixes(e: Engine) -> bool:
         if _answer_fix(e, f) == "quit":
             return False
     by = {f["id"]: f for f in fixes}
-    jobs = [a for a in data.get("applications", []) if a.get("questions")]
+    jobs = data.get("applications", [])
     if jobs:
-        console.print("\n[bold]About one job[/] [dim]· asked by that application only, never reused[/]")
+        console.print("\n[bold]About one job[/] [dim]· that application's own; an answer is never reused[/]")
     for a in jobs:
         console.print(f"\n[bold]{a['company']}[/] · {a['title']}")
+        for line in a.get("own", [])[:2]:
+            console.print(f"  [yellow]{line[:200]}[/]")
+        if not a.get("questions"):          # only its own problem: carry on to it below, or drop the job here
+            k = choose("This application:", ["Keep it", "Skip this job", "Quit"], default=1)
+            if k == 2:
+                return False
+            if k == 1:
+                try:
+                    e.post("/api/fixes/skip", {"job_id": a["id"]})
+                    console.print(f"  [green]Skipped[/] {a['company']} · {a['title']}. Nothing was sent.")
+                except RuntimeError as err:
+                    console.print(f"  [yellow]{err}[/]")
+            continue
         for q in a["questions"]:
             f = by.get(q)
             if not f:

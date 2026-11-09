@@ -156,8 +156,8 @@ def answer(fix_id: str, value: str) -> dict:
     elif fix_id.startswith("question:"):
         if not value:
             raise ValueError("Type an answer first.")
-        asked_by = next((len(f["jobs"]) for f in compute()["fixes"] if f["id"] == fix_id), 0)
-        _answer_question(fix_id, value, job_only=asked_by == 1)
+        asked_by = next((f["jobs"] for f in compute()["fixes"] if f["id"] == fix_id), [])
+        _answer_question(fix_id, value, only_job=asked_by[0] if len(asked_by) == 1 else "")
     elif fix_id == "resume_pdf":
         if profile.attachment_file() is None:
             raise ValueError("Upload your resume as a PDF first.")
@@ -180,9 +180,11 @@ def skip_job(job_id: str) -> dict:
     return compute()
 
 
-def _answer_question(fix_id: str, value: str, job_only: bool = False) -> int:
-    """Your answer, on every held form that asks this question in the same words (with the same choices). job_only:
-    only one application asks it, so the answer is marked as that job's and never offered to another."""
+def _answer_question(fix_id: str, value: str, only_job: str = "") -> int:
+    """Your answer, on every held form that asks this question in the same words (with the same choices). only_job:
+    one application asks it, so the answer goes on that application alone, marked as its own, and is never put on
+    or offered to another (not even one that failed or was stopped and asks the same thing)."""
+    job_only = bool(only_job)
     n = 0
     rows = [db.decode(d) for d in db.q("""SELECT d.* FROM drafts d JOIN jobs j ON j.id=d.job_id
                                          WHERE j.status IN ('filled','error') AND d.final_answer IS NULL
@@ -191,7 +193,7 @@ def _answer_question(fix_id: str, value: str, job_only: bool = False) -> int:
     for d in rows:
         twins.setdefault((d["job_id"], _twin(d["field"])), []).append(d)
     for d in rows:
-        if question_id(d["label"], d["options"] or []) != fix_id:
+        if question_id(d["label"], d["options"] or []) != fix_id or (only_job and d["job_id"] != only_job):
             continue
         ans = classify.pick_option(value, d["options"]) if d["options"] and value not in d["options"] else value
         if not ans:
