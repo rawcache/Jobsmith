@@ -259,7 +259,7 @@ def _asked_elsewhere(label: str, job: dict) -> str:
         elif "," in named:      # "Lehi, UT", "Cambridge, UK": what follows the comma says where
             ok = match._in_us(named)
         else:                   # anywhere in the US, a bare city: one of the posting's own US cities, or a US city
-            ok = city in theirs or match._in_us(named) or \
+            ok = city in theirs or (match._in_us(named) and named not in ALSO_COUNTRIES) or \
                 (city in us_cities and bool(locs) and all(match._in_us(l) for l in locs))       # "Utah", "the US"
         if not ok:
             return named
