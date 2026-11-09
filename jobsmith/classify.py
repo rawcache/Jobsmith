@@ -15,7 +15,7 @@ RULES: list[tuple[str, str]] = [
     (r"preferred (first )?name|nickname", "preferred_name"),
     (r"^first name|^legal first name|given name", "first_name"),
     (r"^last name|^legal last name|surname|family name", "last_name"),
-    (r"^full name|^name$|^your name|(^|\byour )(full )?legal (full )?name\b(?! of)", "full_name"),
+    (r"^full name|^name$|^your name|(^|\byour |\b(enter|provide|state) )(full )?legal (full )?name\b(?! of)", "full_name"),
     (r"(school|university|college|\.edu|student) e-?mail", "school_email"),
     (r"e-?mail", "email"),
     # before "phone": an extension box takes digits only, and a dialling code isn't your number
@@ -41,10 +41,10 @@ RULES: list[tuple[str, str]] = [
     (r"sponsor|visa|employer support to (obtain|maintain|get)", "needs_sponsorship"),
     (r"authori[sz](ed|ation) to work|work authori[sz]ation|eligible to work|legally (able|permitted|authori)|right to work", "work_authorized_us"),
     (r"u\.?s\.? citizen|citizenship", "us_citizen"),
-    (r"(confirm|acknowledge)( receipt)?.*(notice|polic|agreement|statement|terms)|privacy (notice|acknowledg\w*)|^(applicant |candidate )?(privacy|personal information) (policy|notice)$|\bccpa\b|\bgdpr\b|"
+    (r"(confirm|acknowledge)( receipt)?.*(notice|polic|agreement|statement|terms)|privacy (notice|acknowledg\w*)|^(applicant |candidate )?(privacy|personal information) (policy|notice)\b(?!.*\b(link|url)\b)|\bccpa\b|\bgdpr\b|"
      r"arbitration agreement|i (have read|acknowledge|agree|consent|certify)|acknowledge,? (confirm|and)|"
      r"(agree|consent) to the (following|above)|by (checking|selecting|submitting)", "acknowledge_notices"),
-    (r"ai[- ]assisted|(consent|agree|okay|ok|comfortable)\b.{0,40}\b(use of ai|ai[- ](tools?|assistants?|note|transcri|record))|ai (note[- ]?tak|transcri)|"
+    (r"ai[- ]assisted|(consent|agree|okay|ok|comfortable)\b.{0,40}\b(use of ai|ai (being )?used|ai[- ](tools?|assistants?|note|transcri|record))|ai (note[- ]?tak|transcri)|"
      r"(record|transcri)\w* (of )?(the |your )?interview|may use ai", "ai_tools_consent"),
     (r"security clearance|clearance level|active clearance|hold a clearance", "security_clearance"),
     (r"(list|any|relevant|professional)\s+certifications?|certifications? (do you|you) (hold|have)|^certifications?$", "certifications"),
