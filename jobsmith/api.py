@@ -1215,6 +1215,9 @@ async def home():
     return {"applied_today": db.q1(sub_q, (day,))["n"], "applied_week": db.q1(sub_q, (week,))["n"],
             "applied_total": db.q1("SELECT COUNT(*) n FROM jobs WHERE status='submitted'")["n"],
             "in_progress": len(runner.active()), "review": review, "recent": recent, "sources": srcs,
+            # every held application, not only the 30 listed: the terminal's start-up line and Review heading agree
+            "held": {"ready": db.q1("SELECT COUNT(*) n FROM jobs WHERE active=1 AND status='filled'")["n"],
+                     "failed": db.q1("SELECT COUNT(*) n FROM jobs WHERE active=1 AND status='error'")["n"]},
             "queued": db.q1("""SELECT COUNT(*) n FROM jobs WHERE active=1 AND status IN ('new','fetched') AND verdict IS NULL
                                AND COALESCE(fit_score,0) >= ?""", (s.get("min_fit_score") or 40,))["n"],
             **guardrails.summary(),

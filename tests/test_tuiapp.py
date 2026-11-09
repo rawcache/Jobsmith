@@ -621,6 +621,9 @@ def test_every_log_line_names_the_company_and_the_role_and_repeats_collapse():
                              + [ev("submitted", "Globex", "Data Intern"), ev("drafting", "Initech", "Intern")])
     assert many == [f"[b]TikTok[/] · 3 roles [yellow]couldn't finish[/]: {same} · /review",
                     "[b]Globex[/] · Data Intern [green]submitted ✓[/]"]
+    from rich.text import Text
+    odd = words.event_lines([ev("error", "Acme [/b]", "Engineer [/remote]", "its [/form] broke")])
+    assert "Engineer [/remote]" in Text.from_markup(odd[0]).plain and "its [/form] broke" in Text.from_markup(odd[0]).plain
     mixed = words.event_lines([ev("error", "TikTok", "A", "the site didn't answer in time"), ev("error", "TikTok", "B", same)])
     assert mixed == ["[b]TikTok[/] · 2 roles [yellow]couldn't finish[/]: for different reasons · /review"]
 
@@ -668,4 +671,10 @@ def test_start_up_says_one_summary_line_and_the_log_agrees_with_the_list(engine)
             assert "1 ready for you, 2 couldn't finish" in head                                   # the same words
             rows = [str(app.screen.query_one("#jobs").get_row_at(i)) for i in range(app.screen.query_one("#jobs").row_count)]
             assert any("TikTok · ML Engineer Intern" in r and "didn't answer in time" in r for r in rows), rows
+            long = {"id": "x", "company": "Johns Hopkins Applied Physics Laboratory", "title": "Data Science Intern",
+                    "status": "filled", "why": "ready"}
+            app.screen.show_jobs([long], [], {"ready": 31, "failed": 4})
+            await pilot.pause(0.2)
+            assert "Data Science Intern" in str(app.screen.query_one("#jobs").get_row_at(0))      # the role is still there
+            assert "31 ready for you, 4 couldn't finish" in str(app.screen.query_one("#t").render())
     asyncio.run(go())

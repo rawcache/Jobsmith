@@ -63,14 +63,16 @@ def event_lines(events: list[dict]) -> list[str]:
     for e in events:
         if e.get("phase") in _VERB:
             groups.setdefault((e.get("company") or "An application", e["phase"]), []).append(e)
+    from rich.markup import escape          # a title like "Engineer [Remote]" is text, never markup
     out = []
     for (company, phase), es in groups.items():
-        reasons = list(dict.fromkeys(e.get("why") or "" for e in es))
+        company = escape(company)
+        reasons = list(dict.fromkeys(escape(e.get("why") or "") for e in es))
         tail = ""
         if phase == "error":
             tail = (f": {reasons[0]}" if len(reasons) == 1 and reasons[0] else ": for different reasons") + " · /review"
         if len(es) == 1:
-            role = f" · {es[0]['title']}" if es[0].get("title") else ""
+            role = f" · {escape(es[0]['title'])}" if es[0].get("title") else ""
             out.append(f"[b]{company}[/]{role} {_VERB[phase]}{tail}")
         else:
             out.append(f"[b]{company}[/] · {len(es)} roles {_MANY[phase]}{tail}")
