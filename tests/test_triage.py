@@ -459,3 +459,22 @@ async def test_one_choice_fields_take_one_rule_2_answer(monkeypatch):
     db.x("UPDATE drafts SET final_answer='Two or more; please specify' WHERE job_id=?", (jid,))   # exact, whole
     got, _ = await _sweep_once(monkeypatch, jid, dict(race, field="#question_10"))
     assert got == [("#question_10", "Two or more; please specify")]
+
+
+# Misreads from triage: each label is a real form's question.
+@pytest.mark.parametrize("label,want", [
+    ("Are you currently enrolled in an Undergraduate program?", None),
+    ("Are you returning to an undergraduate or graduate program after this internship?", None),
+    ("Are you on track to graduate by June 2027?", "graduation_date"),
+    ("Expected graduation date", "graduation_date"),
+    ("Please share how you use AI tools today", None),
+    ("Do you consent to the use of AI tools to transcribe your interview?", "ai_tools_consent"),
+    ("What is your Legal Name?", "full_name"),
+    ("Please state your full legal name:", "full_name"),
+    ("Legal first name", "first_name"),
+    ("Applicant Privacy Acknowledgement", "acknowledge_notices"),
+    ("Personal Information Policy", "acknowledge_notices"),
+])
+def test_triage_misreads(label, want):
+    assert classify.canon_for(label) == want, label
+
