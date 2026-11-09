@@ -78,7 +78,7 @@ async def test_a_new_person_gets_from_a_resume_to_their_first_application(engine
     from playwright.async_api import async_playwright, expect
     port, data = engine
     state = _get(port, "/api/onboarding")
-    assert not state["resume"]["pdf"] and not _get(port, "/api/status").get("onboarded")     # a clean start
+    assert not state["resume"]["pdf"] and _get(port, "/api/status")["auto"]["on"] is False   # a clean start
     async with async_playwright() as pw:
         exe = os.environ.get("JOBSMITH_CHROMIUM_PATH")
         browser = await pw.chromium.launch(headless=True, args=browser_args(), **({"executable_path": exe} if exe else {}))
@@ -141,7 +141,7 @@ async def test_a_new_person_gets_from_a_resume_to_their_first_application(engine
 
         # 7. the supervised first application; nothing was drafted and autopilot was off until here
         await expect(heading).to_have_text(STEPS[6])
-        assert not _get(port, "/api/status").get("auto_run")
+        assert _get(port, "/api/status")["auto"]["on"] is False
         await _shot(page, "7-start")
         await go.click()
         await page.wait_for_function("!location.hash.startsWith('#/setup')", timeout=30000)
@@ -151,3 +151,5 @@ async def test_a_new_person_gets_from_a_resume_to_their_first_application(engine
     assert not errors, errors
     done = _get(port, "/api/onboarding")
     assert done["resume"]["pdf"] and all(done["step_done"].get(k) for k in ("resume", "confirm", "questions", "prefs"))
+    # setup is over: autopilot is on for the supervised first run (the practice copy opens no real site)
+    assert _get(port, "/api/status")["auto"]["on"] is True

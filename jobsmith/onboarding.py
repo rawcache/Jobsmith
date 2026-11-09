@@ -212,6 +212,7 @@ def set_presets(keys: list[str]) -> list[dict]:
     for k, v in PRESETS.items():
         if k in keys:
             sources.add_source(v["url"])
+            db.x("UPDATE sources SET active=1 WHERE url=?", (v["url"],))     # one you turned off before
         else:
             db.x("UPDATE sources SET active=0 WHERE url=?", (v["url"],))
     return presets_state()
@@ -236,6 +237,17 @@ def preview(levels, seasons, categories, locations, picky) -> dict:
                    "No matches yet. Pick more places or role types." if n == 0 else
                    "That's a lot to check. Pick fewer places or role types, or a higher fit bar." if n > 300 else "")
     return r
+
+
+def read_lists_early(levels: list[str]) -> bool:
+    """A fresh install has no listings to count yet: turn on the lists for these levels now so setup's live count
+    has something to count (step 5 still decides which stay on). True when it added one."""
+    if db.q1("SELECT 1 FROM jobs LIMIT 1") or db.q1("SELECT 1 FROM sources WHERE active=1 LIMIT 1"):
+        return False
+    wanted = [v["url"] for v in PRESETS.values() if v["level"] in (levels or ["internship"])]
+    for url in wanted:
+        sources.add_source(url)
+    return bool(wanted)
 
 
 def save_prefs(levels, seasons, categories, locations, picky) -> dict:

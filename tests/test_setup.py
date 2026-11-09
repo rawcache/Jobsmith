@@ -31,7 +31,8 @@ def test_level_comes_from_the_lists_season_or_the_title():
     assert match.level_of({"terms": [], "title": "Software Engineering Intern"}) == "internship"
     assert match.level_of({"terms": ["N/A"], "title": "Software Engineer, Early Career"}) == "newgrad"
     assert match.level_of({"terms": [], "title": "Software Engineer"}) == ""
-    assert match.level_of({"terms": [], "title": "International Sales Lead"}) == ""   # "intern" inside a word
+    assert match.level_of({"terms": [], "title": "International Sales Associate"}) == ""   # "intern" inside a word
+    assert match.level_of({"terms": [], "title": "International Sales Lead"}) == "senior"
 
 
 def test_a_role_outside_your_level_role_type_place_or_age_isnt_a_match_at_any_fit():
@@ -270,3 +271,57 @@ def test_saving_choices_and_lists_starts_a_sync_without_failing(monkeypatch):
     assert c.post("/api/onboarding/looking", json={"levels": ["internship"], "categories": ["Software"]}).status_code == 200
     r = c.post("/api/onboarding/sources", json={"presets": ["simplify_internships"]})
     assert r.status_code == 200 and r.json()["step_done"]["sources"]
+
+
+# Review of the setup flow (2026-11-09)
+def test_a_place_the_question_names_decides_not_the_postings_place():
+    from jobsmith import draft
+    db.set_settings({"target_locations": onboarding.LOCATIONS["New York"]})
+    ans = _answers(willing_to_relocate="Only in my chosen locations")
+    ny = {"company": "Acme", "locations": ["New York, NY"]}
+    for label in ("Are you willing to work on-site in London?", "Are you willing to relocate to Austin, TX?",
+                  "Are you able to work in person from our Golden, Colorado office?"):
+        got = draft.deterministic(_field(label), ans, ny)
+        assert got["answer"] == "" and "isn't one of your places" in got["issues"][0], label
+    for label in ("Are you able to work in person from our New York office?",
+                  "Are you willing to work on-site in Summer 2027?", "Are you willing to work on-site at Acme?"):
+        assert draft.deterministic(_field(label), ans, ny)["answer"] == "Yes", label
+
+
+def test_an_application_held_for_an_answer_keeps_day_one_to_one():
+    _job("a", url="https://job-boards.greenhouse.io/acme/jobs/1")
+    _job("b", url="https://job-boards.greenhouse.io/globex/jobs/2")
+    db.x("UPDATE jobs SET status='filled', hold_reason='Pay expectation: add it' WHERE id='a'")
+    assert guardrails.first_run_room([_row("b")], [], 5) == []          # no first approval asked for, still one
+    db.x("UPDATE jobs SET status='skipped' WHERE id='a'")               # you skipped it: the next may start
+    assert guardrails.first_run_room([_row("b")], [], 5) == ["b"]
+
+
+def test_a_preset_turned_off_can_be_turned_on_again():
+    key = "simplify_internships"
+    for want in ([key], [], [key]):
+        state = {p["key"]: p for p in onboarding.set_presets(want)}
+        assert bool(state[key]["on"]) == bool(want), want
+
+
+def test_the_live_count_leaves_out_what_matching_rejects_and_senior_roles(monkeypatch):
+    from jobsmith import eligibility
+    _job("ok", title="Software Engineer, New Grad", terms=("New Grad",))
+    _job("clearance", title="Software Engineer, University Graduate", terms=("New Grad",))
+    _job("senior", title="Senior Software Engineer", terms=())
+    assert match.level_of({"title": "Senior Software Engineer", "terms": []}) == "senior"
+    assert match.level_of({"title": "Senior Software Engineer Intern", "terms": []}) == "internship"
+    monkeypatch.setattr(eligibility, "check", lambda j, ans=None: {"ok": j["id"] != "clearance", "reasons": ["clearance"]})
+    patch = onboarding.prefs_patch(["newgrad"], None, ["Software"], [], "good")
+    assert match.preview(patch)["matches"] == 1
+    db.set_settings(patch)
+    match.rescore()
+    bar = float(patch["min_fit_score"])
+    assert [r["id"] for r in db.q("SELECT id FROM jobs WHERE fit_score >= ? ORDER BY id", (bar,))] == ["ok"]
+
+
+def test_a_fresh_install_reads_its_lists_for_the_live_count():
+    assert onboarding.read_lists_early(["internship"])
+    on = [p["key"] for p in onboarding.presets_state() if p["on"]]
+    assert on == ["simplify_internships"]
+    assert not onboarding.read_lists_early(["internship"])              # once: step 5 decides from here

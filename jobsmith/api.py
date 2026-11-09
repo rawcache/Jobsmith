@@ -372,9 +372,15 @@ class LookIn(BaseModel):
 
 
 @app.post("/api/onboarding/preview")
-def onboarding_preview(b: LookIn):
-    """Step 4's live count: how many matches these choices give, nothing saved."""
-    return onboarding.preview(b.levels, b.seasons, b.categories, b.locations, b.picky)
+async def onboarding_preview(b: LookIn):
+    """Step 4's live count: how many matches these choices give, nothing saved. On a fresh install the job lists
+    for the chosen level are read now, so there is something to count; `syncing` says they're on their way."""
+    out = onboarding.preview(b.levels, b.seasons, b.categories, b.locations, b.picky)
+    if not out["open"]:
+        if onboarding.read_lists_early(b.levels):
+            spawn_sync()
+        out["syncing"] = bool(_sync_task and not _sync_task.done())
+    return out
 
 
 @app.post("/api/onboarding/looking")

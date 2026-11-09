@@ -114,6 +114,8 @@ async def test_autopilot_leaves_capped_jobs_for_later_but_your_pick_still_fills(
 
 
 def test_scheduler_counts_a_submission_in_flight_once_and_ignores_held_ones(monkeypatch):
+    from conftest import trust
+    trust("greenhouse")                          # past day one, where a held application keeps the next from starting
     db.set_settings({"max_applications_per_company": 2, "max_applications_per_day": 0})
     sending, held, nxt = _job("Acme", 1), _job("Acme", 2), _job("Acme", 3)
     db.x("UPDATE jobs SET status='filling' WHERE id=?", (sending,))

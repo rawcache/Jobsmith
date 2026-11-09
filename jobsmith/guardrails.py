@@ -404,6 +404,13 @@ def sites_waiting() -> set[str]:
                                         AND j.status NOT IN ('submitted','skipped')""")}
 
 
+def held_for_you() -> int:
+    """Applications filled and waiting on you, for any reason (an answer, a field, your approval). Before your first
+    approval even one keeps autopilot from starting another: answer it or skip it first."""
+    return (db.q1("""SELECT COUNT(*) n FROM jobs WHERE active=1 AND status='filled' AND verdict IS NULL
+                     AND id NOT IN (SELECT job_id FROM runs WHERE kind='submit')""") or {"n": 0})["n"]
+
+
 def first_run_room(candidates: list[dict], working: list[dict], limit: int) -> list[str]:
     """Which of autopilot's picks it may start without piling up applications for you to approve. Before your first
     approval: one application in all (the supervised first run), and none while it's being filled or waits for you.
@@ -411,7 +418,7 @@ def first_run_room(candidates: list[dict], working: list[dict], limit: int) -> l
     working are job rows with id, url, referral_url and ats."""
     approved = approved_sites()
     waiting = sites_waiting() | {site_of(w) for w in working if site_of(w) not in approved}
-    if not approved and (waiting or working):
+    if not approved and (waiting or working or held_for_you()):
         return []
     out: list[str] = []
     for c in candidates:

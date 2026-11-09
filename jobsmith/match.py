@@ -82,8 +82,12 @@ NEWGRAD_TITLE = re.compile(r"new ?grad|university grad|recent grad|college grad|
 LEVELS = ("internship", "newgrad")
 
 
+SENIOR_TITLE = re.compile(r"\b(senior|sr\.?|staff|principal|lead|manager|director|head of|vp|architect|"
+                          r"(engineer|developer|scientist|analyst) (ii|iii|iv|[2-5]))\b", re.I)
+
+
 def level_of(job: dict) -> str:
-    """'internship', 'newgrad', or '' when neither the list's season nor the title says."""
+    """'internship', 'newgrad', 'senior' (a title that says so), or '' when neither the list nor the title says."""
     terms = [t for t in job.get("terms") or [] if t and t != "N/A"]
     if "New Grad" in terms:
         return "newgrad"
@@ -94,6 +98,8 @@ def level_of(job: dict) -> str:
         return "internship"
     if NEWGRAD_TITLE.search(title):
         return "newgrad"
+    if SENIOR_TITLE.search(title):
+        return "senior"
     return ""
 
 
@@ -118,7 +124,8 @@ def scope(job: dict, s: dict) -> list[str]:
     lvl = level_of(job)
     if levels and not named:
         if lvl and lvl not in levels:
-            out.append("not your level (" + ("an internship" if lvl == "internship" else "a new grad role") + ")")
+            out.append("not your level (" + {"internship": "an internship", "newgrad": "a new grad role"}.get(
+                lvl, "a senior role") + ")")
         elif not lvl and levels == ["internship"]:
             out.append("not an internship")
         elif lvl == "internship":
@@ -281,7 +288,7 @@ def preview(patch: dict) -> dict:
     """How many matches these choices would give, without saving them: setup's live "N matches". Counts open roles
     not yet applied to, skipped or left out, at or above the fit bar."""
     s = _scoring_settings(patch)
-    vocab, bias = profile_vocab(), _learned_company_bias()
+    vocab, bias, ans = profile_vocab(), _learned_company_bias(), profile.answers()
     bar = float(s.get("min_fit_score") or 40)
     rows = db.q("""SELECT * FROM jobs WHERE active=1 AND status NOT IN ('submitted','skipped','left_out')
                    AND verdict IS NULL""")
@@ -293,7 +300,12 @@ def preview(patch: dict) -> dict:
             key = ("level" if w.startswith("not your level") or w.startswith("not an intern") or w.startswith("not your season")
                    else "role" if w.startswith("not a role") else "age" if w.startswith("posted") else "place")
             outside[key] += 1
-        if not why and score_job(j, s, vocab, bias)[0] >= bar:
+        if why:
+            continue
+        sc = score_job(j, s, vocab, bias)[0]
+        if not eligibility.check(j, ans)["ok"]:          # the same deduction rescore makes: the counts agree
+            sc = max(0.0, sc - 40)
+        if sc >= bar:
             n += 1
     return {"matches": n, "open": len(rows), "outside": outside, "bar": bar}
 

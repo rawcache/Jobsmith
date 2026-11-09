@@ -88,14 +88,17 @@ export default function Onboarding({ onDone, start: startAt }: { onDone: () => v
   // The resume step updates as files are read (and as the terminal changes things).
   useEffect(() => { if (step !== 0) return; const t = poll(load, 2000); return () => t.stop(); }, [step]);
   // The live count: asked again shortly after each change, nothing saved.
-  const asked = useRef(0);
+  const asked = useRef(0), again = useRef(0);
+  const [tick, setTick] = useState(0);
   useEffect(() => {
     if (step !== 3) return;
     const n = ++asked.current;
     const t = setTimeout(() => api.post<Preview>("/api/onboarding/preview", { levels, seasons, categories: cats, locations: places, picky })
-      .then(p => { if (n === asked.current) setPreview(p); }), 150);
-    return () => clearTimeout(t);
-  }, [step, levels.join(), seasons.join(), cats.join(), places.join(), picky]);
+      .then(p => { if (n !== asked.current) return; setPreview(p);
+        // a fresh install: the lists are being read now, so ask again until listings arrive
+        if (p.open === 0) again.current = window.setTimeout(() => setTick(x => x + 1), 2500); }), 150);
+    return () => { clearTimeout(t); clearTimeout(again.current); };
+  }, [step, levels.join(), seasons.join(), cats.join(), places.join(), picky, tick]);
   useEffect(() => {
     if (!st || step !== 4) return;
     const on = st.presets.filter(p => levels.includes(p.level)).map(p => p.key);
