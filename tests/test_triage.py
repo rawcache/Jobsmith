@@ -507,8 +507,10 @@ def test_asian_indian_is_asian_never_american_indian():
            "Subcontinent, including, for example, China, India, Japan and Korea.",
            "American Indian or Alaska Native (Not Hispanic or Latino) A person having origins in any of the original "
            "peoples of North and South America."]
-    assert classify.pick_option("Asian (Indian)", eeo) == eeo[2]
-    assert classify.pick_option("Asian (Indian)", ["White\xa0", "Asian\xa0", "Black\xa0"]) == "Asian\xa0"
+    assert classify.strict_pick("Asian (Indian)", eeo) is None            # "Not Hispanic" isn't confirmed
+    assert classify.strict_pick("Asian (Indian)", eeo, not_hispanic=True) == eeo[2]
+    assert classify.strict_pick("Asian (Indian)", ["White\xa0", "Asian\xa0", "Black\xa0"]) == "Asian\xa0"
+    assert classify.strict_pick("Asian (Indian)", ["American Indian or Alaska Native", "White"]) is None
     assert classify.pick_option("Asian (Indian)", ["American Indian or Alaska Native", "White"]) is None
 
 
@@ -543,6 +545,16 @@ def test_a_confirmed_citizen_gets_the_citizen_choice_on_an_export_control_list(o
     assert draft.offline(f, profile.answers(), JOB)["answer"] == ""
 
 
+@pytest.mark.parametrize("options", [["Non-U.S. citizen", "Permanent resident", "Other"],
+                                     ["U.S. citizen and hold an active security clearance", "Other"],
+                                     ["U.S. citizen", "United States citizen or national"]])
+def test_a_citizen_choice_that_says_something_else_waits(options):
+    profile.set_answer("us_citizen", "Yes", confirmed=True)
+    f = field("This position is subject to US export controls. Are you any of the following?", options=options)
+    got = draft.offline(f, profile.answers(), JOB)
+    assert got["answer"] == "" and got["issues"]
+
+
 def test_the_country_specified_for_a_us_job_is_the_us():
     profile.set_answer("work_authorized_us", "Yes", confirmed=True)
     f = field("Are you legally authorized to work in the Country specified for this position?", options=["Yes", "No"])
@@ -565,8 +577,18 @@ GENDER = ["Woman", "Man", "Non-binary", "Decline to self-identify"]
     ("gender", "Male", "What is your gender identity?", ["Cisgender woman", "Cisgender man", "Two-spirit"], ""),
     ("gender", "Male", "Which gender were you assigned at birth?", GENDER, ""),          # another question
     ("gender", "Decline to self-identify", "Gender", GENDER, "Decline to self-identify"),
-    ("race", "Asian (Indian)", "Race", ["White", "Asian (Not Hispanic or Latino)", "American Indian or Alaska Native"],
-     "Asian (Not Hispanic or Latino)"),
+    ("race", "Asian (Indian)", "Race", ["White", "Asian", "American Indian or Alaska Native"], "Asian"),
+    ("race", "Asian (Indian)", "Race", ["White", "Asian (Not Hispanic or Latino)"], ""),   # not confirmed non-Hispanic
+    ("race", "Asian (Indian)", "Race", ["White", "Asian (East Asian)"], ""),               # another ancestry
+    ("race", "White", "Race", ["White (Hispanic or Latino)", "Asian"], ""),
+    ("security_clearance", "Secret", "Security clearance level", ["Secret / SCI", "None"], ""),
+    ("disability_status", "Yes", "Disability Status",
+     ["Previously had a disability", "No disability", "Decline to self-identify"], ""),
+    ("disability_status", "No", "Disability Status",
+     ["Yes, I have a disability", "No, I do not have a disability", "I do not want to answer"],
+     "No, I do not have a disability"),
+    ("disability_status", "No", "Disability Status",
+     ["Yes", "No, I do not have a disability and have not had one in the past"], ""),      # says more than your No
     ("race", "Asian (Indian)", "How would you describe your racial/ethnic background?",
      ["East Asian", "South Asian", "White"], ""),                                         # which one is yours to say
     ("race", "Asian (Indian)", "Race", ["American Indian or Alaska Native", "White"], ""),
