@@ -647,3 +647,5 @@ def test_a_company_name_with_dots_is_read_whole():
     assert company == "Acme Robotics" and own
     company, _, _ = draft._asked_company({"company": "Rocket Lab"}, "Have you worked for X. If yes, when?")
     assert company == "X"
+    company, _, _ = draft._asked_company({"company": "Rocket Lab"}, "Have you ever worked for the u.s. Government?")
+    assert company == "the u.s. Government"
