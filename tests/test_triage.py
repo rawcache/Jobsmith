@@ -793,3 +793,9 @@ async def test_no_ai_is_spent_on_a_form_behind_your_sign_in(fake_llm, monkeypatc
     await runner.prepare(jid)
     job = db.q1("SELECT status, hold_reason FROM jobs WHERE id=?", (jid,))
     assert "sign in" in job["hold_reason"] and ai.prompts == [] and draft.drafts_for(jid) == []
+
+
+async def test_an_apply_online_link_opens_the_form_when_the_button_is_covered(page):
+    from jobsmith.fill import generic
+    fields = await generic.scan(page, _apply_page("link_opens_form.html"))
+    assert [f["label"] for f in fields] == ["First name", "Email", "Why this role?"]

@@ -1,0 +1,12 @@
+<!doctype html>
+<!-- Made up: a covered "Apply" button, and an "Apply online" link that shows the form. -->
+<html><head><meta charset="utf-8"><title>Research Intern - Example Careers</title>
+<style>#top{position:relative}.cover{position:absolute;inset:0;z-index:5}</style></head>
+<body>
+<div id="top"><button type="button">Apply</button><div class="cover"></div></div>
+<main><h1>Research Intern</h1>
+<a href="#form" onclick="document.querySelector('main').append(document.querySelector('template').content)">Apply online</a>
+<template><form id="form"><label for="fn">First name</label><input id="fn" name="first_name" required>
+<label for="em">Email</label><input id="em" name="email" type="email" required>
+<label for="why">Why this role?</label><textarea id="why" name="why"></textarea></form></template></main>
+</body></html>
