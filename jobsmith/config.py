@@ -80,6 +80,7 @@ DEFAULT_SETTINGS: dict = {
     "goal": "",
     "goals": [],                       # internship | newgrad | targeted (several allowed)
     "target_companies": [],            # for "targeted": companies you named
+    "ai_step_seen": False,             # setup's AI step was passed (connected or skipped)
     "setup_step": "",                  # where first-run setup is (the terminal hands "profile" to the website)
     "claude_path": "claude",
     "claude_oauth_token": "",          # set by "Connect Claude" in the dashboard
@@ -94,6 +95,7 @@ DEFAULT_SETTINGS: dict = {
     "exclude_companies": [],
     "min_pay": 0,                      # lowest yearly pay in USD you'd take; job boards' roles under it are left out
     "min_fit_score": 40,
+    "max_posting_age_days": 60,       # older postings are left out of matches (most are filled by then); 0 = any age
     # --- Limits -----------------------------------------------------------
     "max_applications_per_day": 20,     # autopilot's caps (see guardrails.py); 0 = no limit
     "max_applications_per_company": 3,  # to one company in 7 days

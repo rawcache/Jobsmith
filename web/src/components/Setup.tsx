@@ -3,7 +3,7 @@ import { StatusCtx } from "../main";
 import { Icon } from "../ui";
 import ConnectClaude from "./ConnectClaude";
 
-const LINK: Record<string, string> = { claude: "#/settings", resume: "#/profile", pdf: "#/profile", answers: "#/profile", jobs: "#/settings" };
+const LINK: Record<string, string> = { setup: "#/setup", claude: "#/settings", resume: "#/profile", pdf: "#/profile", answers: "#/profile", jobs: "#/settings" };
 
 export default function Setup() {
   const { status } = useContext(StatusCtx);

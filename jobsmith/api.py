@@ -209,6 +209,8 @@ async def status():
     rs = profile.resume_status()
     synced = bool(db.q1("SELECT 1 FROM sources WHERE last_synced IS NOT NULL"))
     setup = [
+        {"key": "setup", "label": "Finish setup", "done": onboarding.setup_done(s_),
+         "detail": "Autopilot stays off and nothing is drafted until you do"},
         {"key": "claude", "label": "Connect your AI (Claude or ChatGPT)", "done": ok, "detail": msg},
         {"key": "resume", "label": "Add your resume", "done": bool(rs["resume"]),
          "detail": rs["resume"]["filename"] if rs["resume"] else "A .tex is read exactly; a PDF works too"},
@@ -233,7 +235,8 @@ async def status():
             "facts": len(profile.facts()), "autonomy": db.get_setting("autonomy"),
             "auto": {"on": bool(db.get_setting("auto_run")), "next_run": scheduler.state["next_run"],
                      "last_summary": scheduler.state["last_summary"]},
-            "needs_you": db.q1("SELECT COUNT(*) n FROM jobs WHERE status IN ('filled','error')")["n"],
+            # a posting taken down since can't be sent: it isn't waiting on you
+            "needs_you": db.q1("SELECT COUNT(*) n FROM jobs WHERE active=1 AND status IN ('filled','error')")["n"],
             "tokens_today": _usage_rows("at > ?", (db.now() - 86400,))["tokens"],
             "ai_today": llm.ai_today(),
             "onboarded": bool(s_.get("onboarded")) or bool(db.q1("SELECT 1 FROM runs WHERE kind='submit' LIMIT 1")),
@@ -319,7 +322,11 @@ class AiIn(BaseModel):
 
 @app.post("/api/onboarding/ai")
 async def onboarding_ai(a: AiIn):
+    if a.kind == "skip":                      # setup's AI step, passed without one: answers from your profile still go in
+        db.set_settings({"ai_step_seen": True})
+        return {"ok": True, "message": "No AI for now", "using": ""}
     onboarding.set_ai(a.kind, a.key, a.model)
+    db.set_settings({"ai_step_seen": True})
     ok, msg = await llm.available_cached(ttl=0)
     return {"ok": ok, "message": msg, "using": llm.label(llm.backend("write"))}
 
@@ -333,6 +340,65 @@ class FinishIn(BaseModel):
 @app.post("/api/onboarding/finish")
 def onboarding_finish(f: FinishIn):
     onboarding.finish(f.autonomy, f.start_now, f.final)
+    return {"ok": True}
+
+
+class ValuesIn(BaseModel):
+    values: dict[str, str] = {}
+
+
+@app.post("/api/onboarding/confirm")
+def onboarding_confirm(v: ValuesIn):
+    """Step 2: the values read from your resume, checked (and corrected) by you."""
+    onboarding.confirm_values(v.values)
+    clear_confirm_issues()
+    return {"read_back": onboarding.read_back(), "step_done": onboarding.step_done()}
+
+
+@app.post("/api/onboarding/questions")
+def onboarding_questions(v: ValuesIn):
+    """Step 3: the one list of questions forms ask once."""
+    missing = onboarding.save_questions(v.values)
+    clear_confirm_issues()
+    return {"missing": missing, "questions": onboarding.questions(), "step_done": onboarding.step_done()}
+
+
+class LookIn(BaseModel):
+    levels: list[str] = []
+    seasons: list[str] | None = None
+    categories: list[str] = []
+    locations: list[str] = []
+    picky: str = "good"
+
+
+@app.post("/api/onboarding/preview")
+def onboarding_preview(b: LookIn):
+    """Step 4's live count: how many matches these choices give, nothing saved."""
+    return onboarding.preview(b.levels, b.seasons, b.categories, b.locations, b.picky)
+
+
+@app.post("/api/onboarding/looking")
+async def onboarding_looking(b: LookIn):
+    patch = onboarding.save_prefs(b.levels, b.seasons, b.categories, b.locations, b.picky)
+    spawn_sync()
+    return {"patch": patch, "presets": onboarding.presets_state()}
+
+
+class PresetsIn(BaseModel):
+    presets: list[str] = []
+
+
+@app.post("/api/onboarding/sources")
+async def onboarding_sources(b: PresetsIn):
+    """Step 5: which preset job lists to read."""
+    out = onboarding.set_presets(b.presets)
+    spawn_sync()
+    return {"presets": out, "step_done": onboarding.step_done()}
+
+
+@app.post("/api/onboarding/skip")
+def onboarding_skip():
+    onboarding.skip()
     return {"ok": True}
 
 
@@ -352,7 +418,7 @@ async def onboarding_start():
     import asyncio
     global _start_task
     s_ = db.get_settings()
-    if not s_.get("onboarded"):
+    if not onboarding.setup_done(s_):
         onboarding.finish(s_.get("autonomy") or "autopilot", start_now=True)
     companies = s_.get("target_companies") or []
 
@@ -375,7 +441,7 @@ async def onboarding_start():
 async def onboarding_first_run():
     r = onboarding.first_run()
     if r.get("ok"):
-        if not db.get_setting("onboarded"):
+        if not onboarding.setup_done():
             onboarding.finish(db.get_setting("autonomy") or "autopilot")
         db.set_settings({"setup_step": "first"})
     return r
@@ -745,7 +811,7 @@ async def add_source(s: SourceIn):
     src = sources.add_source(s.url)
     res = await sources.sync_source(src)
     match.rescore()
-    if runner.applies_on_own() and db.get_setting("onboarded"):   # a new list on autopilot: start on its best matches
+    if runner.applies_on_own() and scheduler.enabled(db.get_settings()):   # a new list on autopilot: its best matches
         room = min(int(db.get_setting("auto_max_per_run") or 10), commands._remaining_today())
         res["started"] = commands.queue(scheduler.pick_new_jobs(room))
     return res
@@ -1119,7 +1185,7 @@ async def home():
     day = db.now() - 86400
     sub_q = "SELECT COUNT(*) n FROM runs WHERE kind='submit' AND status='done' AND finished_at>?"
     review = [db.decode(r) for r in db.q("""SELECT id, company, title, ats, status, hold_reason, error, fit_score, updated_at
-                                             FROM jobs WHERE status IN ('filled','error') ORDER BY updated_at DESC LIMIT 30""")]
+                                             FROM jobs WHERE active=1 AND status IN ('filled','error') ORDER BY updated_at DESC LIMIT 30""")]
     waiting = {a["job_id"] for a in guardrails.awaiting_approval()}
     for r in review:
         r["approve"] = r["id"] in waiting          # autopilot's first submission (on its site): yours to approve

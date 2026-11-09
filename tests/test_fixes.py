@@ -595,10 +595,12 @@ async def test_a_held_application_stopped_by_you_or_held_on_the_form_isnt_sent_b
 
 
 async def test_out_of_ai_autopilot_still_sends_what_needs_none_and_says_so_once(fake_llm, tmp_path, monkeypatch):
+    from conftest import trust
     _alex()
     resume_pdf(tmp_path)
-    db.set_settings({"onboarded": True, "auto_run": True, "power_mode": "full", "notifications": False,
-                     "ai_daily_budget": 1, "autonomy": "autopilot"})
+    trust("greenhouse")
+    db.set_settings({"onboarded": True, "setup_step": "done", "auto_run": True, "power_mode": "full",
+                     "notifications": False, "ai_daily_budget": 1, "autonomy": "autopilot"})
     db.x("INSERT INTO usage(job_id, purpose, backend, model, at) VALUES(NULL, 'answers', 'fake', '', ?)", (db.now(),))
     fake_llm(lambda s, p: {"answers": []})
     needs_ai, plain = _job("Acme", FIRST, WHY_US), _job("Globex", FIRST, WORK_AUTH)

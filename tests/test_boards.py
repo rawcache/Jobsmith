@@ -140,6 +140,8 @@ async def test_syncing_a_board_keeps_what_doesnt_pass_apart_and_only_reads(kind)
 
 
 async def test_left_out_roles_never_reach_a_browser_and_a_raised_minimum_leaves_old_ones_out():
+    from conftest import trust
+    trust("greenhouse")
     db.set_settings({"goals": ["internship", "newgrad"], "min_pay": 0, "min_fit_score": 0})
     src = sources.add_source(SAVED["greenhouse"][0])
     async with _client([]) as client:
@@ -296,6 +298,8 @@ async def test_an_answer_that_isnt_a_board_doesnt_close_anything(kind, body):
 
 
 async def _left_out_board():
+    from conftest import trust
+    trust("greenhouse")
     db.set_settings({"goals": ["internship", "newgrad"], "min_pay": 0, "min_fit_score": 0,
                      "max_applications_per_company": 0})
     src = sources.add_source(SAVED["greenhouse"][0])

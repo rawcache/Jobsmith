@@ -45,12 +45,12 @@ def pick_new_jobs(limit: int) -> list[str]:
     from . import llm
     # Out of AI for today: drafted ones still waiting for it would take every slot and get nowhere, so they wait
     waiting_ai = "AND id NOT IN (SELECT job_id FROM drafts WHERE kind='pending')" if llm.out_of_ai() else ""
-    rows = db.q(f"""SELECT id, company, ats, fit_score FROM jobs WHERE active=1 AND status IN ('new','fetched','drafted')
+    rows = db.q(f"""SELECT id, company, ats, url, referral_url, fit_score FROM jobs WHERE active=1 AND status IN ('new','fetched','drafted')
                    AND verdict IS NULL AND COALESCE(fit_score,0) >= ? AND eligibility NOT LIKE '%"ok": false%'
                    AND id NOT IN (SELECT job_id FROM runs WHERE kind='submit') {waiting_ai}
                    ORDER BY status='drafted' DESC, fit_score DESC, date_posted DESC LIMIT 400""", (s.get("min_fit_score") or 40,))
     # Network hiccups ("too slow", "couldn't reach") get two more tries, an hour apart.
-    rows += db.q("""SELECT j.id, j.company, j.ats, j.fit_score FROM jobs j WHERE j.active=1 AND j.status='error'
+    rows += db.q("""SELECT j.id, j.company, j.ats, j.url, j.referral_url, j.fit_score FROM jobs j WHERE j.active=1 AND j.status='error'
                     AND j.updated_at < ? AND (j.error LIKE '%imeout%' OR j.error LIKE '%nodename%' OR j.error LIKE '%ERR_%'
                          OR j.error LIKE '%onnect%' OR j.error LIKE '%name or service%')
                     AND (SELECT COUNT(*) FROM runs r WHERE r.job_id=j.id AND r.status='error') < 3
@@ -84,13 +84,14 @@ def pick_new_jobs(limit: int) -> list[str]:
             continue
         if stated[co] is not None and stated[co] <= 0:
             continue
-        out.append(r["id"])
+        out.append(r)
         per_company[co] += 1
         if stated[co] is not None:
             stated[co] -= 1
-        if len(out) >= limit:
-            break
-    return out
+    # Day one: the supervised first run alone, then one waiting for your approval per new site, never a pile
+    in_flight = db.q(f"SELECT id, url, referral_url, ats FROM jobs WHERE id IN ({','.join('?' * len(working))})",
+                     working) if working else []
+    return guardrails.first_run_room(out, in_flight, limit)
 
 
 async def run_once(reason: str = "scheduled") -> dict:
@@ -133,8 +134,10 @@ async def run_once(reason: str = "scheduled") -> dict:
 
 
 def enabled(s: dict) -> bool:
-    """Runs on its own only when you turned it on and finished setting up (never on a fresh install)."""
-    return bool(s.get("auto_run") and s.get("onboarded"))
+    """Runs on its own only when you turned it on and finished setting up (never on a fresh install, and never
+    after skipping setup: nothing is drafted until it's done)."""
+    from . import onboarding
+    return bool(s.get("auto_run") and onboarding.setup_done(s))
 
 
 async def _loop() -> None:
