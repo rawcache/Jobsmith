@@ -245,7 +245,7 @@ async def test_lever_saved_palantir_form_is_filled_and_held_before_submit(fake_l
         assert await page.input_value(HIGH_SCHOOL) == "" and await page.input_value(HIGH_SCHOOL_YEAR) == ""
         assert await _checked(page, NOTETAKER) == []
         assert await page.eval_on_selector('[name="eeo[veteran]"]', "e => e.selectedOptions[0].text") == \
-            "Select ..."                                    # a pick from a list, not a plain Yes/No: Alex's (rule 2)
+            "I am not a protected veteran"                  # Alex's confirmed No, the one choice that says it (rule 2)
         assert await page.input_value("#disabilitySelectElement") == ""
         assert not await page.is_visible('[name="eeo[disabilitySignature]"]')
         assert await page.input_value('[name="eeo[disabilitySignature]"]') == ""

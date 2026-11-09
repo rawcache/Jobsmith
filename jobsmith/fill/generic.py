@@ -46,13 +46,11 @@ async def _press_apply(page: Page) -> None:
     something on the page swallows moves on to the next after a few seconds; when none works, or the site then asks
     for a sign-in, that's yours (NeedsYou) and says so, instead of a browser's timeout."""
     from .multistep import needs_sign_in
-    tried = False
-    exact = [page.get_by_role(role, name=APPLY_EXACT) for role in ("button", "link")]
-    for btn in exact + [page.locator(sel) for sel in APPLY_BUTTONS]:
-        btn = btn.first
-        if not (await btn.count() and await btn.is_visible()):
-            continue
-        tried = True
+    exact = [el for role in ("button", "link") for el in await page.get_by_role(role, name=APPLY_EXACT).all()]
+    loose = [el for sel in APPLY_BUTTONS for el in await page.locator(sel).all()]
+    # the menu is tried only when nothing says just "Apply": pressing it past a covered Apply button opens no form
+    shown = [el for el in (exact or loose) if await el.is_visible()]
+    for btn in shown:
         try:
             await btn.click(timeout=4000)
         except PlaywrightTimeout:
@@ -61,7 +59,7 @@ async def _press_apply(page: Page) -> None:
         if await needs_sign_in(page):
             raise NeedsYou("asks you to sign in before it shows its application form")
         return
-    if tried:
+    if shown:
         raise NeedsYou("has an Apply button Jobsmith couldn't press (something on the page covers it)")
 
 
