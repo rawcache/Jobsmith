@@ -15,7 +15,7 @@ RULES: list[tuple[str, str]] = [
     (r"preferred (first )?name|nickname", "preferred_name"),
     (r"^first name|^legal first name|given name", "first_name"),
     (r"^last name|^legal last name|surname|family name", "last_name"),
-    (r"^full name|^name$|^your name|^(full )?legal (full )?name$", "full_name"),
+    (r"^full name|^name$|^your name|\b(full )?legal (full )?name\b", "full_name"),
     (r"(school|university|college|\.edu|student) e-?mail", "school_email"),
     (r"e-?mail", "email"),
     # before "phone": an extension box takes digits only, and a dialling code isn't your number
@@ -41,11 +41,11 @@ RULES: list[tuple[str, str]] = [
     (r"sponsor|visa|employer support to (obtain|maintain|get)", "needs_sponsorship"),
     (r"authori[sz](ed|ation) to work|work authori[sz]ation|eligible to work|legally (able|permitted|authori)|right to work", "work_authorized_us"),
     (r"u\.?s\.? citizen|citizenship", "us_citizen"),
-    (r"(confirm|acknowledge)( receipt)?.*(notice|polic|agreement|statement|terms)|privacy notice|\bccpa\b|\bgdpr\b|"
+    (r"(confirm|acknowledge)( receipt)?.*(notice|polic|agreement|statement|terms)|privacy (notice|acknowledg\w*|policy)|personal information (policy|notice)|\bccpa\b|\bgdpr\b|"
      r"arbitration agreement|i (have read|acknowledge|agree|consent|certify)|acknowledge,? (confirm|and)|"
      r"(agree|consent) to the (following|above)|by (checking|selecting|submitting)", "acknowledge_notices"),
-    (r"ai[- ]assisted|ai (tools?|note[- ]?tak|transcri)|(record|transcri)\w* (of )?(the |your )?interview|"
-     r"may use ai", "ai_tools_consent"),
+    (r"ai[- ]assisted|(consent|agree|okay|ok|comfortable)\b.{0,40}\bai\b|ai (note[- ]?tak|transcri)|"
+     r"(record|transcri)\w* (of )?(the |your )?interview|may use ai", "ai_tools_consent"),
     (r"security clearance|clearance level|active clearance|hold a clearance", "security_clearance"),
     (r"(list|any|relevant|professional)\s+certifications?|certifications? (do you|you) (hold|have)|^certifications?$", "certifications"),
     (r"professional licen[cs]e|licen[cs]ed (engineer|professional)|\b(pe|eit|fe) licen[cs]e", "licenses"),
@@ -61,13 +61,13 @@ RULES: list[tuple[str, str]] = [
     (r"pronoun", "pronouns"),
     (r"\bgpa\b|grade point", "gpa"),
     (r"\bminor\b", "minor"),
-    (r"concentration|threads?\b|specialization|\btrack\b|focus area", "concentration"),
+    (r"concentration|threads?\b|specialization|\btrack\b(?! to)|focus area", "concentration"),
     (r"class standing|year in school|current (academic )?year|class level|academic (standing|level)", "class_standing"),
     (r"(start|begin|enroll)(ed|ment)? (date )?(of|at|in) (your )?(degree|program|school|university|education)|"
      r"enrollment (start|date)", "enrollment_start"),
     (r"high school|secondary school", "high_school"),            # before graduation: not your college's year
     (r"graduation (year)|year of graduation|grad(uation)? year|class of", "graduation_year"),
-    (r"graduat", "graduation_date"),
+    (r"(?<!under)graduat(?!e (program|school|degree|student|stud))", "graduation_date"),
     (r"^(school|university|college)( name)?\b|which (school|university)|what (school|university)|"
      r"currently (attend|enrolled)", "school"),
     (r"^degree\b|degree (type|level)|highest degree|degree (are you|you are) (currently )?(pursuing|working|obtaining)|"
@@ -169,6 +169,7 @@ def question_kind(label: str, qtype: str, options: list[str] | None = None) -> s
 # Where to reach you, named inside a yes/no question ("Are you comfortable with a take-home? You'll receive an
 # email from CodeSignal"): the question isn't asking for it.
 CONTACT = {"email", "school_email", "phone", "linkedin", "github", "devpost", "website", "other_links"}
+NOT_YES_NO = CONTACT | {"school"}           # your school's name doesn't answer a yes/no either
 ASKS_YES_NO = re.compile(r"^(are|do|does|did|have|has|will|would|can|could|is|may)\b")
 
 
@@ -176,7 +177,7 @@ def canon_for(label: str) -> str | None:
     l = (plain_fact(label) or " ".join((label or "").split())).lower().strip(" *?:")
     for pat, key in RULES:
         if re.search(pat, l):
-            return None if key in CONTACT and ASKS_YES_NO.match(l) else key
+            return None if key in NOT_YES_NO and ASKS_YES_NO.match(l) else key
     return None
 
 
