@@ -28,6 +28,11 @@ class QuotaError(LLMError):
     """A free tier's limit ran out. Jobsmith falls back to smith when it's installed."""
 
 
+class BusyError(LLMError):
+    """The AI is connected but didn't answer just now: overloaded, timed out or unreachable. Worth another try in
+    a few minutes; nothing for you to fix, so what it would have written waits for it."""
+
+
 class BudgetError(QuotaError):
     """Your daily AI budget (Settings) is used up. Like a free limit: smith may stand in, nothing else is called."""
 
@@ -201,7 +206,7 @@ class ClaudeCLI(Backend):
             out, err = await asyncio.wait_for(proc.communicate(prompt.encode()), timeout)
         except asyncio.TimeoutError:
             proc.kill()
-            raise LLMError("Claude Code timed out")
+            raise BusyError("Claude is busy just now (it timed out)")
         raw = out.decode(errors="replace")
         try:
             env = json.loads(raw)
@@ -260,7 +265,9 @@ class AnthropicAPI(Backend):
                 r = await c.post("https://api.anthropic.com/v1/messages", json=body, headers={
                     "x-api-key": self.key, "anthropic-version": "2023-06-01", "content-type": "application/json"})
         except httpx.HTTPError as e:
-            raise LLMError(f"Couldn't reach Anthropic's API: {e.__class__.__name__}") from e
+            raise BusyError(f"Anthropic is busy or unreachable just now ({e.__class__.__name__})") from e
+        if r.status_code >= 500:
+            raise BusyError(f"Anthropic is busy just now (its servers answered {r.status_code})")
         if r.status_code != 200:
             raise LLMError(f"Anthropic API {r.status_code}: {r.text[:200]}")
         u = r.json().get("usage") or {}
@@ -300,7 +307,9 @@ class OpenAIAPI(Backend):
                 r = await c.post("https://api.openai.com/v1/responses", json=body,
                                  headers={"Authorization": f"Bearer {self.key}"})
         except httpx.HTTPError as e:
-            raise LLMError(f"Couldn't reach OpenAI's API: {e.__class__.__name__}") from e
+            raise BusyError(f"OpenAI is busy or unreachable just now ({e.__class__.__name__})") from e
+        if r.status_code >= 500:
+            raise BusyError(f"OpenAI is busy just now (its servers answered {r.status_code})")
         if r.status_code != 200:
             raise LLMError(f"OpenAI API {r.status_code}: {r.text[:200]}")
         data = r.json()
@@ -365,7 +374,7 @@ class GeminiAPI(Backend):
                 async with httpx.AsyncClient(timeout=timeout) as c:
                     r = await c.post(url, json=body, headers={"x-goog-api-key": self.key})
             except httpx.HTTPError as e:
-                raise LLMError(f"Couldn't reach Gemini: {e.__class__.__name__}")
+                raise BusyError(f"Gemini is busy or unreachable just now ({e.__class__.__name__})")
             if r.status_code not in (429, 500, 503) or attempt == 3:
                 break
             if r.status_code == 429 and "PerDay" in r.text:
@@ -382,6 +391,8 @@ class GeminiAPI(Backend):
             raise QuotaError(_gemini_out_message())
         if r.status_code in (400, 403) and ("API_KEY_INVALID" in r.text or "API key not valid" in r.text):
             raise LLMError("That Gemini key isn't valid. Copy it again from aistudio.google.com/apikey.")
+        if r.status_code >= 500:
+            raise BusyError(f"Gemini is busy just now (its servers answered {r.status_code})")
         if r.status_code != 200:
             raise LLMError(f"Gemini API {r.status_code}: {r.text[:200]}")
         data = r.json()
@@ -692,6 +703,10 @@ _sem: asyncio.Semaphore | None = None
 _local_sem: asyncio.Semaphore | None = None
 
 
+BUSY_WAIT = 5 * 60                 # after a busy answer, autopilot starts no AI work for this long
+_busy_until: dict[str, tuple[float, str]] = {}     # backend -> (until when, what it said)
+
+
 async def _call(b: Backend, system: str, prompt: str, schema, web: bool):
     """One call, logged whatever happens. A call refused before it was sent (a limit already known to be used up)
     isn't a call and isn't logged."""
@@ -702,6 +717,8 @@ async def _call(b: Backend, system: str, prompt: str, schema, web: bool):
     except LLMError as e:
         if not getattr(e, "not_sent", False):
             _record_usage(b, time.time() - t0, e)
+        if isinstance(e, BusyError):
+            _busy_until[b.name] = (time.time() + BUSY_WAIT, str(e))
         raise
     except Exception as e:
         _record_usage(b, time.time() - t0, e)
@@ -812,6 +829,9 @@ def out_of_ai() -> str | None:
     """Why no AI can be called right now (today's budget, or Gemini's free limit), with nothing to stand in; None
     when one can. Autopilot checks this before starting work that needs AI, and says it once."""
     b = backend("write")
+    until, said = _busy_until.get(b.name, (0, ""))
+    if until > time.time():
+        return f"{said}. Autopilot tries again in a few minutes."
     if not _cloud(b):
         return None
     why = None

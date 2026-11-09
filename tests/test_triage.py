@@ -649,3 +649,45 @@ def test_a_company_name_with_dots_is_read_whole():
     assert company == "X"
     company, _, _ = draft._asked_company({"company": "Rocket Lab"}, "Have you ever worked for the u.s. Government?")
     assert company == "the u.s. Government"
+
+
+# "Needs your AI connected" was shown when the AI was connected and only busy (Gemini 503s, a timeout).
+WHY = {"field": "q_why", "label": "Why do you want to work here?", "qtype": "textarea", "required": True, "options": []}
+
+
+async def test_a_busy_ai_is_waited_for_not_handed_to_you(monkeypatch):
+    import httpx
+    from jobsmith import db, llm
+
+    async def send(self, req, *a, **k):
+        return httpx.Response(503, json={"error": {"code": 503, "message": "The model is overloaded."}}, request=req)
+
+    async def no_wait(s):
+        return None
+    monkeypatch.setattr(httpx.AsyncClient, "send", send)
+    monkeypatch.setattr(llm.asyncio, "sleep", no_wait)
+    monkeypatch.setattr(llm, "_busy_until", {})
+    with pytest.raises(llm.BusyError, match="busy"):
+        await llm.GeminiAPI("test-key-not-real").complete_json("sys", "prompt")
+    llm.set_backend_override(llm.GeminiAPI("test-key-not-real"))
+    jid = _greenhouse_job()
+    job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,)))
+    got, err = await draft.answer_fields(job, [dict(WHY)])
+    assert got["q_why"]["kind"] == "pending" and "busy" in err          # the application waits for AI, not for you
+    assert "busy" in (llm.out_of_ai() or "")                            # and autopilot doesn't hammer it meanwhile
+
+
+async def test_an_ai_that_cant_be_used_says_why(fake_llm):
+    from jobsmith import db, llm
+
+    def refuse(s, p):
+        raise llm.LLMError("That Gemini key isn't valid. Copy it again from aistudio.google.com/apikey.")
+    fake_llm(refuse)
+    jid = _greenhouse_job()
+    got, _ = await draft.answer_fields(db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,))), [dict(WHY)])
+    issue = got["q_why"]["issues"][0]
+    assert "key isn't valid" in issue and "Needs your AI connected" not in issue
+    llm.set_backend_override(None)                                      # no AI at all: that is what it says
+    got, _ = await draft.answer_fields(db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,))), [dict(WHY)])
+    assert "Needs your AI connected" in got["q_why"]["issues"][0]
+
