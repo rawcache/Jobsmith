@@ -345,6 +345,8 @@ def test_a_city_the_question_names_under_anywhere_in_the_us():
         assert draft.deterministic(_field(label), ans, {"company": "Acme", "locations": ["New York, NY"]})["answer"] == ""
     for label in ("Are you willing to relocate to Utah?", "Are you willing to relocate to California?"):
         assert draft.deterministic(_field(label), ans, seattle)["answer"] == "Yes", label
+    got = draft.deterministic(_field("Are you willing to relocate to Georgia?"), ans, seattle)
+    assert got["answer"] == ""                                          # the state or the country: yours to say
     both = {"company": "Acme", "locations": ["Seattle, WA", "London, UK"]}
     assert draft.deterministic(_field("Are you willing to work on-site in London?"), ans, both)["answer"] == ""
     assert draft.deterministic(_field("Are you willing to work on-site in Boston?"), ans, both)["answer"] == ""
