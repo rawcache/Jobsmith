@@ -151,7 +151,7 @@ def test_yes_no_profile_facts_never_answer_a_different_question():
         assert draft.offline(field(label, "text"), profile.answers(), JOB)["answer"] == "", label
     # an unfamiliar word means it waits: a condition, a negation, a history, a place
     for label in ("Will you require sponsorship when your current authorization expires?",
-                  "Are you authorized to work in the United States without sponsorship?",
+                  "Are you authorized to work in the United States without restriction?",
                   "Are you not authorized to work in the United States?",
                   "Have you ever required visa sponsorship?",
                   "Are you authorized to work in Canada?",
@@ -885,3 +885,64 @@ async def test_a_demographic_fieldset_that_cant_be_grouped_keeps_its_heading(pag
     for f in fields[:2]:
         got = draft.offline(f, profile.answers(), JOB)
         assert got is not None and got["answer"] == ""                 # still yours: never AI's (rule 2)
+
+
+# Plain sponsorship and work-authorization questions from held applications (the company's name swapped for Acme
+# Robotics). Each waited for the user though the confirmed profile answers it.
+US_JOB = dict(JOB, locations=["New York, NY"])
+REAL_NO_SPONSORSHIP = [
+    "Would you require a new H-1B sponsorship to work with us?",
+    "Will you now (or in the future) require visa sponsorship for employment at Acme Robotics? (H1-B, TN, F1, etc.)",
+    "Do you need sponsorship or visa-related assistance to work in the United States?",
+    "Will you require Acme Robotics to sponsor you for a work permit now or in the future in the United States",
+    "Do you now or in the future require visa sponsorship to work in the country where this position is located?",
+    "Do you now or will you in the future require any visa sponsorship by Acme Robotics Group (e.g., H-1B visa) to "
+    "work at the company?",
+    "Will you require sponsorship from Acme for employment now or in the future (e.g, F-1/OPT, H1B visa)?",
+    "Will you now require immigration sponsorship by our company to attain or maintain your employment eligibility "
+    "(e.g., H-1B, E-3, TN, O-1, STEM OPT, or any immigration work authorization requiring a written submission from "
+    "the company to a government agency)?",
+]
+
+
+@pytest.mark.parametrize("label", REAL_NO_SPONSORSHIP, ids=lambda l: l[:40])
+def test_real_sponsorship_wordings_get_a_confirmed_no(label):
+    f = field(label, options=["Yes", "No"])
+    assert draft.offline(f, profile.answers(), US_JOB)["answer"] == ""          # nothing confirmed: yours
+    profile.set_answer("needs_sponsorship", "No", confirmed=True)
+    got = draft.offline(f, profile.answers(), US_JOB)
+    assert got["answer"] == "No" and not got["issues"]
+    assert draft.offline(f, profile.answers(), dict(JOB, locations=["Toronto, Canada"]))["answer"] == "" or \
+        draft.NAMES_US.search(label)                                             # another country's rules: yours
+    profile.set_answer("needs_sponsorship", "Yes", confirmed=True)             # a Yes isn't a Yes to a narrower one
+    narrower = "new" in label or "permit" in label or "assistance" in label or "now require" in label or \
+        any(v in label for v in ("H-1B", "H1-B", "H1B", "F-1"))
+    assert (draft.offline(f, profile.answers(), US_JOB)["answer"] == "") == narrower
+
+
+def test_authorized_without_sponsorship_needs_both_facts_confirmed():
+    f = field("Are you legally authorized to work in the US without sponsorship?", options=["Yes", "No"])
+    profile.set_answer("work_authorized_us", "Yes", confirmed=True)
+    assert draft.offline(f, profile.answers(), US_JOB)["answer"] == ""          # sponsorship not confirmed
+    profile.set_answer("needs_sponsorship", "No", confirmed=True)
+    assert draft.offline(f, profile.answers(), US_JOB)["answer"] == "Yes"
+    profile.set_answer("needs_sponsorship", "Yes", confirmed=True)
+    assert draft.offline(f, profile.answers(), US_JOB)["answer"] == "No"
+    profile.set_answer("work_authorized_us", "No", confirmed=True)
+    assert draft.offline(f, profile.answers(), US_JOB)["answer"] == ""
+    profile.set_answer("work_authorized_us", "Yes", confirmed=True)
+    other = field("Are you authorized to work in the US without restriction?", options=["Yes", "No"])
+    assert draft.offline(other, profile.answers(), US_JOB)["answer"] == ""      # another question
+
+
+def test_the_country_where_the_position_is_located_and_a_short_company_name():
+    profile.set_answer("work_authorized_us", "Yes", confirmed=True)
+    f = field("Are you legally authorized to work in the country where this position is located?", options=["Yes", "No"])
+    assert draft.offline(f, profile.answers(), US_JOB)["answer"] == "Yes"
+    assert draft.offline(f, profile.answers(), dict(JOB, locations=["New York, NY", "London, UK"]))["answer"] == ""
+    job = dict(US_JOB, company="Acme Capital Management")
+    f = field("Are you authorized to work lawfully in the United States for Acme Capital?", options=["Yes", "No"])
+    assert draft.offline(f, profile.answers(), job)["answer"] == "Yes"
+    # a shortened name never hides a word that changes the question
+    f = field("Are you authorized to work in the United States for Not?", options=["Yes", "No"])
+    assert draft.offline(f, profile.answers(), dict(US_JOB, company="Not Acme Capital"))["answer"] == ""
