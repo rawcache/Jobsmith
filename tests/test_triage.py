@@ -1031,7 +1031,8 @@ def test_an_ordinary_question_that_starts_with_if_is_still_written():
     assert draft.deterministic(field(long, "textarea"), profile.answers(), JOB) is None and time.time() - t0 < 0.5
     for label in ("If you could build anything, what would it be?", "Describe a project you're proud of",
                   "Describe how you handle conflict", "Describe a project (include a link)",
-                  "Why do you want to join Medium", "Do you have a link to your portfolio?"):
+                  "Why do you want to join Medium", "Do you have a link to your portfolio?",
+                  "Tell us your favorite project (include a link)", "Please tell us your experience with link prediction"):
         assert draft.deterministic(field(label, "textarea"), profile.answers(), JOB) is None
     profile.set_answer("website", "https://alexrivera.example", confirmed=True)     # a link you do have still goes in
     assert draft.offline(field("Website", "text"), profile.answers(), JOB)["answer"] == "https://alexrivera.example"

@@ -770,7 +770,9 @@ _ASKS_POLITELY = re.compile(r"^(please\s+)?(tell us|share|provide|give us|enter|
 def _link_box(label: str) -> bool:
     l = " ".join((label or "").split()).strip(" :*?")
     l = re.sub(r"\s*\((optional|if any|if applicable|if you have one)\)\s*$", "", l, flags=re.I)
-    l = _ASKS_POLITELY.sub("", l)            # "Please tell us your Twitter URL" asks for the same one thing
+    asked, l = l, _ASKS_POLITELY.sub("", l)  # "Please tell us your Twitter URL" asks for the same one thing
+    if asked != l and len(l.split()) > 3:    # ...but "Tell us your favorite project (include a link)" is a story
+        return False
     if len(l.split()) > 7 or classify.ESSAY_Q.search(l) or classify.YES_NO_Q.search(l):
         return False
     return bool(_LINK_WORD.search(l) or _NETWORK.fullmatch(l))
