@@ -208,7 +208,8 @@ _EEO_TAIL = re.compile(r"\s*(\(not hispanic or latino\))?\s*(a person (having|of
 # The whole choice, word for word: a closed list, so a choice that adds anything ("…that requires accommodation",
 # "…and have never had one", "protected" for a veteran's Yes) waits for you.
 _YES_CHOICES = {"yes", "i have a disability", "yes i have a disability", "i am a veteran", "yes i am a veteran"}
-_NO_CHOICES = {"no", "i have no disability", "i do not have a disability", "i dont have a disability",
+_NONE_CHOICES = {"none", "no", "n a", "not applicable", "no clearance", "no security clearance", "no active clearance"}
+_NO_CHOICES = {"no", "no disability", "no i have no disability", "i have no disability", "i do not have a disability", "i dont have a disability",
                "no i do not have a disability", "no i dont have a disability", "i am not a veteran",
                "no i am not a veteran", "not a veteran", "i am not a protected veteran", "not a protected veteran",
                "no i am not a protected veteran"}
@@ -233,8 +234,8 @@ def strict_pick(answer: str, options: list[str], not_hispanic: bool = False) -> 
     if al in SAME_WORD:
         return only([o for o in options if re.sub(r"\W+", " ", o).strip().lower() == SAME_WORD[al]])
     words = lambda o: " ".join(re.findall(r"[a-z0-9]+", flat(o)))
-    if al in NONE:                                      # "No Clearance", "None": one or two words, nothing added
-        return only([o for o in options if NO_OPTION.match(o) and len(words(o).split()) <= 2])
+    if al in NONE:                                      # "No Clearance", "None": nothing added ("None (past)")
+        return only([o for o in options if words(o) in _NONE_CHOICES])
     if al in ("yes", "no"):
         return only([o for o in options if words(o) in (_YES_CHOICES if al == "yes" else _NO_CHOICES)])
     head = al.split("(")[0].strip()
