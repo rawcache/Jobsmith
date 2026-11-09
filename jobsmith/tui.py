@@ -403,31 +403,70 @@ def _needs(d: dict) -> bool:
         (bool(d["issues"]) and d["verdict"] != "green" and not d.get("final_answer"))
 
 
+def _answer_fix(e: Engine, f: dict, skip_job: str = "") -> str:
+    """Ask one fix. Returns "" to carry on, "quit", or "skip_job" (only offered under one application)."""
+    extra = (["Skip this job"] if skip_job else []) + ["Skip", "Quit"]
+    if f.get("choices"):
+        # Enter skips: an answer like work authorization is only ever one you picked (rule 2)
+        k = choose("Your answer:", f["choices"] + extra, default=len(f["choices"]) + len(extra) - 1)
+        picked = (f["choices"] + extra)[k]
+        if picked in ("Quit", "Skip this job") and k >= len(f["choices"]):
+            return "quit" if picked == "Quit" else "skip_job"
+        value = picked if k < len(f["choices"]) else ""
+    else:
+        value = ask("Your answer (blank skips" + (", 'skip job' drops this application" if skip_job else "") + "):"
+                    + ("  {company} and {role} are filled in" if f["kind"] == "essay" else ""))
+        if skip_job and value.strip().lower() == "skip job":
+            return "skip_job"
+    if value:
+        try:
+            r = e.post("/api/fixes/answer", {"id": f["id"], "value": value})
+        except RuntimeError as err:
+            console.print(f"  [yellow]{err}[/]")
+            return ""
+        n, sent = len(r.get("freed", [])), len(r.get("started", []))
+        console.print("  [green]Saved.[/] " + (r.get("note") or (f"{n} application(s) have nothing left"
+                      + (f"; {sent} going out now." if sent else ".") if n else "")))
+    return ""
+
+
 def review_fixes(e: Engine) -> bool:
-    """What held applications wait on, once each, with how many it unblocks; answer each here. False: quit."""
-    for f in e.get("/api/fixes").get("fixes", []):
+    """Needs you, in two parts: about you (asked once, with how many applications each unblocks), then about one job
+    (under its company and role, with "Skip this job"). False: quit."""
+    data = e.get("/api/fixes")
+    fixes = data.get("fixes", [])
+    you = [f for f in fixes if f.get("part") != "job"]
+    if you:
+        console.print("\n[bold]About you[/] [dim]· answer once, used on every form[/]")
+    for f in you:
         count = "blocks every application" if f["id"] == "resume_pdf" else f"unblocks {f['unblocks']}"
         console.print(f"\n[bold]{f['title']}[/]  [yellow]{count}[/]\n  [dim]{f['detail']}[/]")
         if f["kind"] == "resume_pdf":
             console.print("  Upload it on the dashboard's Profile page; the applications waiting on it go out after.")
             continue
-        if f.get("choices"):
-            # Enter skips: an answer like work authorization is only ever one you picked (rule 2)
-            k = choose("Your answer:", f["choices"] + ["Skip", "Quit"], default=len(f["choices"]) + 1)
-            if k == len(f["choices"]) + 1:
-                return False
-            value = f["choices"][k] if k < len(f["choices"]) else ""
-        else:
-            value = ask("Your answer (blank skips):" + ("  {company} and {role} are filled in" if f["kind"] == "essay" else ""))
-        if value:
-            try:
-                r = e.post("/api/fixes/answer", {"id": f["id"], "value": value})
-            except RuntimeError as err:
-                console.print(f"  [yellow]{err}[/]")
+        if _answer_fix(e, f) == "quit":
+            return False
+    by = {f["id"]: f for f in fixes}
+    jobs = [a for a in data.get("applications", []) if a.get("questions")]
+    if jobs:
+        console.print("\n[bold]About one job[/] [dim]· asked by that application only, never reused[/]")
+    for a in jobs:
+        console.print(f"\n[bold]{a['company']}[/] · {a['title']}")
+        for q in a["questions"]:
+            f = by.get(q)
+            if not f:
                 continue
-            n, sent = len(r.get("freed", [])), len(r.get("started", []))
-            console.print(f"  [green]Saved.[/] " + (r.get("note") or (f"{n} application(s) have nothing left"
-                          + (f"; {sent} going out now." if sent else ".") if n else "")))
+            console.print(f"  [bold]{f['title']}[/]")
+            did = _answer_fix(e, f, skip_job=a["id"])
+            if did == "quit":
+                return False
+            if did == "skip_job":
+                try:
+                    e.post("/api/fixes/skip", {"job_id": a["id"]})
+                    console.print(f"  [green]Skipped[/] {a['company']} · {a['title']}. Nothing was sent.")
+                except RuntimeError as err:
+                    console.print(f"  [yellow]{err}[/]")
+                break
     return True
 
 
