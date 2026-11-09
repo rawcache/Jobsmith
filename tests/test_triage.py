@@ -1022,7 +1022,13 @@ def test_a_follow_up_to_another_question_is_never_ais_to_guess(label):
 
 
 def test_an_ordinary_question_that_starts_with_if_is_still_written():
-    for label in ("If you could build anything, what would it be?", "Describe a project you're proud of"):
+    import time
+    t0 = time.time()
+    long = "Please tell us in a few sentences about a time you shared a link to your work with a team " * 6
+    assert draft.deterministic(field(long, "textarea"), profile.answers(), JOB) is None and time.time() - t0 < 0.5
+    for label in ("If you could build anything, what would it be?", "Describe a project you're proud of",
+                  "Describe how you handle conflict", "Describe a project (include a link)",
+                  "Why do you want to join Medium", "Do you have a link to your portfolio?"):
         assert draft.deterministic(field(label, "textarea"), profile.answers(), JOB) is None
     profile.set_answer("website", "https://alexrivera.example", confirmed=True)     # a link you do have still goes in
     assert draft.offline(field("Website", "text"), profile.answers(), JOB)["answer"] == "https://alexrivera.example"
