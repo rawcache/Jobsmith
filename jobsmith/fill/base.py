@@ -155,7 +155,7 @@ SCAN_JS = r"""
       // only under a question of their own, and never boxes each required by itself (separate consents)
       const titled = legend || (fs && [...fs.querySelectorAll('label')].some(l => !boxes.some(x => x.id === l.htmlFor || l.contains(x))));
       let shared = '';
-      if (titled && boxes.length > 1 && new Set(boxes.map(x => x.name)).size === boxes.length && boxes.every(x => x.id && !x.required)) {
+      if (titled && boxes.length > 1 && new Set(boxes.map(x => x.name)).size === boxes.length && boxes.every(x => x.id && !x.required && x.getAttribute('aria-required') !== 'true')) {
         shared = boxes[0].id; for (const x of boxes) while (!x.id.startsWith(shared)) shared = shared.slice(0, -1);
         if (shared.length < 6 || rootOf(el).querySelectorAll(`input[type="checkbox"][id^="${CSS.escape(shared)}"]`).length !== boxes.length) shared = '';
       }
@@ -165,6 +165,8 @@ SCAN_JS = r"""
       seenGroups.add(g);
       const title = own && [...fs.querySelectorAll('label')].find(l => !boxes.some(x => x.id === l.htmlFor || l.contains(x)));
       let label = legend ? clean(legend.innerText) : title ? clean(title.innerText) : '';
+      // one box of several in a fieldset, each its own question (consents): its own words, not the shared heading
+      if (group.length === 1 && boxes.length > 1 && labelFor(el)) label = labelFor(el);
       const opts = group.map(x => labelFor(x));
       // the first line of the nearest box holding every option, unless that line is an option itself (Ashby's
       // SMS consent: "Yes - I consent…" first, the question "SMS" one box further out). A lone checkbox's own

@@ -174,13 +174,15 @@
         const boxes = type === "checkbox" && fs ? [...fs.querySelectorAll('input[type="checkbox"]')] : [];
         // only under a question of their own, and never boxes each required by itself (separate consents)
         const titled = legend || (fs && [...fs.querySelectorAll("label")].some(l => !boxes.some(x => x.id === l.htmlFor || l.contains(x))));
-        const own = !!titled && boxes.length > 1 && new Set(boxes.map(x => x.name)).size === boxes.length && boxes.every(x => !x.required);
+        const own = !!titled && boxes.length > 1 && new Set(boxes.map(x => x.name)).size === boxes.length && boxes.every(x => !x.required && x.getAttribute("aria-required") !== "true");
         const g = own ? boxes[0] : (el.name || el.id); if (!g) continue;
         const seen = groups.get(el.getRootNode()) || new Set(); groups.set(el.getRootNode(), seen);
         if (seen.has(g)) continue; seen.add(g);
         const group = own ? boxes : el.name ? [...el.getRootNode().querySelectorAll(`input[name="${CSS.escape(el.name)}"]`)] : [el];
         const title = own && [...fs.querySelectorAll("label")].find(l => !boxes.some(x => x.id === l.htmlFor || l.contains(x)));
         let label = legend ? clean(legend.innerText) : title ? clean(title.innerText) : "";
+        // one box of several in a fieldset, each its own question (consents): its own words, not the shared heading
+        if (group.length === 1 && boxes.length > 1 && labelFor(el)) label = labelFor(el);
         // the first line of the nearest box holding every option, unless that line is an option itself (a lone
         // checkbox's own label is its question)
         const opts = group.map(labelFor), isOpt = t => /^(yes|no)\W*$/i.test(t) || (group.length > 1 && opts.some(o => o && (t.startsWith(o) || o.startsWith(t))));

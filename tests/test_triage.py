@@ -846,8 +846,9 @@ def test_a_choice_saved_as_a_question_before_this_fix_is_still_yours(label):
     assert got is not None and got["answer"] == ""
 
 
-def test_orientation_choices_under_a_vague_label_are_yours():
-    got = draft.offline(field("Which best describes you?", options=["Asexual", "Straight", "Prefer not to answer"]),
+@pytest.mark.parametrize("choice", ["Asexual", "Straight"])
+def test_orientation_choices_under_a_vague_label_are_yours(choice):
+    got = draft.offline(field("Which best describes you?", options=[choice, "Other", "Prefer not to answer"]),
                         profile.answers(), JOB)
     assert got is not None and got["answer"] == ""
 
@@ -859,8 +860,11 @@ async def test_separate_consents_in_one_fieldset_stay_separate_questions(page):
       <input type="checkbox" id="consent-news" name="news"><label for="consent-news">Send me the newsletter</label>
       </fieldset><fieldset><legend>Before you apply</legend>
       <input type="checkbox" id="agree-terms" name="terms" required><label for="agree-terms">I agree to the terms</label>
-      <input type="checkbox" id="agree-data" name="data" required><label for="agree-data">I agree to data retention</label>
+      <input type="checkbox" id="agree-data" name="data" aria-required="true"><label for="agree-data">I agree to data retention</label>
       </fieldset><input name="first_name" id="first_name"><label for="first_name">First name</label></form>""")
     fields = await base.scan_form(page)
     boxes = [f for f in fields if f["qtype"] in ("checkbox", "multiselect")]
     assert [f["qtype"] for f in boxes] == ["checkbox"] * 4 and [f["required"] for f in boxes] == [True, False, True, True]
+    assert [f["label"] for f in boxes] == ["I accept the privacy notice", "Send me the newsletter",
+                                           "I agree to the terms", "I agree to data retention"]
+    assert len({f["field"] for f in boxes}) == 4
