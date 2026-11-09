@@ -289,7 +289,7 @@ def _names_us(loc: str) -> bool:
 
 # The whole choice, nothing added: "U.S. citizen", "A United States citizen or national". Not "Non-U.S. citizen" or
 # "U.S. citizen with an active clearance".
-US_CITIZEN_OPTION = re.compile(r"\W*(i am )?(an? )?(u\.?\s?s\.?(\s?a\.?)?|united states)( of america)? citizen"
+US_CITIZEN_OPTION = re.compile(r"\W*(\d+\W+)?(i am )?(an? )?(u\.?\s?s\.?(\s?a\.?)?|united states)( of america)? citizen"
                                r"( or (u\.?\s?s\.? )?national( of the (u\.?\s?s\.?|united states))?)?\W*", re.I)
 
 
@@ -527,18 +527,20 @@ PLAIN_CORE = {"work_authorized_us": [{"authorized", "authorised", "eligible", "a
               "first_gen": [{"first"}, {"generation"}]}
 # ...or a pick from a list, when the label is plainly that one fact and exactly one choice means your confirmed
 # answer (classify.strict_pick): "Gender" with Man/Woman for "Male", never "Cisgender man", never the nearest match.
-_WHICH = f"{_ASKING} what is your my i identify as how would you describe which best describes select one option status"
+_WHICH = (f"{_ASKING} what is your my i identify as how would you describe which best describes select one option status "
+          "mark all apply most accurately yourself and s")
 _EXPORT = (f"{_ASKING} {_US} position requires require may access information technology items subject export "
            "control controls laws law regulations regulation ear itar international traffic arms such as following "
            "one protected individuals individual person persons defined under immigration naturalization nationality act "
-           "8 usc c 1324b 3 and purposes complying comply federal best applies you your citizenship status citizen is what")
+           "8 usc c 1324b 3 and purposes complying comply federal best applies you your citizenship status citizen is what "
+           "be below determine eligibility materials questions receive responses solely used option select with")
 PLAIN_PICK = {
     "gender": f"{_WHICH} gender identity sex",
     "race": f"{_WHICH} race ethnicity racial ethnic background origin group category",
-    "hispanic_latino": f"{_WHICH} hispanic latino latina latinx or origin",
+    "hispanic_latino": f"{_WHICH} hispanic latino latina latinx or origin spanish",
     "veteran_status": f"{_WHICH} veteran protected",
     "disability_status": f"{_WHICH} have disability",
-    "security_clearance": f"{_WHICH} have hold security clearance level highest current active and",
+    "security_clearance": f"{_WHICH} have hold security clearance level highest current active and access",
     "us_person": _EXPORT, "us_citizen": _EXPORT, "citizenship_status": _EXPORT,
 }
 PLAIN_PICK = {k: set(v.split()) for k, v in PLAIN_PICK.items()}

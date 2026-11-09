@@ -958,3 +958,38 @@ def test_wider_or_narrower_sponsorship_questions_still_wait():
     assert draft.offline(f, profile.answers(), US_JOB)["answer"] == "Yes"
     for note in ("For a new work permit.", "For an H-1B visa."):               # the note narrows it: yours
         assert draft.offline(dict(f, description=note), profile.answers(), US_JOB)["answer"] == "", note
+
+
+# More list questions from held applications that a confirmed profile answers.
+def test_real_list_wordings_pick_the_confirmed_answer():
+    profile.set_answer("us_citizen", "Yes", confirmed=True)
+    profile.set_answer("security_clearance", "None", confirmed=True)
+    profile.set_answer("gender", "Male", confirmed=True)
+    profile.set_answer("hispanic_latino", "No", confirmed=True)
+    cases = [
+        (dict(field("EXPORT CONTROLS - This position requires access to information and technology that is subject to "
+                    "U.S. export controls. Your responses to the questions below will be used solely to determine your "
+                    "eligibility under U.S. law to receive information and materials subject to U.S. export controls.",
+                    options=["A United States citizen or national", "A person lawfully admitted for permanent residence "
+                             "of the United States", "None of the above"])), "A United States citizen or national"),
+        (field("For purposes of complying with Federal Export Control Laws, please select one of the following: (Select "
+               "the option that best applies to you)", options=["US Citizen", "US National", "Person granted asylum",
+                                                                "Prefer not to answer"]), "US Citizen"),
+        (field("Citizenship Status", options=["1) U.S. citizen or national of the United States",
+                                              "2) U.S. lawful permanent resident", "6) Other (please explain)"]),
+         "1) U.S. citizen or national of the United States"),
+        (field("Please select the highest level security clearance and access you currently hold:",
+               options=["No Clearance", "TS/SCI", "Top Secret", "Secret"]), "No Clearance"),
+        (field("How would you describe your gender identity? (mark all that apply)", "multiselect",
+               ["Man ", "Non-binary ", "Woman", "I don't wish to answer"]), "Man "),
+        (field("Please select the gender which most accurately describes how you identify yourself",
+               options=["Female", "Male", "Non-Binary", "Not Declared"]), "Male"),
+        (field("Are you of Hispanic, Latinx or Spanish origin?", options=["Yes", "No", "I don't wish to answer"]), "No"),
+        # ...and ones that still wait: a clearance you could get, a list with no choice that is yours
+        (field("To the best of your knowledge, are you able to obtain a US Department of Defense Security Clearance?",
+               options=["Yes", "No"]), ""),
+        (field("Active Security Clearance(s)", "multiselect", ["Top Secret", "Secret", "Confidential", "Other"]), ""),
+        (field("What is your gender identity?", options=["Cisgender man", "Cisgender woman", "Non-binary"]), ""),
+    ]
+    for f, want in cases:
+        assert draft.offline(f, profile.answers(), US_JOB)["answer"] == want, f["label"]
