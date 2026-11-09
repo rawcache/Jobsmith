@@ -893,7 +893,6 @@ US_JOB = dict(JOB, locations=["New York, NY"])
 REAL_NO_SPONSORSHIP = [
     "Would you require a new H-1B sponsorship to work with us?",
     "Will you now (or in the future) require visa sponsorship for employment at Acme Robotics? (H1-B, TN, F1, etc.)",
-    "Do you need sponsorship or visa-related assistance to work in the United States?",
     "Will you require Acme Robotics to sponsor you for a work permit now or in the future in the United States",
     "Do you now or in the future require visa sponsorship to work in the country where this position is located?",
     "Do you now or will you in the future require any visa sponsorship by Acme Robotics Group (e.g., H-1B visa) to "
@@ -915,7 +914,7 @@ def test_real_sponsorship_wordings_get_a_confirmed_no(label):
     assert draft.offline(f, profile.answers(), dict(JOB, locations=["Toronto, Canada"]))["answer"] == "" or \
         draft.NAMES_US.search(label)                                             # another country's rules: yours
     profile.set_answer("needs_sponsorship", "Yes", confirmed=True)             # a Yes isn't a Yes to a narrower one
-    narrower = "new" in label or "permit" in label or "assistance" in label or "now require" in label or \
+    narrower = "new" in label or "permit" in label or "now require" in label or \
         any(v in label for v in ("H-1B", "H1-B", "H1B", "F-1"))
     assert (draft.offline(f, profile.answers(), US_JOB)["answer"] == "") == narrower
 
@@ -926,8 +925,9 @@ def test_authorized_without_sponsorship_needs_both_facts_confirmed():
     assert draft.offline(f, profile.answers(), US_JOB)["answer"] == ""          # sponsorship not confirmed
     profile.set_answer("needs_sponsorship", "No", confirmed=True)
     assert draft.offline(f, profile.answers(), US_JOB)["answer"] == "Yes"
-    profile.set_answer("needs_sponsorship", "Yes", confirmed=True)
-    assert draft.offline(f, profile.answers(), US_JOB)["answer"] == "No"
+    profile.set_answer("needs_sponsorship", "Yes", confirmed=True)             # needed later isn't needed today
+    assert draft.offline(f, profile.answers(), US_JOB)["answer"] == ""
+    profile.set_answer("needs_sponsorship", "No", confirmed=True)
     profile.set_answer("work_authorized_us", "No", confirmed=True)
     assert draft.offline(f, profile.answers(), US_JOB)["answer"] == ""
     profile.set_answer("work_authorized_us", "Yes", confirmed=True)
@@ -946,3 +946,15 @@ def test_the_country_where_the_position_is_located_and_a_short_company_name():
     # a shortened name never hides a word that changes the question
     f = field("Are you authorized to work in the United States for Not?", options=["Yes", "No"])
     assert draft.offline(f, profile.answers(), dict(US_JOB, company="Not Acme Capital"))["answer"] == ""
+
+
+def test_wider_or_narrower_sponsorship_questions_still_wait():
+    profile.set_answer("needs_sponsorship", "No", confirmed=True)
+    for label in ("Do you need sponsorship or visa-related assistance to work in the United States?",
+                  "Do you currently require sponsorship or are you currently sponsored to work in the United States?"):
+        assert draft.offline(field(label, options=["Yes", "No"]), profile.answers(), US_JOB)["answer"] == "", label
+    profile.set_answer("needs_sponsorship", "Yes", confirmed=True)
+    f = dict(field("Will you in the future require sponsorship for employment in the United States?", options=["Yes", "No"]))
+    assert draft.offline(f, profile.answers(), US_JOB)["answer"] == "Yes"
+    for note in ("For a new work permit.", "For an H-1B visa."):               # the note narrows it: yours
+        assert draft.offline(dict(f, description=note), profile.answers(), US_JOB)["answer"] == "", note

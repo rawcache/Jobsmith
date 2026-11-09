@@ -510,7 +510,7 @@ PLAIN_YES_NO = {
                          "continue continued working in order our company from by with type employer etc "
                          "e g i h 1b h1 h1b b tn o 1 j f 3 stem opt cpt f1 "
                          # words real forms use that leave the question the same one (each from a held application)
-                         "new permit assistance related sponsored attain eligibility requiring written submission "
+                         "new permit attain eligibility requiring written submission "
                          "government agency your you on answer current",
     "us_citizen": f"{_ASKING} {_US} citizen",
     "hispanic_latino": f"{_ASKING} identify as hispanic latino latina latinx or origin",
@@ -553,13 +553,13 @@ US_ONLY = {"work_authorized_us", "needs_sponsorship"}      # your profile answer
 # visa type, may have another answer, so a Yes answers only one that asks about the future and names no visa
 LATER = {"future", "ever", "later", "point", "time", "will", "would"}
 VISA_TYPES = {"h", "1b", "h1", "h1b", "tn", "o", "1", "j", "f", "e", "3", "stem", "opt", "cpt", "f1"}
-NARROWER = {"new", "permit", "current", "assistance"}     # ...nor one about a new visa, a permit or only today
+NARROWER = {"new", "permit", "current"}                   # ...nor one about a new visa, a permit or only today
 _PLACEHOLDER = re.compile(r"^\W*((please )?(select|choose)\b.*)?$", re.I)
 
 
 _NEVER_A_NAME = {"not", "no", "without", "never", "except", "unless", "non", "other", "any"}
 # "Are you authorized to work in the US without sponsorship?": both facts in one question. Yes only for a confirmed
-# "authorized" and a confirmed "no sponsorship"; No for a confirmed need; nothing else.
+# "authorized" and a confirmed "no sponsorship, now or later"; nothing else.
 _AUTH_WITHOUT = set(f"{_ASKING} {_US} legally lawfully authorized authorised eligible work without requiring needing "
                     "sponsorship visa employer".split())
 
@@ -570,9 +570,8 @@ def _auth_without_sponsorship(asked: set[str], ans: dict) -> str:
         return ""
     auth, need = ans.get("work_authorized_us") or {}, ans.get("needs_sponsorship") or {}
     a, n = (auth.get("value") or "").strip().lower(), (need.get("value") or "").strip().lower()
-    if not (auth.get("confirmed") and need.get("confirmed")) or a != "yes" or n not in ("yes", "no"):
-        return ""
-    return "yes" if n == "no" else "no"
+    # a need for sponsorship later doesn't say you need it today, so only "authorized, and never need it" answers
+    return "yes" if auth.get("confirmed") and need.get("confirmed") and a == "yes" and n == "no" else ""
 
 
 def _profile_only(field: dict) -> bool:
@@ -600,12 +599,13 @@ def _plain_yes_no(field: dict, ans: dict, job: dict | None) -> dict | None:
                        rf"( (group|inc|llc|corp|corporation|co|ltd))?\b", r"\1", t)
         return set(t.split())
     asked = words(field["label"])
-    both = _auth_without_sponsorship(asked | words(field.get("description") or ""), ans)
+    whole = asked | words(field.get("description") or "")          # a note under it counts too
+    both = _auth_without_sponsorship(whole, ans)
     if both:
         canon = "work_authorized_us"
     elif canon not in PLAIN_YES_NO or not asked or not all(asked & core for core in PLAIN_CORE[canon]):
         return None
-    elif (asked | words(field.get("description") or "")) - PLAIN_YES_NO[canon]:     # a note under it counts too
+    elif whole - PLAIN_YES_NO[canon]:
         return None
     if field["qtype"] not in ("select", "radio", "listbox"):       # one choice from a list
         return None
@@ -616,7 +616,7 @@ def _plain_yes_no(field: dict, ans: dict, job: dict | None) -> dict | None:
     value = both or (row.get("value") or "").strip().lower()
     if value not in ("yes", "no") or not row.get("confirmed"):
         return None
-    if canon == "needs_sponsorship" and value == "yes" and (not asked & LATER or asked & (VISA_TYPES | NARROWER)):
+    if canon == "needs_sponsorship" and value == "yes" and (not asked & LATER or whole & (VISA_TYPES | NARROWER)):
         return None
     if canon in US_ONLY and not NAMES_US.search(field["label"]):
         # names no country: it means the job's, which is the US only when every place the posting lists is
