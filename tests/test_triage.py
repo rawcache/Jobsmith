@@ -685,7 +685,8 @@ async def test_a_busy_ai_is_waited_for_not_handed_to_you(monkeypatch):
     with pytest.raises(llm.BusyError):                                  # asked again right away: nothing is sent
         await llm.complete_json("sys", "prompt")
     assert sent == []
-    monkeypatch.setattr(llm, "_busy_until", {"gemini_api": (llm.time.time() - 1, "busy")})   # five minutes on
+    assert all(until > llm.time.time() for until, _ in llm._busy_until.values())
+    monkeypatch.setattr(llm, "_busy_until", {k: (llm.time.time() - 1, "busy") for k in llm._busy_until})   # later
     with pytest.raises(llm.BusyError):
         await llm.complete_json("sys", "prompt")
     assert sent                                                         # it's asked again

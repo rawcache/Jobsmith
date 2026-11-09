@@ -704,7 +704,11 @@ _local_sem: asyncio.Semaphore | None = None
 
 
 BUSY_WAIT = 5 * 60                 # after a busy answer, autopilot starts no AI work for this long
-_busy_until: dict[str, tuple[float, str]] = {}     # backend -> (until when, what it said)
+_busy_until: dict[str, tuple[float, str]] = {}     # AI and model -> (until when, what it said)
+
+
+def _busy_key(b: "Backend") -> str:
+    return f"{b.name}:{getattr(b, 'model', '') or ''}"      # another model you switch to isn't the busy one
 
 
 async def _call(b: Backend, system: str, prompt: str, schema, web: bool):
@@ -718,7 +722,7 @@ async def _call(b: Backend, system: str, prompt: str, schema, web: bool):
         if not getattr(e, "not_sent", False):
             _record_usage(b, time.time() - t0, e)
         if isinstance(e, BusyError):
-            _busy_until[b.name] = (time.time() + BUSY_WAIT, str(e))
+            _busy_until[_busy_key(b)] = (time.time() + BUSY_WAIT, str(e))
         raise
     except Exception as e:
         _record_usage(b, time.time() - t0, e)
@@ -746,7 +750,7 @@ async def complete_json(system: str, prompt: str, schema: dict | None = None, we
         async with _local_sem:
             return await _call(b, system, prompt, schema, web)
     async with _sem:
-        until, said = _busy_until.get(b.name, (0, ""))
+        until, said = _busy_until.get(_busy_key(b), (0, ""))
         if until > time.time():             # it just said it's busy: not asked again (or charged to your budget) yet
             e = BusyError(said)
             e.not_sent = True
@@ -834,7 +838,7 @@ def out_of_ai() -> str | None:
     """Why no AI can be called right now (today's budget, or Gemini's free limit), with nothing to stand in; None
     when one can. Autopilot checks this before starting work that needs AI, and says it once."""
     b = backend("write")
-    until, said = _busy_until.get(b.name, (0, ""))
+    until, said = _busy_until.get(_busy_key(b), (0, ""))
     if until > time.time():
         return f"{said}. Autopilot tries again in a few minutes."
     if not _cloud(b):
