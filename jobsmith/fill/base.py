@@ -147,11 +147,22 @@ SCAN_JS = r"""
     if (!plain) continue;
     const key = unique(el, plain);
     if (type === 'radio' || type === 'checkbox') {
-      const g = el.name ? unique(el, `input[name="${el.name}"]`) : key; if (seenGroups.has(g)) continue;
-      const group = el.name ? [...rootOf(el).querySelectorAll(`input[name="${CSS.escape(el.name)}"]`)] : [el];
-      seenGroups.add(g);
       const fs = el.closest('fieldset'); const legend = fs && fs.querySelector('legend');
-      let label = legend ? clean(legend.innerText) : '';
+      // "Select all that apply" where every choice has a name of its own (Ashby: name="Gay", name="Parent"): the
+      // boxes of one fieldset are one question, keyed by what their ids share. Never each choice a question, and
+      // never "Other" in two questions taken for one.
+      const boxes = type === 'checkbox' && fs ? [...fs.querySelectorAll('input[type="checkbox"]')] : [];
+      let shared = '';
+      if (boxes.length > 1 && new Set(boxes.map(x => x.name)).size === boxes.length && boxes.every(x => x.id)) {
+        shared = boxes[0].id; for (const x of boxes) while (!x.id.startsWith(shared)) shared = shared.slice(0, -1);
+        if (shared.length < 6 || rootOf(el).querySelectorAll(`input[type="checkbox"][id^="${CSS.escape(shared)}"]`).length !== boxes.length) shared = '';
+      }
+      const own = shared ? unique(el, `input[type="checkbox"][id^="${shared}"]`) : '';
+      const g = own || (el.name ? unique(el, `input[name="${el.name}"]`) : key); if (seenGroups.has(g)) continue;
+      const group = own ? boxes : el.name ? [...rootOf(el).querySelectorAll(`input[name="${CSS.escape(el.name)}"]`)] : [el];
+      seenGroups.add(g);
+      const title = own && [...fs.querySelectorAll('label')].find(l => !boxes.some(x => x.id === l.htmlFor || l.contains(x)));
+      let label = legend ? clean(legend.innerText) : title ? clean(title.innerText) : '';
       const opts = group.map(x => labelFor(x));
       // the first line of the nearest box holding every option, unless that line is an option itself (Ashby's
       // SMS consent: "Yes - I consent…" first, the question "SMS" one box further out). A lone checkbox's own
@@ -159,7 +170,7 @@ SCAN_JS = r"""
       const isOpt = t => /^(yes|no)\W*$/i.test(t) || (group.length > 1 && opts.some(o => o && (t.startsWith(o) || o.startsWith(t))));
       if (!label) { let p = el.parentElement; for (let i = 0; i < 5 && p; i++, p = p.parentElement) {
         const t = clean((p.innerText || '').split('\n')[0]); if (t && group.every(x => p.contains(x)) && t.length > 2 && !isOpt(t)) { label = t; break; } } }
-      out.push({ field: el.name ? (g.includes(' >> ') ? g : `[name="${el.name}"]`) : key, label: label || opts[0],
+      out.push({ field: own || (el.name ? (g.includes(' >> ') ? g : `[name="${el.name}"]`) : key), label: label || opts[0],
                  ...(!label && group.every(unworded) ? { unworded: true } : {}), value: group.some(x => x.checked) ? 'set' : '',
                  qtype: group.length > 1 ? (type === 'radio' ? 'radio' : 'multiselect') : 'checkbox',
                  required: group.some(x => x.required || x.getAttribute('aria-required') === 'true') || !!(group.length > 1 && el.closest('[aria-required="true"]')) || /[*✱]\s*$/.test((legend ? legend.innerText : '').trim()), options: group.length > 1 ? opts : [], description: '', group: groupFor(el) });

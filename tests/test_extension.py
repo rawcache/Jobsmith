@@ -475,6 +475,25 @@ async def _pressed(page, question: str) -> str:
         return [...e.querySelectorAll('button[aria-pressed=true]')].map(b => b.innerText.trim()).join(); }""", question)
 
 
+COMMUNITIES = "Which of the following communities do you belong to? Please select all that apply."
+
+
+@browser
+async def test_ashby_checkbox_choices_are_one_question_not_one_each(page):
+    """The saved Dyna Robotics form (Ashby): each choice of "select all that apply" is a checkbox with a name of its
+    own (name="Gay", name="Parent"), so every choice was read as a question. A group is one question: an answer
+    ticks its choice, and one with no answer is under Needs you by its question, never by a choice's name."""
+    await _load(page, {"panelOpen": True}, fixture="ashby_dyna_form.html", answers={
+        "Name": {"value": "Alex Rivera", "kind": "standard"},
+        COMMUNITIES: {"value": "Parent", "kind": "answer_bank", "source": "Profile (you confirmed it)"}})
+    await page.evaluate("__listeners.forEach(f => f({type: 'fill'}, {}, () => {}))")
+    note = "document.querySelector('#jobsmith-panel').shadowRoot.querySelector('.note')"
+    await page.wait_for_function(f"{note}?.innerText.includes('Filled')", timeout=30000)
+    assert await page.evaluate("[...document.querySelectorAll('input[type=checkbox]:checked')].map(e => e.name)") == ["Parent"]
+    text = await page.evaluate(f"{note}.innerText")
+    assert "\nGay" not in text and "\nOther" not in text and "Diversity Survey" not in text, text
+
+
 @browser
 async def test_autofill_presses_ashby_yes_no_buttons_on_the_saved_ramp_form(page):
     """The saved Ramp form (Ashby): its Yes/No questions are two buttons beside a hidden checkbox, so a scan that
