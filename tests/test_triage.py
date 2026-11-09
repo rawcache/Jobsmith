@@ -1005,7 +1005,8 @@ def test_two_facts_in_one_list_question_wait():
 # From the second look at held applications: boxes AI can't know the answer to were waiting for AI.
 @pytest.mark.parametrize("label", ["Twitter URL", "Twitter", "X (Twitter) profile", "Other URL", "Kaggle profile link",
                                    "Please tell us your Twitter URL", "Tell us your Kaggle username",
-                                   "Twitter (optional)", "Your Twitter handle (optional)"])
+                                   "Twitter (optional)", "Your Twitter handle (optional)",
+                                   "Please provide your Stack Overflow profile link"])
 def test_a_link_your_profile_doesnt_have_is_left_blank_never_written(label):
     got = draft.offline(field(label, "text", required=False), profile.answers(), JOB)
     assert got is not None and got["answer"] == "" and not got["issues"]           # optional: blank, no AI, no hold
