@@ -808,3 +808,39 @@ def test_a_timeout_is_a_busy_ai_but_no_connection_is_yours_to_see():
     for e in (httpx.ConnectError("refused"), httpx.ConnectTimeout("no route")):
         got = llm._unreached("Gemini", e)
         assert not isinstance(got, llm.BusyError) and "Couldn't reach Gemini" in str(got)
+
+
+# Ashby's "select all that apply": every choice is a checkbox with a name of its own (name="Gay", name="Parent"), so
+# each was read as a question, and "Other" in two questions as one. A sexual-orientation choice reached the AI queue.
+def _dyna() -> str:
+    from conftest import FIXTURES
+    return (FIXTURES / "ashby_dyna_form.html").resolve().as_uri()
+
+
+async def test_ashby_checkbox_choices_are_one_question_each_group(page):
+    from jobsmith.fill import base
+    await page.goto(_dyna())
+    fields = await base.scan_form(page)
+    labels = [f["label"] for f in fields]
+    assert not {"Gay", "Parent", "Other", "White", "Veteran", "Diversity Survey"} & set(labels), labels
+    groups = {f["label"]: f for f in fields if f["qtype"] == "multiselect"}
+    assert len(groups) == 3 and len({f["field"] for f in groups.values()}) == 3
+    orientation = next(f for l, f in groups.items() if "sexual orientation" in l)
+    assert orientation["options"] == ["Bisexual", "Lesbian", "Gay", "Queer", "Heterosexual / straight", "Other",
+                                      "I prefer not to answer"]
+    communities = next(f for l, f in groups.items() if "communities" in l)
+    assert await base.fill_field(page, communities["field"], "multiselect", "Parent")
+    assert await page.evaluate("[...document.querySelectorAll('input[type=checkbox]:checked')].map(e => e.name)") == ["Parent"]
+    # every question on this form's survey is yours (rule 2): none goes to AI, none is answered without your profile
+    survey = [f for f in fields if f["qtype"] in ("radio", "multiselect")]
+    assert len(survey) == 6
+    for f in survey:
+        got = draft.offline(dict(f, required=True), profile.answers(), JOB)
+        assert got is not None and got["answer"] == "" and got["issues"], f["label"]
+
+
+@pytest.mark.parametrize("label", ["Gay", "Heterosexual / straight", "Neurodiverse", "What is your current age?",
+                                   "Diversity Survey"])
+def test_a_choice_saved_as_a_question_before_this_fix_is_still_yours(label):
+    got = draft.offline(field(label, "checkbox"), profile.answers(), JOB)
+    assert got is not None and got["answer"] == ""

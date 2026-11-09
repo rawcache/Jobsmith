@@ -477,11 +477,15 @@ PROFILE_ONLY = re.compile(r"citizen|nationality|\bnational of\b|export (control|
                           r"non-?binary|cisgender|\bblack\b|african american|\basian\b|pacific islander|"
                           r"alaska native|native american|indigenous|"
                           r"permanent resident|asyl|refugee|\brac(e|ial)\b|\bethnic(ity)?\b|transgender|gender|sexual orientation|"
-                          r"lgbt|veteran|disabilit|hispanic|latin[aox]|pronoun", re.I)
+                          r"lgbt|veteran|disabilit|hispanic|latin[aox]|pronoun|"
+                          r"\b(gay|lesbian|bisexual|queer|heterosexual|pansexual|asexual|neurodiver\w+)\b|"
+                          r"\b(your|current) age\b|date of birth|birth ?date|diversity (survey|questionnaire)|"
+                          r"communities do you belong", re.I)
 PROFILE_ONLY_OPTION = re.compile(r"citizen|green card|permanent resident|u\.?s\.? person|^\W*(i am an? )?(wo)?m[ae]n\b|"
                                  r"^\W*(i am )?(fe)?male\b|non-?binary|"
                                  r"veteran|disabilit|hispanic|latin[aox]|african american|\basian\b|\bwhite\b|"
-                                 r"pacific islander|alaska native|transgender|cisgender", re.I)
+                                 r"pacific islander|alaska native|transgender|cisgender|"
+                                 r"\b(gay|lesbian|bisexual|queer|heterosexual|pansexual|neurodiver\w+)\b", re.I)
 # The profile keys and classifier answers that put a question under rule 2, whatever its wording
 RULE2_CANONS = {"work_authorized_us", "needs_sponsorship", "us_citizen", "us_person", "citizenship_status",
                 "other_citizenship", "export_license", "security_clearance", "citizenships", "work_authorized_other",
