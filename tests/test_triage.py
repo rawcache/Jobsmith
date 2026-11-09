@@ -993,3 +993,10 @@ def test_real_list_wordings_pick_the_confirmed_answer():
     ]
     for f, want in cases:
         assert draft.offline(f, profile.answers(), US_JOB)["answer"] == want, f["label"]
+
+
+def test_two_facts_in_one_list_question_wait():
+    profile.set_answer("gender", "Male", confirmed=True)
+    got = draft.offline(field("Please select your gender identity and sex", options=["Male", "Female"]),
+                        profile.answers(), US_JOB)
+    assert got["answer"] == "" and got["issues"]
