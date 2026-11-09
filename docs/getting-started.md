@@ -73,15 +73,19 @@ them from your own saved answers with no AI at all, or you can connect one: Gemi
 
 ## 3. Approve your first application
 
-Jobsmith fills your best match and stops. It does not send it. You'll see it under **Needs you** with "approve the
-first submission".
+Jobsmith fills your best match and stops. It does not send it.
 
-Open it and read every answer. Each one says where it came from: your resume, your profile, or your own writing.
-If an answer is wrong, change it there. When it all looks right, approve it, and that application is sent.
+**If you chose autopilot,** it's under **Needs you** as "approve the first submission". Open it and read every
+answer; each says where it came from (your resume, your profile, or your own writing). When it all looks right,
+press **Approve and send**. If an answer is wrong, press **Take over** instead: the filled form opens in a window,
+you correct it there and press the site's Submit yourself.
 
 After that first approval, autopilot sends applications on that job site on its own, up to 20 a day and 3 per
 company a week (you can change both in Settings). Its first application on each other job site also stops for your
 approval, one at a time.
+
+**If you chose copilot,** every application stops at the filled form. Open it from Needs you, check it, and press
+the site's Submit yourself. Jobsmith never presses it for you in copilot.
 
 ## 4. Day to day
 
@@ -98,14 +102,14 @@ CAPTCHA, signing in, and answering anything about work authorization, sponsorshi
 your confirmed profile.
 
 In the terminal, type what you want in plain words ("what's waiting for me?", "apply to nvidia hardware
-internships") or a command: `/review` goes through what's waiting, `/status` says what's running, `/web` opens the
-dashboard, `/stop` stops everything, and Shift+Tab turns autopilot on or off.
+internships") or a command: `/review` goes through what's waiting, `/watch` shows forms being filled, `/web` opens
+the dashboard, `/stop` stops everything, and Shift+Tab turns autopilot on or off.
 
 **The Chrome extension is optional.** Autopilot doesn't need it. It adds a Jobsmith panel to job postings you open
 yourself, to fill a form you'll submit by hand. Until it's in the Chrome Web Store, add it like this:
 
-1. In the terminal, type `/extension` (or run `jobsmith extension`). It opens Chrome's extensions page and the
-   folder to pick.
+1. Open a new Terminal window and run `jobsmith extension`. It opens Chrome's extensions page and the folder to
+   pick.
 2. On that page, turn on **Developer mode** (top right).
 3. Click **Load unpacked** and choose the folder Jobsmith opened.
 4. Click the puzzle piece in Chrome's toolbar and pin Jobsmith.
