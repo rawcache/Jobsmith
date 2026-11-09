@@ -13,6 +13,7 @@ APPLY_BUTTONS = ['a:has-text("Apply for this job")', 'a:has-text("Apply now")', 
                  'a:has-text("Apply")', 'button:has-text("Apply")']
 
 
+MENU = '[aria-haspopup], [aria-expanded], [data-testid*="dropdown" i], [role="menuitem"], summary'
 APPLY_EXACT = re.compile(r"^\s*apply(\s+now|\s+(for|to)\s+(this|the)\s+(job|role|position))?\s*$", re.I)
 
 
@@ -48,8 +49,10 @@ async def _press_apply(page: Page) -> None:
     from .multistep import needs_sign_in
     exact = [el for role in ("button", "link") for el in await page.get_by_role(role, name=APPLY_EXACT).all()]
     loose = [el for sel in APPLY_BUTTONS for el in await page.locator(sel).all()]
-    # the menu is tried only when nothing says just "Apply": pressing it past a covered Apply button opens no form
-    shown = [el for el in (exact or loose) if await el.is_visible()]
+    # then anything else with the word ("Apply online"), but never a menu: pressing "How to Apply ▾" opens no form
+    loose = [el for el in loose if not APPLY_EXACT.match(" ".join((await el.inner_text()).split()))
+             and not await el.evaluate(f"e => e.matches('{MENU}')")]
+    shown = [el for el in exact + loose if await el.is_visible()]
     for btn in shown:
         try:
             await btn.click(timeout=4000)
