@@ -383,9 +383,9 @@ class Review(View):
     def load_jobs(self) -> None:
         home = self.get("/api/home")
         fixes = self.get("/api/fixes").get("fixes", [])
-        self.app.call_from_thread(self.show_jobs, home.get("review", []), fixes)
+        self.app.call_from_thread(self.show_jobs, home.get("review", []), fixes, home.get("held"))
 
-    def show_jobs(self, rows: list[dict], fixes: list[dict] | None = None) -> None:
+    def show_jobs(self, rows: list[dict], fixes: list[dict] | None = None, held: dict | None = None) -> None:
         t = self.query_one("#jobs", DataTable)
         keep = t.cursor_row
         t.clear()
@@ -396,8 +396,12 @@ class Review(View):
         for r in rows:
             mark = Text("✗", style=BAD) if r["status"] == "error" else Text("!", style=WARN)
             why = r.get("why") or words.why(r)
-            t.add_row(mark, Text(f"{r['company']} · {r.get('title') or ''}"[:34], style="bold"), why[:60], key=r["id"])
+            # both stay readable: a long company name never pushes the role off the row
+            name = Text.assemble((r["company"][:18], "bold"), " · ", ((r.get("title") or "")[:26], ""))
+            t.add_row(mark, name, why[:60], key=r["id"])
         ready, failed = sum(r["status"] != "error" for r in rows), sum(r["status"] == "error" for r in rows)
+        if held:                         # all of them, when there are more than the list shows
+            ready, failed = held.get("ready", ready), held.get("failed", failed)
         self.query_one("#t", Static).update(self.heading((f"Review  {words.summary(ready, failed) or 'nothing waiting'}", "bold"),
                                                        ("   a approve · e edit · s submit · k skip · esc back", DIM)))
         if not rows and not self.fixes:
