@@ -799,3 +799,12 @@ async def test_an_apply_online_link_opens_the_form_when_the_button_is_covered(pa
     from jobsmith.fill import generic
     fields = await generic.scan(page, _apply_page("link_opens_form.html"))
     assert [f["label"] for f in fields] == ["First name", "Email", "Why this role?"]
+
+
+def test_a_timeout_is_a_busy_ai_but_no_connection_is_yours_to_see():
+    import httpx
+    from jobsmith import llm
+    assert isinstance(llm._unreached("Gemini", httpx.ReadTimeout("slow")), llm.BusyError)
+    for e in (httpx.ConnectError("refused"), httpx.ConnectTimeout("no route")):
+        got = llm._unreached("Gemini", e)
+        assert not isinstance(got, llm.BusyError) and "Couldn't reach Gemini" in str(got)
