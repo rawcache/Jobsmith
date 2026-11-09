@@ -651,6 +651,22 @@ async def test_an_answer_for_one_job_is_never_reused_for_another(fake_llm, tmp_p
     row = next(d for d in draft.drafts_for(c) if d["field"] == "q_commute")
     assert row["final_answer"] == "Yes" and row["scope"] == "job"
     assert learn.reusable_answer(COMMUTE["label"], "select", ["Yes", "No"]) is None        # not offered elsewhere
+    # ...nor put on another application that asks the same thing but isn't counted (it failed on its site)
+    e = await _held("Hooli", COMMUTE)
+    db.x("UPDATE jobs SET status='error', error='the site timed out' WHERE id=?", (e,))
+    f = await _held("Vandelay", COMMUTE)
+    db.x("UPDATE jobs SET status='error', error='the site timed out' WHERE id=?", (f,))
+    g = await _held("Stark", COMMUTE)
+    db.x("UPDATE jobs SET status='error', error='the site timed out' WHERE id=?", (e,))
+    [only] = [x["jobs"] for x in fixes.compute()["fixes"] if x["id"] == fixes.question_id(COMMUTE["label"], COMMUTE["options"])]
+    assert only == [g]
+    fixes.answer(fixes.question_id(COMMUTE["label"], COMMUTE["options"]), "No")
+    assert next(d for d in draft.drafts_for(g) if d["field"] == "q_commute")["final_answer"] == "No"
+    for other in (e, f):
+        assert next(d for d in draft.drafts_for(other) if d["field"] == "q_commute")["final_answer"] is None
+    # ...nor used as an example of your writing for another job
+    db.x("UPDATE drafts SET kind='generated', answer='Maybe' WHERE job_id=? AND field='q_commute'", (g,))
+    assert not [x for x in learn.edit_examples(10) if x["label"] == COMMUTE["label"]]
     # one that several applications ask is answered once, and is there for the next form that asks it
     a, b = await _held("Acme", OFFICE), await _held("Globex", OFFICE)
     fixes.answer(fixes.question_id(OFFICE["label"], OFFICE["options"]), "No")
@@ -674,3 +690,14 @@ async def test_skip_this_job_drops_it_and_never_one_being_sent(fake_llm):
         guardrails.release(d)
     with pytest.raises(ValueError):
         fixes.skip_job("nope")
+
+
+async def test_an_application_with_only_its_own_problem_is_listed_to_skip(fake_llm):
+    _alex()
+    fake_llm(lambda s, p: {"answers": []})
+    c = await _held("Initech", FIRST)
+    db.x("UPDATE jobs SET status='error', error='The site asks you to sign in' WHERE id=?", (c,))
+    out = fixes.compute()
+    [app] = out["applications"]
+    assert app["id"] == c and app["questions"] == [] and "sign in" in app["own"][0] and out["about_jobs"] == [c]
+    assert fixes.skip_job(c)["applications"] == []

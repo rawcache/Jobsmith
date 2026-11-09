@@ -107,6 +107,7 @@ def passages() -> list[dict]:
     rows = [dict(r, kind="sample") for r in db.q("SELECT id, source, title, text FROM voice_passages ORDER BY id")]
     for d in db.q("""SELECT d.id, d.label, COALESCE(d.final_answer, d.answer) text, j.company FROM drafts d JOIN jobs j ON j.id=d.job_id
                      WHERE (d.verdict='green' OR d.final_answer IS NOT NULL) AND d.qtype='textarea'
+                       AND COALESCE(d.scope, '') != 'job'
                        AND length(COALESCE(d.final_answer, d.answer)) > 120 ORDER BY d.id DESC LIMIT 200"""):
         rows.append({"id": -d["id"], "source": f"your answer to {d['company']}", "title": d["label"], "text": d["text"], "kind": "answer"})
     return rows

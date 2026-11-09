@@ -86,6 +86,7 @@ def edit_examples(limit: int = 4) -> list[dict]:
     """Before/after pairs where the user rewrote a generated answer: the strongest style signal."""
     rows = db.q("""SELECT label, answer, final_answer FROM drafts WHERE kind='generated'
                    AND final_answer IS NOT NULL AND final_answer != '' AND final_answer != answer
+                   AND COALESCE(scope, '') != 'job'
                    ORDER BY updated_at DESC LIMIT ?""", (limit,))
     return rows
 
