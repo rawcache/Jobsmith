@@ -634,3 +634,14 @@ def test_the_not_hispanic_race_choice_needs_that_confirmed_too(hispanic, confirm
         profile.set_answer("hispanic_latino", hispanic, confirmed=confirmed)
     f = field("Race", options=["White (Not Hispanic or Latino)", "Asian (Not Hispanic or Latino)", "Hispanic or Latino"])
     assert draft.offline(f, profile.answers(), JOB)["answer"] == want
+
+
+def test_a_company_name_with_dots_is_read_whole():
+    company, _, own = draft._asked_company({"company": "Rocket Lab"},
+                                           "Have you ever worked for the U.S. Government or Department of Defense?")
+    assert company != "the U" and not own
+    assert company == ""                                 # two employers in one: named as "them", never "the U"
+    company, _, own = draft._asked_company({"company": "Rocket Lab"}, "Have you ever worked for the U.S. Government?")
+    assert company == "the U.S. Government" and not own
+    company, _, own = draft._asked_company({"company": "Acme Robotics"}, "Have you worked for Acme Robotics. If so, when?")
+    assert company == "Acme Robotics" and own

@@ -152,7 +152,7 @@ ALSO_COUNTRIES = {"Georgia"}       # spelled out, it may mean the country
 _STOP = r"(?:in|within|during|over|since|from|between|before|after|until|prior to)"
 ASKS_ABOUT = re.compile(r"(?:(?:worked|work|been employed|employed)\s+(?:for|at|by|with)|(former|previous|past)\s+"
                         r"(?:employee|intern|contractor|worker)s?\s+(?:of|at|with))\s+(.+?)"
-                        r"(?=\s+(?:before|previously|in the past|at any time|ever)\b|\s*[,?.(]|\s+as\b"
+                        r"(?=\s+(?:before|previously|in the past|at any time|ever)\b|\s*[,?(]|(?<!\b[A-Z])\.|\s+as\b"
                         rf"|\s+(?:or|and)\s+(?:any|its|their|one)\b|\s+{_STOP}\b|$)", re.I)
 NOT_A_COMPANY = re.compile(r"^(?:a|an|any|another|other)\b", re.I)      # "worked for a government agency"
 THIS_COMPANY = re.compile(r"^(?:us|this company|the company|our company|this organi[sz]ation|here)$", re.I)
