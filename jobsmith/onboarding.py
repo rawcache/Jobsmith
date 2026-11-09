@@ -80,6 +80,197 @@ def resume_summary() -> dict:
             "to_confirm": sum(1 for v in profile.answers().values() if v.get("value") and not v.get("confirmed"))}
 
 
+# --------------------------------------------------------------------------- setup, in order
+# 1 resume PDF, 2 check what was read, 3 one list of one-time questions, 4 what you're looking for (with a live
+# count), 5 job lists from presets, 6 AI (optional), 7 the supervised first application.
+SETUP_STEPS = ["resume", "confirm", "questions", "prefs", "sources", "ai", "start"]
+
+# What the resume gives that forms ask for, shown back to you to check before anything uses it. Work authorization
+# and the rest of the one-time questions are asked in step 3, never read from a resume.
+READ_BACK = ["first_name", "last_name", "email", "phone", "location", "linkedin", "github", "website", "school",
+             "degree", "major", "gpa", "graduation_date"]
+
+DECLINE = "Decline to self-identify"
+VOLUNTARY_KEYS = ["gender", "race", "hispanic_latino", "veteran_status", "disability_status", "lgbtq"]
+
+# The one list. No default for work authorization, sponsorship, or the employer-list claim: only you answer those
+# (rule 2), and a default would be a guess. Each says in one line why forms ask.
+QUESTIONS = [
+    {"key": "work_authorized_us", "label": "Are you authorized to work in the US?", "choices": ["Yes", "No"],
+     "required": True, "why": "Nearly every form asks. Only you answer it; Jobsmith never guesses."},
+    {"key": "needs_sponsorship", "label": "Will you need visa sponsorship, now or later?", "choices": ["Yes", "No"],
+     "required": True, "why": "Asked next to work authorization. Yes also hides roles that say they don't sponsor."},
+    {"key": "resume_lists_all_employers", "label": "Does your resume list every employer and contract you've had?",
+     "choices": ["Yes", "No"], "required": True,
+     "why": "Then \"Have you worked for us before?\" is No for companies not on it. With No, each one asks you."},
+    {"key": "willing_to_relocate", "label": "Work in person or relocate?", "choices": ["Only in my chosen locations",
+     "Yes, anywhere", "No"], "default": "Only in my chosen locations",
+     "why": "Forms ask about relocating and office days. Yes for a job in a place you pick next; others ask you."},
+    {"key": "desired_pay", "label": "Pay expectation", "kind": "text", "default": "",
+     "placeholder": "Leave blank, or e.g. $45/hour", "why": "Left empty when optional. When a form requires it, "
+     "that job asks you."},
+    {"key": "years_experience", "label": "Years of work experience", "kind": "text", "default": "",
+     "placeholder": "e.g. 1", "why": "Some forms want a number. Blank: those jobs ask you."},
+    {"key": "internships_count", "label": "Did you count internships in that number?", "choices": ["Yes", "No"],
+     "default": "Yes", "why": "A form that counts them the other way asks you, so the number is never wrong."},
+    {"key": "earliest_start", "label": "Earliest start date", "kind": "text", "default": "",
+     "placeholder": "e.g. May 2027", "why": "Forms ask when you can start."},
+    {"key": "voluntary", "label": "Voluntary questions (gender, race, veteran and disability status)",
+     "choices": ["Decline to answer", "I'll answer them on my Profile"], "default": "Decline to answer",
+     "why": "Optional on US forms, and declining never counts against you. Jobsmith never guesses these."},
+]
+
+
+def read_back() -> list[dict]:
+    """The values your resume gave, for you to check: each with its label and whether you've confirmed it."""
+    a = profile.answers()
+    return [{"key": k, "label": a[k]["label"], "value": a[k]["value"], "confirmed": bool(a[k]["confirmed"]),
+             "section": a[k]["section"]} for k in READ_BACK if k in a]
+
+
+def confirm_values(values: dict[str, str]) -> None:
+    """You checked these (and maybe corrected some): each is saved as yours. Only the keys shown, never the rest."""
+    for k, v in values.items():
+        if k in READ_BACK:
+            profile.set_answer(k, (v or "").strip(), confirmed=bool((v or "").strip()))
+
+
+def _start_default(s: dict, a: dict) -> str:
+    grad = (a.get("graduation_date") or {}).get("value") or ""
+    if goals_of(s) == ["newgrad"] and grad:
+        return grad
+    return "Summer 2027" if "internship" in goals_of(s) else ""
+
+
+def questions() -> list[dict]:
+    """The one list, with what you answered (or the default) and whether it's yours yet."""
+    a = profile.answers()
+    s = db.get_settings()
+    out = []
+    for q in QUESTIONS:
+        row = dict(q, kind=q.get("kind") or "choice")
+        if q["key"] == "voluntary":
+            vals = [(a.get(k) or {}) for k in VOLUNTARY_KEYS]
+            mine = [v for v in vals if v.get("confirmed") and v.get("value") and v["value"] != DECLINE]
+            declined = all(v.get("confirmed") and v.get("value") == DECLINE for v in vals)
+            row["value"] = "I'll answer them on my Profile" if mine else "Decline to answer" if declined else ""
+            row["confirmed"] = bool(mine or declined)
+        else:
+            cur = a.get(q["key"]) or {}
+            row["value"], row["confirmed"] = cur.get("value") or "", bool(cur.get("confirmed"))
+            if q.get("required") and not row["confirmed"]:
+                # read from your resume, never picked for you: shown beside the question, you choose
+                row["hint"] = f"Your resume says: {row['value']}" if row["value"] else ""
+                row["value"] = ""
+        if q["key"] == "earliest_start":
+            row["default"] = _start_default(s, a)
+        out.append(row)
+    return out
+
+
+def questions_done() -> bool:
+    return all(q["confirmed"] and q["value"] for q in questions() if q.get("required"))
+
+
+def save_questions(values: dict[str, str]) -> list[str]:
+    """Your answers to the one list, saved as confirmed. Returns the required ones still missing."""
+    known = {q["key"]: q for q in QUESTIONS}
+    for k, v in values.items():
+        q = known.get(k)
+        v = (v or "").strip()
+        if not q or (q.get("choices") and v and v not in q["choices"]):
+            continue
+        if k == "voluntary":
+            if v == "Decline to answer":
+                a = profile.answers()
+                for key in VOLUNTARY_KEYS:     # an answer you gave yourself before stays
+                    cur = a.get(key) or {}
+                    if not (cur.get("confirmed") and cur.get("value") and cur["value"] != DECLINE):
+                        profile.set_answer(key, DECLINE, confirmed=True)
+            continue
+        profile.set_answer(k, v, confirmed=bool(v) or not q.get("required"))
+    match.rescore()                            # sponsorship changes which roles fit
+    return [q["label"] for q in questions() if q.get("required") and not (q["confirmed"] and q["value"])]
+
+
+# Job lists to start from, instead of typing a board's address. Each level picks its list by default.
+PRESETS = {
+    "simplify_internships": {"label": "SimplifyJobs: Summer 2027 internships", "level": "internship",
+                             "url": "https://github.com/SimplifyJobs/Summer2027-Internships"},
+    "simplify_newgrad": {"label": "SimplifyJobs: new grad roles", "level": "newgrad",
+                         "url": "https://github.com/SimplifyJobs/New-Grad-Positions"},
+}
+
+
+def presets_state() -> list[dict]:
+    active = {r["url"] for r in db.q("SELECT url FROM sources WHERE active=1")}
+    return [dict(v, key=k, on=v["url"] in active) for k, v in PRESETS.items()]
+
+
+def set_presets(keys: list[str]) -> list[dict]:
+    """Turn the preset lists on or off. Lists you added yourself are left alone."""
+    for k, v in PRESETS.items():
+        if k in keys:
+            sources.add_source(v["url"])
+        else:
+            db.x("UPDATE sources SET active=0 WHERE url=?", (v["url"],))
+    return presets_state()
+
+
+def prefs_patch(levels: list[str], seasons: list[str] | None, categories: list[str], locations: list[str],
+                picky: str) -> dict:
+    """The settings these choices mean, for previewing the count or saving."""
+    levels = [x for x in levels if x in match.LEVELS] or ["internship"]
+    terms = (["New Grad"] if "newgrad" in levels else []) + \
+            ([t for t in (seasons or ["Summer 2027"]) if match.SEASON.match(t)] if "internship" in levels else [])
+    names = [n for n in locations if n in LOCATIONS]
+    return {"goals": levels, "goal": levels[0], "target_terms": terms, "target_categories": categories,
+            "target_locations": [x for n in names for x in LOCATIONS[n]], "location_choices": names,
+            "min_fit_score": PICKY.get(picky, 40)}
+
+
+def preview(levels, seasons, categories, locations, picky) -> dict:
+    r = match.preview(prefs_patch(levels, seasons, categories, locations, picky))
+    n = r["matches"]
+    r["advice"] = ("" if n == 0 and not r["open"] else
+                   "No matches yet. Pick more places or role types." if n == 0 else
+                   "That's a lot to check. Pick fewer places or role types, or a higher fit bar." if n > 300 else "")
+    return r
+
+
+def save_prefs(levels, seasons, categories, locations, picky) -> dict:
+    patch = prefs_patch(levels, seasons, categories, locations, picky) | {"prefs_saved": True}
+    db.set_settings(patch)
+    for k, v in PRESETS.items():               # the level you picked brings its list along
+        if v["level"] in patch["goals"]:
+            sources.add_source(v["url"])
+    match.rescore()
+    return patch
+
+
+def seasons_seen() -> list[str]:
+    """Internship seasons in your lists, most roles first, for the level picker."""
+    import json as _j
+    n: dict[str, int] = {}
+    for r in db.q("SELECT terms FROM jobs WHERE active=1 AND terms LIKE '%20%'"):
+        for t in _j.loads(r["terms"] or "[]"):
+            if match.SEASON.match(t or ""):
+                n[t] = n.get(t, 0) + 1
+    return sorted(n, key=lambda t: -n[t])[:6] or ["Summer 2027"]
+
+
+def step_done() -> dict[str, bool]:
+    s = db.get_settings()
+    rs = profile.resume_status()
+    rb = read_back()
+    return {"resume": bool(rs["attached"]),
+            "confirm": bool(rs["attached"]) and all(r["confirmed"] for r in rb if r["value"]),
+            "questions": questions_done(), "prefs": bool(s.get("prefs_saved")),
+            "sources": bool(s.get("prefs_saved")) and bool(db.q1("SELECT 1 FROM sources WHERE active=1")),
+            "ai": bool(s.get("llm_backend") not in (None, "", "auto")) or bool(s.get("ai_step_seen")),
+            "start": setup_done(s)}
+
+
 # What autopilot needs before it can apply on its own. (key, label, required)
 CHECKLIST = [
     ("resume", "Resume", True), ("pdf", "PDF resume to attach", True), ("name", "Name", True),
@@ -130,7 +321,11 @@ async def state() -> dict:
             "categories": s.get("target_categories") or [], "ai": {"detected": llm.detected(s, models), "ok": ok,
             "message": msg, "using": llm.label(llm.backend("write")), "backend": s.get("llm_backend")},
             "resume": resume_summary(), "sources": db.q("SELECT id, url, last_synced, last_count FROM sources WHERE active=1"),
-            "autonomy": s.get("autonomy"), "smith": await smith.status()}
+            "autonomy": s.get("autonomy"), "smith": await smith.status(),
+            "steps": SETUP_STEPS, "step_done": step_done(), "read_back": read_back(), "questions": questions(),
+            "presets": presets_state(), "seasons": seasons_seen(), "seasons_set": [x for x in s.get("target_terms") or []
+                                                                                  if match.SEASON.match(x)],
+            "prefs_saved": bool(s.get("prefs_saved"))}
 
 
 def set_goal(goal: str | list[str], categories: list[str] | None = None, companies: list[str] | None = None) -> dict:
@@ -167,6 +362,21 @@ def set_ai(kind: str, key: str = "", model: str = "") -> None:
 
 
 FIRST_AUTOPILOT_DELAY = 20 * 60   # the supervised first run gets the browser to itself
+
+
+DONE_STEPS = ("done", "first", "started")
+
+
+def setup_done(s: dict | None = None) -> bool:
+    """Setup reached its end. Until then nothing is drafted on its own and autopilot stays off; skipping setup
+    doesn't count."""
+    s = s or db.get_settings()
+    return bool(s.get("onboarded")) and (s.get("setup_step") or "") in DONE_STEPS
+
+
+def skip() -> None:
+    """You left setup before the end: the dashboard opens, but autopilot stays off until you finish it."""
+    db.set_settings({"onboarded": True, "setup_step": "skipped", "auto_run": False})
 
 
 def finish(autonomy: str = "autopilot", start_now: bool = False, final: bool = True) -> None:

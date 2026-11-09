@@ -821,191 +821,175 @@ def _pick_ai(e: Engine, st: dict) -> None:
         P.warn(f"{res['using']}: {res['message']}")
 
 
-def _checklist_lines(st: dict, footer: str) -> list[str]:
-    lines = [f"{P.cyan(P.ACTIVE)}  {P.bold('Your resume and details')}  {P.dim('(on the website)')}"]
-    for c in st["checklist"]:
-        if c["done"]:
-            mark, label = P.green(P.BOX_ON), c["label"]
-        else:
-            mark, label = (P.yellow(P.BOX_OFF) if c["required"] else P.dim(P.BOX_OFF)), P.dim(c["label"] + ("" if c["required"] else " (optional)"))
-        val = P.dim("  " + c["value"][:48]) if c["value"] else ""
-        lines.append(f"{P.cyan(P.BAR)}  {mark} {label}{val}")
-    lines.append(f"{P.cyan(P.END)}  {footer}")
-    return lines
+LEVEL_OPTS = [("Internship", "internship"), ("New grad", "newgrad")]
+PICKY_OPTS = [("Good fits (recommended)", "good", "roles that match your level, role types and places"),
+              ("Strong fits only", "strong", "fewer, closer matches"), ("Anything I qualify for", "any", "the most")]
 
 
-def _wait_for_profile(e: Engine) -> dict:
-    """The website takes your resume and details; this ticks each one off as it arrives.
-    Enter continues here instead, o opens the page again."""
-    url = BASE + "/#/setup"
-    e.put("/api/settings", {"setup_step": "profile"})
-    P.note(f"Opening {url}\nAdd your resume and details there. They tick off here as they arrive.", "Next: your resume")
-    webbrowser.open(url)
-    st = e.get("/api/onboarding")
-    if not P.interactive():
-        return st
-    f = P.Frame()
-    tick = 0
-    try:
-        with P._Raw() as kb:
-            while st.get("setup_step") == "profile":
-                tick += 1
-                foot = (P.green("Everything autopilot needs is here.") + P.dim("  Finish on the website, or press Enter to continue here")
-                        if st["profile_ready"] else
-                        P.dim(f"{SPIN_FRAMES[tick % 4]} waiting for the website · Enter to continue here instead · o to open it again"))
-                f.draw(_checklist_lines(st, foot))
-                k = kb.key(1.0)
-                if k == "enter":
-                    break
-                if k == "o":
-                    webbrowser.open(url)
-                st = e.get("/api/onboarding")
-    except KeyboardInterrupt:
-        f.clear()
-        raise
-    f.clear()
-    done = [c for c in st["checklist"] if c["done"]]
-    print(f"{P.green(P.DONE)}  Your resume and details")
-    for c in done:
-        print(f"{P.gray(P.BAR)}  {P.green(P.BOX_ON)} {c['label']}  {P.dim(c['value'][:60])}")
-    print(P.gray(P.BAR))
+def _why(text: str) -> None:
+    print(f"{P.gray(P.BAR)}  {P.dim(text)}")
+
+
+def _setup_resume(e: Engine, st: dict) -> dict:
+    """Step 1: the resume PDF first. A .tex or .docx alongside it is read more exactly."""
+    while not st["step_done"]["resume"]:
+        p = P.text("Drag your resume PDF here and press Enter")
+        if not p:
+            if not P.interactive():
+                break
+            P.warn("Setup starts from your resume: everything Jobsmith writes comes from it.")
+            continue
+        path = _clean_path(p)
+        if not path.exists():
+            P.warn(f"Can't find {path}")
+            continue
+        slots = ["resume", "resume_pdf"] if path.suffix.lower() == ".pdf" else ["resume"]
+        for slot in slots:
+            with open(path, "rb") as fh:
+                e.post("/api/profile/upload", files={"file": (path.name, fh)}, data={"slot": slot})
+        st = e.get("/api/onboarding")
+        P.success(f"Read {path.name}: {st['resume']['facts']} facts")
+        if not st["step_done"]["resume"]:
+            P.info("Employers get a PDF. Drag the PDF version in too.")
     return st
 
 
-def _resume_here(e: Engine, st: dict) -> dict:
-    """Finishing in the terminal: drag a resume in, answer what's still missing."""
-    if not st["checklist"][0]["done"] or not st["checklist"][1]["done"]:
-        while True:
-            p = P.text("Drag your resume here (.tex, .pdf or .docx) and press Enter, or leave blank to skip")
-            if not p:
-                break
-            path = _clean_path(p)
-            if not path.exists():
-                P.warn(f"Can't find {path}")
-                continue
-            slots = ["resume", "resume_pdf"] if path.suffix.lower() == ".pdf" else ["resume"]
-            for slot in slots:
-                with open(path, "rb") as fh:
-                    e.post("/api/profile/upload", files={"file": (path.name, fh)}, data={"slot": slot})
-            st = e.get("/api/onboarding")
-            P.success(f"Read {path.name}: {st['checklist'][0]['value']}")
-            if st["checklist"][1]["done"] or not P.confirm("Add the PDF version too? That's what employers get."):
-                break
-    for key, label in (("work_authorized_us", "Authorized to work in the US?"), ("needs_sponsorship", "Need visa sponsorship now or later?")):
-        item = next(c for c in st["checklist"] if c["key"] == key)
-        if not item["done"]:
-            v = P.select(label, [("Yes", "Yes"), ("No", "No"), ("Skip", "")])
-            if v:
-                e.put(f"/api/answers/{key}", {"value": v, "confirmed": True})
-    if any(c["value"] for c in st["checklist"]) and P.confirm("Confirm the details read from your resume?"):
-        e.post("/api/answers/confirm-all")
+def _setup_confirm(e: Engine, st: dict) -> dict:
+    """Step 2: every value read from the resume, shown back; fix any before they go into a form."""
+    vals = {r["key"]: r["value"] for r in st["read_back"]}
+    labels = {r["key"]: r["label"] for r in st["read_back"]}
+    while True:
+        lines = [f"{labels[k]}: {v or P.dim('(not on your resume)')}" for k, v in vals.items()]
+        P.note("\n".join(lines), "Check what we read")
+        fix = P.select("These go into forms exactly as shown. Are they right?",
+                       [("Yes, these are right", "")] + [(f"Fix {labels[k]}", k) for k in vals], "")
+        if not fix:
+            break
+        vals[fix] = P.text(labels[fix], vals[fix])
+    e.post("/api/onboarding/confirm", {"values": vals})
     return e.get("/api/onboarding")
 
 
+def _setup_questions(e: Engine, st: dict) -> dict:
+    """Step 3: the one list of questions forms ask once. Work authorization, sponsorship and the employer list have
+    no default: only you answer them."""
+    P.info("Questions forms ask. Answer once; every application uses them.")
+    out: dict[str, str] = {}
+    for q in st["questions"]:
+        _why(q["why"])
+        cur = q["value"] or q.get("default") or ""
+        if q["kind"] == "choice":
+            opts = [(c, c) for c in q["choices"]]
+            if q.get("required") and not cur:
+                opts = [("Choose one", "")] + opts
+            while True:
+                v = P.select(q["label"], opts, cur or "")
+                if v or not q.get("required"):
+                    break
+                P.warn("Only you can answer this one.")
+        else:
+            v = P.text(q["label"] + (f" ({q['placeholder']})" if q.get("placeholder") and not cur else ""), cur)
+        out[q["key"]] = v
+    r = e.post("/api/onboarding/questions", {"values": out})
+    if r["missing"]:
+        P.warn("Still to answer: " + ", ".join(r["missing"]))
+    if P.interactive() and P.confirm("Add saved answers now? Your own words for questions many forms ask (optional)",
+                                     False):
+        for kind, label in (("additional_info", "Additional information"), ("why_role", "Why this role?")):
+            text_ = P.text(f"{label} (Enter to skip)")
+            if text_:
+                e.put(f"/api/essays/{kind}", {"text": text_})
+    return e.get("/api/onboarding")
+
+
+def _setup_looking(e: Engine, st: dict) -> dict:
+    """Step 4: level, role types, places and fit bar, with the count of matches they give."""
+    levels = [g for g in st.get("goals_set") or [] if g != "targeted"] or ["internship"]
+    seasons = st.get("seasons_set") or ["Summer 2027"]
+    cats = st["categories"] if st.get("prefs_saved") and st.get("categories") else ["Software", "AI/ML/Data"]
+    places = st.get("location_choices") or []
+    picky = st.get("picky") or "good"
+    while True:
+        levels = P.multiselect("Level", LEVEL_OPTS, levels)
+        if "internship" in levels and len(st.get("seasons") or []) > 1:
+            seasons = P.multiselect("Internship seasons", [(x, x) for x in st["seasons"]], seasons)
+        cats = P.multiselect("Role types", [(f, f) for f in st["fields"]], cats)
+        picked = P.multiselect("Places", [("Anywhere in the US", "any")] +
+                               [(n, n, "outside the US" if n in st.get("international", []) else "") for n in st["locations"]],
+                               places or ["any"], exclusive="any")
+        places = [] if "any" in picked else picked
+        picky = P.select("How good a fit", PICKY_OPTS, picky)
+        body = {"levels": levels, "seasons": seasons, "categories": cats, "locations": places, "picky": picky}
+        pv = e.post("/api/onboarding/preview", body)
+        P.success(f"{pv['matches']:,} match{'es' if pv['matches'] != 1 else ''}"
+                  + (f" of {pv['open']:,} open roles in your lists" if pv["open"] else
+                     " so far: your job lists are still syncing"))
+        if pv.get("advice"):
+            P.info(pv["advice"])
+        if not P.interactive() or P.select("Keep these?", [("Yes", True), ("Change them", False)], True):
+            break
+    e.post("/api/onboarding/looking", body)
+    return e.get("/api/onboarding")
+
+
+def _setup_sources(e: Engine, st: dict) -> dict:
+    """Step 5: job lists from presets, not board addresses. The list for your level is on already."""
+    levels = st.get("goals_set") or []
+    on = [p["key"] for p in st["presets"] if p["level"] in levels]
+    keys = P.multiselect("Where to look", [(p["label"], p["key"]) for p in st["presets"]], on)
+    e.post("/api/onboarding/sources", {"presets": keys})
+    P.info("Want one company's own job board too? Paste its address here any time later.")
+    return e.get("/api/onboarding")
+
+
+def _setup_start(e: Engine, st: dict) -> None:
+    """Step 7: the supervised first application. Nothing is sent until you approve it."""
+    mode = P.select("After your first application", [
+        ("Autopilot (recommended)", "autopilot", "applies on its own within your limits; holds anything unsure"),
+        ("Copilot", "copilot", "fills every form and stops before Submit")], st.get("autonomy") or "autopilot")
+    P.info("Jobsmith fills your best match, then stops and shows every answer and where it came from.\n"
+           "Nothing is sent until you approve it (/review, then s).")
+    go = P.select("Ready", [("Fill my first application now", "go"), ("Not now", "later", "autopilot stays off")], "go")
+    if go != "go":
+        e.post("/api/onboarding/skip")
+        P.outro("Setup is saved. Run `jobsmith setup` to finish; autopilot stays off until then.")
+        return
+    if smith_busy(e):
+        P.info("Waiting for smith to finish downloading (Ctrl+C to do this later).")
+        smith_wait(e)
+    e.post("/api/onboarding/finish", {"autonomy": mode, "final": False})
+    res = e.post("/api/onboarding/first-run" if mode == "copilot" else "/api/onboarding/start")
+    if res.get("ok") is False:
+        P.outro(res.get("message", "Nothing to fill yet. Your job lists may still be syncing; try /autopilot in a minute."))
+        return
+    P.outro("Filling your first application. It waits for you under /review." + (
+        f" Also applying to {', '.join(res['companies'])}." if res.get("companies") else ""))
+    _handoff(e)
+
+
 def init(e: Engine) -> None:
+    """First-run setup in the terminal, the same steps and order as the website's."""
     st = e.get("/api/onboarding")
     print()
     P.intro("Jobsmith setup")
     P.note("Applies to jobs for you, from your real resume, and never makes anything up.\n"
-           "A few questions and your resume, here in the terminal. Then it gets to work.", "Welcome")
-
-    # 1. what you're applying for (several allowed)
-    goal_opts = [(g["label"], k) for k, g in st["goals"].items()]
-    goals = P.multiselect("What are you applying for?", goal_opts, st.get("goals_set") or ["internship"])
-    companies: list[str] = []
-    if "targeted" in goals:
-        companies = [c.strip() for c in P.text("Which companies? Separate them with commas",
-                                               ", ".join(st.get("companies") or [])).split(",") if c.strip()]
-
-    # 2. fields (several allowed)
-    fields = st["fields"]
-    cats = P.multiselect("Which fields?", [(f, f) for f in fields], st.get("categories") or fields[:3])
-    e.post("/api/onboarding/goal", {"goals": goals, "goal": goals[0], "categories": cats, "companies": companies})
-
-    # 3. preferences
-    places = P.multiselect("Where do you want to work?", [("Anywhere in the US", "any")] +
-                           [(n, n, "remote roles" if n == "Remote" else "outside the US" if n in st.get("international", []) else "")
-                            for n in st["locations"]],
-                           st.get("location_choices") or ["any"], exclusive="any")
-    picky = P.select("How picky should autopilot be?", [
-        ("Good fits (recommended)", "good", "roles that match your fields and resume"),
-        ("Strong fits only", "strong", "fewer applications, closer matches"),
-        ("Anything I qualify for", "any", "the most applications")], st.get("picky") or "good")
-    at_once = P.select("How many applications at once?", [
-        ("3 (recommended)", 3, "fast, and easy to keep an eye on"), ("1", 1, "one at a time, easiest to watch"),
-        ("5", 5, "fastest; uses more memory")], st.get("concurrency") or 3)
-    window = P.select("While it applies, the browser window should be", [
-        ("In the background (recommended)", "background", "watch any application when you want to"),
-        ("On screen", "visible", "see every form as it's filled")], st.get("browser_window") or "background")
-    values = P.multiselect("What do you value most in a role? Pick up to 3", [(v, v) for v in st.get("values_all") or []],
-                           st.get("values") or [], required=False, limit=3) if st.get("values_all") else []
-    e.post("/api/onboarding/prefs", {"locations": [] if "any" in places else places, "picky": picky,
-                                     "concurrency": at_once, "browser_window": window, "values": values})
-    ack = P.select("Forms often ask you to confirm privacy notices, terms, or AI-use policies. Answer those for you?", [
-        ("Yes, agree for me (recommended)", "Yes", "otherwise each one waits for you"),
-        ("No, ask me each time", "No")], "Yes")
-    for key in ("acknowledge_notices", "ai_tools_consent"):
-        e.put(f"/api/answers/{key}", {"value": ack, "confirmed": True})
-    P.info("Job lists are syncing in the background.")
-
-    # 4. AI
-    _pick_ai(e, st)
-
-    # 4. resume and details: right here by default (drag the file in), or on the website if you'd rather
-    where = P.select("Your resume", [("Add it here (recommended)", "here", "drag the file into this window"),
-                                     ("On the website", "web", "upload it and check what was read, in your browser")], "here") \
-        if P.interactive() else "web"
-    if where == "here":
-        e.put("/api/settings", {"setup_step": "profile"})
-        st = e.get("/api/onboarding")
-    else:
-        st = _wait_for_profile(e)
-    if st.get("setup_step") == "profile":       # you continued here instead of on the website
-        if not st["profile_ready"]:
-            st = _resume_here(e, st)
-        # 5. how it applies: autopilot first, since that's what Jobsmith is for
-        mode = P.select("How should it apply?", [
-            ("Autopilot (recommended)", "autopilot", "applies on its own, holds anything it isn't sure about for you"),
-            ("Copilot", "copilot", "fills every form and stops before Submit")], "autopilot")
-        e.post("/api/onboarding/finish", {"autonomy": mode})
-        st = e.get("/api/onboarding")
-    elif st.get("setup_step") in ("started", "first"):
-        P.success("Finished on the website. " + ("Autopilot is running." if st["setup_step"] == "started"
-                                                 else "Filling your first application."))
-        P.outro("Here's what it's doing.")
-        _handoff(e, until_idle=st["setup_step"] == "first")
+           "About ten minutes. Nothing is drafted or sent until you finish,\n"
+           "and the first application waits for you to approve it.", "Welcome")
+    if P.interactive() and P.select("Set up here or in your browser?", [
+            ("Here (recommended)", "here", "drag your resume into this window"),
+            ("In the browser", "web", f"{BASE}/#/setup")], "here") == "web":
+        webbrowser.open(f"{BASE}/#/setup")
+        P.outro(f"Setup is open at {BASE}/#/setup. Come back here when it's done.")
         return
-    else:
-        P.success("Finished on the website.")
-    missing = [c["label"] for c in st["checklist"] if c["required"] and not c["done"]]
-    if missing:
-        P.warn(f"Still missing: {', '.join(missing)}. Applications that need these wait for you.")
-
-    # 6. go
-    if st.get("autonomy") == "copilot":
-        go = P.select("Ready", [("Fill my best match now", "first", "you press Submit"), ("Not now", "later")], "first")
-    else:
-        go = P.select("Ready", [("Start autopilot now (recommended)", "start", "and watch it work"),
-                                ("Watch one application first", "first", "fills it without submitting"),
-                                ("Not now", "later")], "start")
-    if smith_busy(e):
-        P.info("Waiting for smith to finish downloading (Ctrl+C to do this later).")
-        smith_wait(e)
-    if go == "start":
-        r = e.post("/api/onboarding/start")
-        P.success("Autopilot is on." + (f" Also applying to {', '.join(r['companies'])}." if r.get("companies") else ""))
-        P.outro("Opening Jobsmith. Ask it anything, or type /help. `jobsmith extension` adds Chrome.")
-        _handoff(e)
-    elif go == "first":
-        res = e.post("/api/onboarding/first-run")
-        if res.get("ok"):
-            P.outro(f"Filling {res['company']}, {res['title']}. Shift+Tab turns autopilot on when you're ready.")
-            _handoff(e)
-        else:
-            P.outro(res.get("message", "Nothing to try yet. Your job lists may still be syncing."))
-    else:
-        P.outro("Autopilot is on: it checks your job lists every few hours. Type /autopilot off to stop it."
-                if st.get("autonomy") != "copilot" else "All set. Type what to apply to, or /help.")
+    st = _setup_resume(e, st)
+    st = _setup_confirm(e, st)
+    st = _setup_questions(e, st)
+    st = _setup_looking(e, st)
+    st = _setup_sources(e, st)
+    _pick_ai(e, st)
+    if not e.get("/api/onboarding")["step_done"]["ai"]:      # skipped: answers from your profile still go in
+        e.post("/api/onboarding/ai", {"kind": "skip"})
+    _setup_start(e, e.get("/api/onboarding"))
 
 
 def _handoff(e: Engine, until_idle: bool = False) -> None:

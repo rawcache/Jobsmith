@@ -66,37 +66,13 @@ def stop(port: int = DEMO_PORT) -> bool:
     return True
 
 
-def seed_here(setup: bool = False) -> None:
-    """Runs inside the practice copy (JOBSMITH_DATA points at it): fill it with a made-up person and jobs."""
-    import asyncio
-    from . import db, match, outcomes, profile
-    from .config import DEMO
-    assert DEMO, "seed_here only runs in the practice copy"
-    resume = Path(__file__).parent / "demo_data" / "resume.tex"
-    shutil.copy(resume, DEMO_DIR / "Alex_Rivera_resume.tex")     # to upload yourself when testing setup
-    pdf = resume_pdf(resume, DEMO_DIR / "Alex_Rivera_resume.pdf")
-    db.conn()
-    outcomes._ensure()
-    if setup:
-        db.set_settings({"onboarded": False, "setup_step": "", "auto_run": False})
-        return
-    asyncio.run(profile.ingest_document(resume))
-    asyncio.run(profile.ingest_document(pdf, "resume_pdf"))     # so autofill has a file to attach
-    for k in ("first_name", "last_name", "email", "phone", "work_authorized_us", "needs_sponsorship"):
-        a = profile.answers().get(k)
-        if a and a["value"]:
-            profile.set_answer(k, a["value"], confirmed=True)
-    profile.set_answer("country", "United States", confirmed=True)   # forms' Country boxes, from the profile, not a guess
-    now = time.time()
-    db.set_settings({"onboarded": True, "setup_step": "done", "goals": ["internship", "newgrad"], "prefs_saved": True,
-                     "auto_run": True, "auto_last_run": now, "autonomy": "autopilot", "values": ["Hard technical problems", "Path to a full-time offer"],
-                     "location_choices": ["Boston", "New York", "Remote"], "llm_backend": "auto"})
+def _setup_jobs(now: float | None = None) -> None:
+    """Made-up roles as the two SimplifyJobs lists would bring them: several levels, role types and places."""
+    from . import db
+    now = now or time.time()
     for url, n in (("https://github.com/SimplifyJobs/Summer2027-Internships", 17249), ("https://github.com/SimplifyJobs/New-Grad-Positions", 19600)):
         db.x("INSERT OR REPLACE INTO sources(url, kind, active, last_synced, last_count) VALUES(?,?,?,?,?)",
              (url, "simplify_github", 1, now - 1800, n))
-    rows = json.loads((Path(__file__).parent / "demo_data" / "jobs.json").read_text())
-    for i, j in enumerate(rows):
-        _add_job(j, now - 3600 * (i + 1))
     rnd = random.Random(7)
     cos = ["Lumen Robotics", "Quarry Labs", "Brightwave", "Northstar Silicon", "Tessellate", "Kestrel AI", "Halcyon Systems",
            "Orbital Freight", "Pinecone Health", "Ridgeline Data", "Cobalt Motors", "Fathom Bio", "Gridlock Energy",
@@ -116,6 +92,40 @@ def seed_here(setup: bool = False) -> None:
                   "description": f"{co} is hiring a {title}.\n\nRequirements\n- Python or C++\n- Git and Linux\n\n"
                                  f"Responsibilities\n- Ship features with a small team\n\n" + (f"Pay: {pay}." if pay else "")},
                  now - 86400 * rnd.randint(0, 40))
+
+
+def seed_here(setup: bool = False) -> None:
+    """Runs inside the practice copy (JOBSMITH_DATA points at it): fill it with a made-up person and jobs."""
+    import asyncio
+    from . import db, match, outcomes, profile
+    from .config import DEMO
+    assert DEMO, "seed_here only runs in the practice copy"
+    resume = Path(__file__).parent / "demo_data" / "resume.tex"
+    shutil.copy(resume, DEMO_DIR / "Alex_Rivera_resume.tex")     # to upload yourself when testing setup
+    pdf = resume_pdf(resume, DEMO_DIR / "Alex_Rivera_resume.pdf")
+    db.conn()
+    outcomes._ensure()
+    if setup:
+        # A fresh install, except the job lists already read (the practice copy never syncs): made-up roles only,
+        # so setup's live match count has something to count. No profile, nothing drafted.
+        db.set_settings({"onboarded": False, "setup_step": "", "auto_run": False})
+        _setup_jobs()
+        return
+    asyncio.run(profile.ingest_document(resume))
+    asyncio.run(profile.ingest_document(pdf, "resume_pdf"))     # so autofill has a file to attach
+    for k in ("first_name", "last_name", "email", "phone", "work_authorized_us", "needs_sponsorship"):
+        a = profile.answers().get(k)
+        if a and a["value"]:
+            profile.set_answer(k, a["value"], confirmed=True)
+    profile.set_answer("country", "United States", confirmed=True)   # forms' Country boxes, from the profile, not a guess
+    now = time.time()
+    db.set_settings({"onboarded": True, "setup_step": "done", "goals": ["internship", "newgrad"], "prefs_saved": True,
+                     "auto_run": True, "auto_last_run": now, "autonomy": "autopilot", "values": ["Hard technical problems", "Path to a full-time offer"],
+                     "location_choices": ["Boston", "New York", "Remote"], "llm_backend": "auto"})
+    rows = json.loads((Path(__file__).parent / "demo_data" / "jobs.json").read_text())
+    for i, j in enumerate(rows):
+        _add_job(j, now - 3600 * (i + 1))
+    _setup_jobs(now)
     # Two job board roles screened out for Alex, under "Left out" on Matches.
     for jid, co, title, kind, why in (
             ("demo-left-senior", "Kestrel AI", "Senior Machine Learning Engineer", "senior",

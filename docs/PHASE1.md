@@ -371,18 +371,28 @@ then `ats.SUPPORTED` and the README.
 The launch gate's third check: someone who isn't a developer installs Jobsmith and reaches a first real application
 in under 15 minutes without help.
 
-- [ ] First-run setup, in the dashboard and mirrored in the terminal, in this order: the resume PDF first; confirm
+- [x] First-run setup, in the dashboard and mirrored in the terminal, in this order: the resume PDF first; confirm
       every value read from it; one list of every one-time question, each with a default (none for work
       authorization, sponsorship or the employer-list claim, which only the user answers) and a one-line "why we
       ask" (work authorization, sponsorship, "my resume lists every employer", in person or relocating "only in my
       chosen locations", pay expectation, years of experience and whether internships count, start date, voluntary
       questions "decline to answer", optional saved answers); preferences (level, role types from a picker,
       locations); job lists from presets (SimplifyJobs internships, new grad) instead of board addresses.
-- [ ] Nothing is drafted and autopilot stays off until setup is done; then the supervised first run. No pile of
+      Done: `jobsmith/onboarding.py`, `web/src/pages/Onboarding.tsx`, `jobsmith/tui.py` (`jobsmith setup`);
+      `tests/test_setup.py`; walked through the dashboard on a clean folder by `tests/test_setup_walk.py`;
+      screenshots of every step in [images/setup/](images/setup/).
+- [x] Nothing is drafted and autopilot stays off until setup is done; then the supervised first run. No pile of
       "Needs you" on day one: one application waits for approval at a time, one per job site.
-- [ ] Matches narrowed to the user's level, role types, locations and fit bar, with a live "N matches" count in
+      Done: `scheduler.enabled`, `guardrails.first_run_room`; `tests/test_setup.py`
+      (`test_day_one_*`, `test_setup_gates_*`).
+- [x] Matches narrowed to the user's level, role types, locations and fit bar, with a live "N matches" count in
       setup, aiming for tens to low hundreds. Find and fix why the maintainer's copy counted 3828 good matches and 75
       needing them.
+      Done: `match.scope`, `match.preview`. Why 3828: both levels on (two full job lists), no locations, four role
+      types, and a fit bar of 40 under a baseline score of 72 with no posting text read, so nearly every open role
+      counted. Why 75: closed postings still counted, and setup's Start queued up to ten first applications at
+      once. The same copy previews 138 to 367 matches once a level, two role types and places are chosen. It
+      applies to an existing copy when setup is run again.
 - [ ] "Needs you" in two parts: "About you, answer once" and "About one job" (under that company and role, with
       "Skip this job"). An answer for one job is never reused for another; questions many jobs ask become profile
       answers.

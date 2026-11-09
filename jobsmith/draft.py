@@ -219,6 +219,66 @@ def _worked_here(job: dict, ans: dict, label: str = "") -> tuple[str, str]:
     return "", ""
 
 
+# "Willing to relocate?" and "Able to work in the office 3 days a week?": from your one answer in setup. "Only in my
+# chosen locations" is Yes for a job in a place you picked (anywhere in the US when you picked none) and waits for
+# you anywhere else, for that one job.
+RELOCATE_CHOICES = ["Only in my chosen locations", "Yes, anywhere", "No"]
+
+
+def in_your_places(job: dict) -> bool:
+    from . import match
+    s = db.get_settings()
+    if not job.get("locations"):
+        return False                  # a posting that names no place can't be one you chose
+    tl = s.get("target_locations") or []
+    return match.place_matches(job, tl) if tl else any(match._in_us(l) for l in job["locations"])
+
+
+def _in_person(canon: str, field: dict, ans: dict, job: dict) -> dict:
+    row = ans.get("willing_to_relocate") or {}
+    pref, confirmed = (row.get("value") or "").strip(), bool(row.get("confirmed"))
+    what = "relocating" if canon == "willing_to_relocate" else "working in person"
+    yes_no = "Yes" if pref.lower().startswith("yes") or (pref.lower().startswith("only") and in_your_places(job)) \
+        else "No" if pref.lower() == "no" else ""
+    where = ", ".join((job.get("locations") or [])[:2]) or "a place the posting doesn't name"
+    if not yes_no or not confirmed:
+        why = (f"Asks about {what} for {where}, which isn't one of your places; answer it for this job"
+               if pref.lower().startswith("only") and confirmed else
+               f"Asks about {what}; answer it once in setup (Profile: Willing to relocate?)")
+        return {"kind": "answer_bank", "canon": canon, "answer": "", "confidence": 0.0 if field["required"] else 1.0,
+                "issues": [why] if field["required"] else [], "rationale": f"About {what}: left for you"}
+    out = classify.pick_option(yes_no, field["options"]) if field["options"] else yes_no
+    if not out:
+        return {"kind": "answer_bank", "canon": canon, "answer": "", "confidence": 0.0,
+                "issues": [f"None of the choices is a plain {yes_no}; pick one"] if field["required"] else []}
+    why = ("you said yes, anywhere" if pref.lower().startswith("yes") else "you said no" if yes_no == "No"
+           else f"{where} is one of your places")
+    return {"kind": "answer_bank", "canon": canon, "answer": out, "confidence": 1.0, "issues": [],
+            "rationale": f"From your answer in setup: {why}"}
+
+
+INCLUDING_INTERNSHIPS = re.compile(r"includ\w* internships?|internships? (count|included)|with internships?", re.I)
+EXCLUDING_INTERNSHIPS = re.compile(r"(exclud\w*|not (count\w*|includ\w*)|without|other than) internships?|"
+                                   r"post-?(graduate|graduation)|full[- ]time (professional )?experience", re.I)
+
+
+def _years_scope(field: dict, ans: dict) -> dict | None:
+    """Your years of experience were counted with internships or without them (setup asks). A question counting
+    them the other way waits for you, for that job, rather than getting the wrong number."""
+    counts = ((ans.get("internships_count") or {}).get("value") or "").strip().lower()
+    label = field["label"]
+    if counts not in ("yes", "no"):
+        return None
+    if (counts == "yes" and EXCLUDING_INTERNSHIPS.search(label)) or (counts == "no" and INCLUDING_INTERNSHIPS.search(label)):
+        how = "without" if counts == "yes" else "with"
+        return {"kind": "answer_bank", "canon": "years_experience", "answer": "",
+                "confidence": 0.0 if field["required"] else 1.0,
+                "issues": [f"Counts years of experience {how} internships, and yours are counted the other way; "
+                           "answer it for this job"] if field["required"] else [],
+                "rationale": "Years counted a different way: left for you"}
+    return None
+
+
 # Yes/no questions with legal or employment weight: each answer says where it came from, in the extension's panel
 # and the audit trail.
 LEGAL_YES_NO = {"work_authorized_us", "needs_sponsorship", "us_citizen", "us_person", "citizenship_status",
@@ -761,6 +821,12 @@ def _deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | No
                 "issues": ["Asks about your high school, which your profile doesn't cover; answer it yourself"]
                 if field["required"] else [],
                 "rationale": "About your high school: left for you"}
+    if canon in ("willing_to_relocate", "in_person"):
+        return _in_person(canon, field, ans, job or {})
+    if canon == "years_experience":
+        held = _years_scope(field, ans)
+        if held:
+            return held
     if canon == "previously_employed":
         value, confirmed = _worked_here(job or {}, ans, field["label"])[0], True
     else:

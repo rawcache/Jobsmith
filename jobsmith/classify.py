@@ -75,6 +75,9 @@ RULES: list[tuple[str, str]] = [
     (r"^sat\b|\bsat (score|total)", "sat_score"),
     (r"^act\b|\bact (score|composite)", "act_score"),
     (r"major|discipline|field of study|area of study", "major"),
+    (r"(willing|able|comfortable|open|available) to (work|be|come) (in[- ]person|on[- ]?site|in[- ]office|"
+     r"in (the|our|an) office|from (the|our|an) office)|\bin[- ]office\b.{0,40}\b(days?|week)|\d days (a|per|each) week "
+     r"(in|at|from) (the |our |an )?office|return to (the )?office|commut(e|ing) to (the |our )?office", "in_person"),
     (r"relocat", "willing_to_relocate"),
     (r"salary|compensation (expectation|requirement)|desired (pay|compensation|salary)|expected (pay|salary|"
      r"compensation)|hourly rate|pay expectation", "desired_pay"),

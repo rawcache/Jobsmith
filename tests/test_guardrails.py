@@ -129,6 +129,8 @@ def test_scheduler_counts_a_submission_in_flight_once_and_ignores_held_ones(monk
 
 
 def test_a_job_already_being_worked_on_isnt_picked_or_counted_twice(monkeypatch):
+    from conftest import trust
+    trust("greenhouse")                          # day one's single first run is test_setup.py's
     db.set_settings({"max_applications_per_company": 2, "max_applications_per_day": 0})
     drafting, other = _job("Acme", 1), _job("Acme", 2)
     db.x("UPDATE jobs SET fit_score=90 WHERE id IN (?,?)", (drafting, other))
@@ -701,6 +703,8 @@ def test_a_company_with_no_stated_limits_isnt_held_and_a_later_posting_keeps_wha
 
 
 def test_scheduler_doesnt_pick_past_a_companys_stated_limit():
+    from conftest import trust
+    trust("greenhouse")
     db.set_settings({"max_applications_per_company": 0, "max_applications_per_day": 0})
     guardrails.note_limits("Figma", _figma_posting(), "posting")
     for n in range(1, 4):

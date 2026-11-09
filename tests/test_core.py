@@ -370,11 +370,12 @@ async def test_command_company_and_links(fake_llm, monkeypatch):
 
 
 async def test_scheduler_picks_respecting_limits(monkeypatch, tmp_path):
-    from conftest import resume_pdf
+    from conftest import resume_pdf, trust
     from jobsmith import scheduler, commands
     resume_pdf(tmp_path)
+    trust("greenhouse")                          # past day one: one waiting for approval at a time is test_setup's
     db.set_settings({"max_applications_per_company": 1, "auto_max_per_run": 5, "notifications": False,
-                     "onboarded": True, "auto_run": True, "power_mode": "full"})
+                     "onboarded": True, "setup_step": "done", "auto_run": True, "power_mode": "full"})
     ids = []
     for co, score in (("A", 90), ("A", 85), ("B", 70), ("C", 20)):
         jid = sources.add_job_url(f"https://job-boards.greenhouse.io/{co}/jobs/{score}", co, f"Intern {score}")
@@ -396,7 +397,8 @@ async def test_without_a_resume_pdf_autopilot_starts_nothing_and_says_so_once(mo
     """Every application attaches the resume PDF, so without one autopilot starts none (and spends no AI on them):
     the run says so once, not once per application."""
     from jobsmith import scheduler, commands
-    db.set_settings({"onboarded": True, "auto_run": True, "power_mode": "full", "notifications": False})
+    db.set_settings({"onboarded": True, "setup_step": "done", "auto_run": True, "power_mode": "full",
+                     "notifications": False})
     for co in ("A", "B"):
         jid = sources.add_job_url(f"https://job-boards.greenhouse.io/{co}/jobs/1", co, "Intern")
         db.x("UPDATE jobs SET fit_score=90 WHERE id=?", (jid,))
@@ -747,6 +749,8 @@ def test_scheduler_waits_for_setup():
     db.set_settings({"auto_run": True, "onboarded": False})
     assert not scheduler.enabled(db.get_settings())
     db.set_settings({"onboarded": True})
+    assert not scheduler.enabled(db.get_settings())          # onboarded alone isn't setup done (test_setup.py)
+    db.set_settings({"setup_step": "done"})
     assert scheduler.enabled(db.get_settings())
     db.set_settings({"auto_run": False})
     assert not scheduler.enabled(db.get_settings())

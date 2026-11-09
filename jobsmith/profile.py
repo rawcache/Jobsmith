@@ -56,6 +56,7 @@ ANSWER_BANK: list[tuple[str, str, str]] = [
     ("work_authorized_other", "Also allowed to work in (other countries)", "Work authorization"),
     ("headline", "Headline (one line about you, like on LinkedIn)", "Credentials"),
     ("years_experience", "Years of work experience", "Credentials"),
+    ("internships_count", "Count internships as work experience?", "Credentials"),
     ("certifications", "Certifications (e.g. AWS Solutions Architect, 2025)", "Credentials"),
     ("licenses", "Professional licenses (e.g. EIT, PE)", "Credentials"),
     ("languages", "Languages you speak", "Credentials"),
@@ -383,6 +384,44 @@ def seed_answers_from_identity(ident: dict, parsed: dict | None = None) -> None:
                     infer_answer("major", deg.group(2).strip())
 
 
+# --------------------------------------------------------------------------- plain text, no AI
+_EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+_PHONE = re.compile(r"(?<!\d)(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}(?!\d)")
+_NAME = re.compile(r"[A-Z][a-zA-Z'’-]+(?: [A-Z][a-zA-Z.'’-]*){1,3}")
+_CITY = re.compile(r"\b([A-Z][a-zA-Z.]+(?: [A-Z][a-zA-Z.]+)*, [A-Z]{2})\b")
+_SCHOOL = re.compile(r"University|Institute of Technology|College|Institute\b")
+
+
+def identity_from_text(text: str) -> tuple[dict, dict]:
+    """Contact details and the education lines from a resume's plain text (a PDF read without AI). Only what's
+    written there; every value lands unconfirmed for you to check in setup."""
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    ident: dict = {}
+    m = _EMAIL.search(text or "")
+    if m:
+        ident["email"] = m.group(0).rstrip(".")
+    m = _PHONE.search(" ".join(lines[:8]))
+    if m:
+        ident["phone"] = m.group(0).strip()
+    for k, host in (("linkedin", r"linkedin\.com/in/[\w-]+"), ("github", r"github\.com/[\w-]+")):
+        m = re.search(r"(?:https?://)?(?:www\.)?" + host, text or "", re.I)
+        if m:
+            ident[k] = m.group(0) if m.group(0).startswith("http") else "https://" + m.group(0)
+    first = re.split(r"\s*[|•·]\s*", lines[0])[0] if lines else ""
+    if _NAME.fullmatch(first) and not _SCHOOL.search(first):
+        ident["name"] = first
+    pieces = [x.strip() for ln in lines[:4] for x in re.split(r"[|•·]", ln)]
+    city = next((x for x in pieces if _CITY.fullmatch(x)), "")
+    if city:
+        ident["location"] = city
+    edu = []
+    for i, ln in enumerate(lines):
+        if _SCHOOL.search(ln) and not _EMAIL.search(ln):
+            edu.append({"heading": " ".join(lines[i:i + 3])})
+            break
+    return ident, {"sections": [{"category": "education", "entries": edu}]}
+
+
 # --------------------------------------------------------------------------- PDF / LLM path
 def pdf_text(path: Path) -> str:
     from pypdf import PdfReader
@@ -547,8 +586,11 @@ async def ingest_document(path: Path, slot: str = "resume") -> dict:
             method = "AI"
         except LLMError as e:
             ids = facts_from_text_plain(text, path.name)
-            warnings.append(f"Claude isn't connected, so {path.name} was imported line by line. "
-                            "Connect Claude and upload it again for cleaner facts.")
+            if slot == "resume":       # setup asks for the PDF before any AI: its contact and school lines still count
+                identity, parsed = identity_from_text(text)
+                seed_answers_from_identity(identity, parsed)
+            warnings.append(f"No AI is connected, so {path.name} was imported line by line. "
+                            "Connect one and upload it again for cleaner facts.")
             method = "line by line"
 
     if identity.get("email_conflict"):

@@ -68,7 +68,90 @@ def _in_us(loc: str) -> bool:
     return bool(_US.search(l))
 
 
+# --------------------------------------------------------------------------- what you're looking for
+# Level, role type, place and how fresh a posting is are filters, not nudges: a role outside them isn't a match at
+# any fit, so it scores at most OUT_OF_SCOPE (under every fit bar setup offers) and says why. Before these were
+# filters, a role in the right season and category started at 60+ with no skill overlap at all, so a fit bar of 40
+# let thousands through.
+OUT_OF_SCOPE = 10.0
+SEASON = re.compile(r"^(Summer|Fall|Winter|Spring) \d{4}$")
+INTERN_TITLE = re.compile(r"\bintern(ship)?s?\b|\bco-?op\b|\bapprentice(ship)?\b|\bsummer (analyst|associate)\b", re.I)
+NEWGRAD_TITLE = re.compile(r"new ?grad|university grad|recent grad|college grad|early[- ]career|entry[- ]level|"
+                           r"graduate (engineer|program|software|developer|analyst)|\bjunior\b|\b(engineer|developer) i\b",
+                           re.I)
+LEVELS = ("internship", "newgrad")
+
+
+def level_of(job: dict) -> str:
+    """'internship', 'newgrad', or '' when neither the list's season nor the title says."""
+    terms = [t for t in job.get("terms") or [] if t and t != "N/A"]
+    if "New Grad" in terms:
+        return "newgrad"
+    if any(SEASON.match(t) for t in terms):
+        return "internship"
+    title = job.get("title") or ""
+    if INTERN_TITLE.search(title):
+        return "internship"
+    if NEWGRAD_TITLE.search(title):
+        return "newgrad"
+    return ""
+
+
+def place_matches(job: dict, wanted: list[str]) -> bool:
+    locs = " ".join(job.get("locations") or [])
+    return any(re.search(r"(?<![A-Za-z])" + re.escape(t) + r"(?![A-Za-z])", locs, re.I) for t in wanted)
+
+
+def category_of(job: dict) -> str:
+    return job.get("category") or guess_category(job.get("title") or "")
+
+
+def category_wanted(cat: str, targets: list[str]) -> bool:
+    return not targets or not cat or any(t.lower() in cat.lower() or cat.lower() in t.lower() for t in targets)
+
+
+def scope(job: dict, s: dict) -> list[str]:
+    """Why a role is outside what you're looking for (empty: it's inside). Companies you named keep any level."""
+    out: list[str] = []
+    levels = [g for g in (s.get("goals") or []) if g in LEVELS]
+    named = (job.get("company") or "").strip().lower() in {c.strip().lower() for c in s.get("target_companies") or []}
+    lvl = level_of(job)
+    if levels and not named:
+        if lvl and lvl not in levels:
+            out.append("not your level (" + ("an internship" if lvl == "internship" else "a new grad role") + ")")
+        elif not lvl and levels == ["internship"]:
+            out.append("not an internship")
+        elif lvl == "internship":
+            seasons = [t for t in job.get("terms") or [] if SEASON.match(t or "")]
+            wanted = [t for t in s.get("target_terms") or [] if SEASON.match(t)]
+            if seasons and wanted and not set(seasons) & set(wanted):
+                out.append(f"not your season ({', '.join(seasons)})")
+    cat = category_of(job)
+    if not category_wanted(cat, s.get("target_categories") or []):
+        out.append(f"not a role type you picked ({cat})")
+    if job.get("locations"):
+        tl = s.get("target_locations") or []
+        if tl and not place_matches(job, tl):
+            out.append("not in your places")
+        elif not tl and not any(_in_us(l) for l in job["locations"]):
+            out.append("outside the US")
+    days = int(s.get("max_posting_age_days") or 0)
+    posted = job.get("date_posted")
+    if days and posted and (time.time() - float(posted)) / 86400 > days:
+        out.append(f"posted over {days} days ago")
+    return out
+
+
 def score_job(job: dict, s: dict, vocab: set[str], bias: dict[str, float]) -> tuple[float, list[str]]:
+    sc, reasons = _score(job, s, vocab, bias)
+    outside = scope(job, s)
+    if outside and sc > OUT_OF_SCOPE:
+        sc = OUT_OF_SCOPE
+        reasons.insert(0, "- outside what you're looking for: " + "; ".join(outside))
+    return sc, reasons
+
+
+def _score(job: dict, s: dict, vocab: set[str], bias: dict[str, float]) -> tuple[float, list[str]]:
     reasons: list[str] = []
     score = 35.0
     cat = job.get("category") or ""
@@ -186,11 +269,38 @@ def value_bonus(job: dict, values: list[str]) -> list[tuple[str, float]]:
     return out
 
 
-def rescore(job_ids: list[str] | None = None) -> int:
-    s = db.get_settings()
+def _scoring_settings(patch: dict | None = None) -> dict:
+    s = db.get_settings() | (patch or {})
     ans = profile.answers()
     s["_needs_sponsorship"] = (ans.get("needs_sponsorship", {}).get("value") or "").lower() == "yes"
     s["_citizen"] = (ans.get("us_citizen", {}).get("value") or "").lower() == "yes"
+    return s
+
+
+def preview(patch: dict) -> dict:
+    """How many matches these choices would give, without saving them: setup's live "N matches". Counts open roles
+    not yet applied to, skipped or left out, at or above the fit bar."""
+    s = _scoring_settings(patch)
+    vocab, bias = profile_vocab(), _learned_company_bias()
+    bar = float(s.get("min_fit_score") or 40)
+    rows = db.q("""SELECT * FROM jobs WHERE active=1 AND status NOT IN ('submitted','skipped','left_out')
+                   AND verdict IS NULL""")
+    n, outside = 0, {"level": 0, "role": 0, "place": 0, "age": 0}
+    for r in rows:
+        j = db.decode(r)
+        why = scope(j, s)
+        for w in why:
+            key = ("level" if w.startswith("not your level") or w.startswith("not an intern") or w.startswith("not your season")
+                   else "role" if w.startswith("not a role") else "age" if w.startswith("posted") else "place")
+            outside[key] += 1
+        if not why and score_job(j, s, vocab, bias)[0] >= bar:
+            n += 1
+    return {"matches": n, "open": len(rows), "outside": outside, "bar": bar}
+
+
+def rescore(job_ids: list[str] | None = None) -> int:
+    s = _scoring_settings()
+    ans = profile.answers()
     vocab = profile_vocab()
     bias = _learned_company_bias()
     if job_ids:

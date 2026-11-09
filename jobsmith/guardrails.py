@@ -393,6 +393,39 @@ def first_run_reason(job: dict) -> str | None:
             f"autopilot submits on {site_name(site)} on its own within your limits.")
 
 
+def approved_sites() -> set[str]:
+    return {r["site"] for r in db.q("SELECT DISTINCT site FROM first_runs WHERE approved_at IS NOT NULL")}
+
+
+def sites_waiting() -> set[str]:
+    """Sites with an application held for your first approval there, still open and not sent or skipped."""
+    return {r["site"] for r in db.q("""SELECT DISTINCT f.site FROM first_runs f JOIN jobs j ON j.id=f.job_id
+                                        WHERE f.approved_at IS NULL AND j.active=1
+                                        AND j.status NOT IN ('submitted','skipped')""")}
+
+
+def first_run_room(candidates: list[dict], working: list[dict], limit: int) -> list[str]:
+    """Which of autopilot's picks it may start without piling up applications for you to approve. Before your first
+    approval: one application in all (the supervised first run), and none while it's being filled or waits for you.
+    After it: one at a time on each site you haven't approved yet, and any number on sites you have. candidates and
+    working are job rows with id, url, referral_url and ats."""
+    approved = approved_sites()
+    waiting = sites_waiting() | {site_of(w) for w in working if site_of(w) not in approved}
+    if not approved and (waiting or working):
+        return []
+    out: list[str] = []
+    for c in candidates:
+        site = site_of(c)
+        if site not in approved:
+            if site in waiting or (not approved and out):
+                continue
+            waiting.add(site)
+        out.append(c["id"])
+        if len(out) >= limit:
+            break
+    return out
+
+
 def ask_approval(job_id: str, site: str, files: list[str] | None = None) -> bool:
     """Hold it for you, noting the files the fill attached (`files`, from when it started; default: as they are
     now). True when you'd approved different answers for it before (the form changed since)."""
