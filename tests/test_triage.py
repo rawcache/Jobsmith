@@ -474,6 +474,11 @@ async def test_one_choice_fields_take_one_rule_2_answer(monkeypatch):
     ("Legal first name", "first_name"),
     ("Applicant Privacy Acknowledgement", "acknowledge_notices"),
     ("Personal Information Policy", "acknowledge_notices"),
+    ("Are you comfortable developing AI models?", None),
+    ("Please enter the legal name of your school", None),
+    ("Have you ever changed your legal name?", None),
+    ("Please provide a link to your privacy policy", None),
+    ("Are you comfortable with the use of AI note-taking in your interview?", "ai_tools_consent"),
 ])
 def test_triage_misreads(label, want):
     assert classify.canon_for(label) == want, label
