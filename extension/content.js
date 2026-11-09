@@ -182,7 +182,8 @@
         const title = own && [...fs.querySelectorAll("label")].find(l => !boxes.some(x => x.id === l.htmlFor || l.contains(x)));
         let label = legend ? clean(legend.innerText) : title ? clean(title.innerText) : "";
         // one box of several in a fieldset, each its own question (consents): its own words, not the shared heading
-        if (group.length === 1 && boxes.length > 1 && labelFor(el)) label = labelFor(el);
+        // ...after that heading, which says what the box is about ("Sexual orientation: Straight" stays yours)
+        if (group.length === 1 && boxes.length > 1 && labelFor(el)) label = (label ? label + ": " : "") + labelFor(el);
         // the first line of the nearest box holding every option, unless that line is an option itself (a lone
         // checkbox's own label is its question)
         const opts = group.map(labelFor), isOpt = t => /^(yes|no)\W*$/i.test(t) || (group.length > 1 && opts.some(o => o && (t.startsWith(o) || o.startsWith(t))));
