@@ -528,7 +528,7 @@ PLAIN_CORE = {"work_authorized_us": [{"authorized", "authorised", "eligible", "a
 # ...or a pick from a list, when the label is plainly that one fact and exactly one choice means your confirmed
 # answer (classify.strict_pick): "Gender" with Man/Woman for "Male", never "Cisgender man", never the nearest match.
 _WHICH = (f"{_ASKING} what is your my i identify as how would you describe which best describes select one option status "
-          "mark all apply most accurately yourself and s")
+          "mark all apply most accurately yourself s")
 _EXPORT = (f"{_ASKING} {_US} position requires require may access information technology items subject export "
            "control controls laws law regulations regulation ear itar international traffic arms such as following "
            "one protected individuals individual person persons defined under immigration naturalization nationality act "
