@@ -38,6 +38,8 @@ from textual.message import Message
 from textual.screen import ModalScreen, Screen
 from textual.widgets import DataTable, Footer, Input, Static, TextArea
 
+from . import words
+
 DOWN_LOG_AFTER = 10.0  # seconds without the engine before the log says so (the status line says so at once)
 
 # Warm charcoal like the dashboard's dark theme. EMBER is the extension panel's deep rust lifted for a dark background
@@ -368,7 +370,7 @@ class Review(View):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.query_one("#jobs", DataTable).add_columns("", "Company", "Why")
+        self.query_one("#jobs", DataTable).add_columns("", "Company · role", "Why")
         self.query_one("#qs", DataTable).add_columns("", "Question", "Answer")
         self.job: dict = {}
         self.drafts: list[dict] = []
@@ -393,9 +395,10 @@ class Review(View):
             t.add_row(Text("?", style=WARN), Text(f["title"][:20], style="bold " + EMBER), count, key="fix:" + f["id"])
         for r in rows:
             mark = Text("✗", style=BAD) if r["status"] == "error" else Text("!", style=WARN)
-            why = "approve the first submission" if r.get("approve") else r.get("hold_reason") or r.get("error") or "ready to submit"
-            t.add_row(mark, Text(r["company"][:20], style="bold"), why[:40], key=r["id"])
-        self.query_one("#t", Static).update(self.heading((f"Review  {len(rows)} waiting for you", "bold"),
+            why = r.get("why") or words.why(r)
+            t.add_row(mark, Text(f"{r['company']} · {r.get('title') or ''}"[:34], style="bold"), why[:60], key=r["id"])
+        ready, failed = sum(r["status"] != "error" for r in rows), sum(r["status"] == "error" for r in rows)
+        self.query_one("#t", Static).update(self.heading((f"Review  {words.summary(ready, failed) or 'nothing waiting'}", "bold"),
                                                        ("   a approve · e edit · s submit · k skip · esc back", DIM)))
         if not rows and not self.fixes:
             self.query_one("#detail", Static).update(Text("Nothing is waiting for you. Everything is either sent or still being worked on.", style=DIM))
@@ -1148,6 +1151,7 @@ class Jobsmith(App):
         self.frame = 0
         self.state: dict = {}
         self.phases: dict[str, str] = {}
+        self.greeted = False            # the start-up summary line is said once
         self.splash = splash
         self.busy_since = 0.0
         self.verb = random.choice(VERBS)
@@ -1645,18 +1649,31 @@ class Jobsmith(App):
         if st.get("active") or live:
             self.ticker.resume()
         tabs = {t["job_id"]: t for t in live}
+        names = st.get("names") or {}
+        if not self.greeted:            # start-up: what's waiting, in one line, never one line per application
+            self.greeted = True
+            held = st.get("held") or {}
+            line = words.summary(held.get("ready", 0), held.get("failed", 0))
+            if line:
+                self.say(f"[yellow]{line}[/] · /review")
+        changed = []
         for jid in list(dict.fromkeys(list(st.get("active", {})) + list(tabs))):   # tell you when something changes
             tab = tabs.get(jid, {})
             ph = tab.get("phase") or st["active"].get(jid, "")
+            rec = names.get(jid) or {}
+            # the saved status decides between "ready for you" and "couldn't finish", as in the Review list: a tab
+            # left open on a bot check is in "review", and its application couldn't finish
+            if ph in ("review", "error") and rec.get("status") in ("filled", "error"):
+                ph = "error" if rec["status"] == "error" else "review"
             if jid in self.phases and self.phases[jid] != ph:
-                who = self.job_name(jid, tab)[0]
-                msg = {"submitted": f"[b]{who}[/] [green]submitted ✓[/]", "code": f"[b]{who}[/] [yellow]emailed you a code[/] · /code",
-                       "review": f"[b]{who}[/] [yellow]is filled and waiting for you[/] · /review", "error": f"[b]{who}[/] [yellow]couldn't finish[/] · /review"}.get(ph)
-                if msg:
-                    self.say(msg)
-                    if ph == "submitted":
-                        self.swing()
+                company, title = self.job_name(jid, tab)
+                changed.append({"phase": ph, "company": company, "title": title,
+                                "why": rec.get("why") or tab.get("note") or "open it to see why"})
             self.phases[jid] = ph
+        for line in words.event_lines(changed):      # one company's roles in the same state: one line
+            self.say(line)
+        if any(c["phase"] == "submitted" for c in changed):
+            self.swing()
         self.paint_hello()
         self.paint_status()
 

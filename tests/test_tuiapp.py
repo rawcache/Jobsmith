@@ -253,7 +253,8 @@ def test_job_name_prefers_the_tab_then_the_record_then_the_id():
     db.x("INSERT INTO jobs(id, company, title, url, ats, status, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?)",
          ("r1", "Globex", "Data Intern", "https://x/3", "greenhouse", "new", now, now))
     assert _names([]) == {}
-    assert _names(["r1", "gone"]) == {"r1": {"company": "Globex", "title": "Data Intern"}}   # unknown ids are left out
+    got = _names(["r1", "gone"])                                                    # unknown ids are left out
+    assert list(got) == ["r1"] and (got["r1"]["company"], got["r1"]["title"]) == ("Globex", "Data Intern")
     app = Jobsmith("http://127.0.0.1:9", splash=False)
     app.state = {"st": {"names": _names(["r1"])}}
     assert app.job_name("r1") == ("Globex", "Data Intern")
@@ -607,3 +608,64 @@ def test_the_input_is_a_line_above_and_below_with_a_prompt_and_grows_as_you_type
     sent = asyncio.run(go())
     assert sent == ["apply to the robotics and embedded software internships at acme, northwind and every other company nearby that is hiring\n"
                     "then tell me\nand more\ndone"]
+
+
+# --------------------------------------------------------------------------- the log's words (item 10, the terminal)
+def test_every_log_line_names_the_company_and_the_role_and_repeats_collapse():
+    from jobsmith import words
+    ev = lambda phase, company, title, why="": {"phase": phase, "company": company, "title": title, "why": why}
+    one = words.event_lines([ev("review", "Acme Robotics", "Software Intern")])
+    assert one == ["[b]Acme Robotics[/] · Software Intern [yellow]is ready for you[/] · /review"]
+    same = "asks you to sign in before it shows its application form"
+    many = words.event_lines([ev("error", "TikTok", f"ML Engineer Intern {i}", same) for i in range(3)]
+                             + [ev("submitted", "Globex", "Data Intern"), ev("drafting", "Initech", "Intern")])
+    assert many == [f"[b]TikTok[/] · 3 roles [yellow]couldn't finish[/]: {same} · /review",
+                    "[b]Globex[/] · Data Intern [green]submitted ✓[/]"]
+    mixed = words.event_lines([ev("error", "TikTok", "A", "the site didn't answer in time"), ev("error", "TikTok", "B", same)])
+    assert mixed == ["[b]TikTok[/] · 2 roles [yellow]couldn't finish[/]: for different reasons · /review"]
+
+
+def test_couldnt_finish_always_says_why_in_plain_words():
+    from jobsmith import words
+    timeout = "Locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator(\"button\")"
+    assert words.why({"status": "error", "error": timeout}) == "the site didn't answer in time"
+    assert words.why({"status": "error", "error": "[Errno 8] nodename nor servname provided, or not known"}) == \
+        "the site's address couldn't be found"
+    assert words.why({"status": "error", "error": "Client error '404 Not Found' for url 'https://x'"}) == "the posting is gone"
+    assert words.why({"status": "error", "error": ""}) == "Jobsmith didn't record why; open it to see"
+    held = "Pay expectation: Add this to your answers on the Profile page"
+    assert words.why({"status": "filled", "hold_reason": held, "error": "old"}) == held
+    wall = 'Lever showed a bot check instead of the form ("Verify you are human"). Jobsmith never tries to get past one.'
+    assert words.why({"status": "error", "hold_reason": wall}).startswith("Lever showed a bot check")
+    assert words.status_word("error") == "couldn't finish" and words.status_word("filled") == "ready for you"
+    assert words.summary(12, 3) == "12 ready for you, 3 couldn't finish" and words.summary(0, 0) == ""
+
+
+def test_start_up_says_one_summary_line_and_the_log_agrees_with_the_list(engine):
+    from jobsmith import sources
+    from jobsmith.tuiapp import Jobsmith, Review
+    db.conn()
+    _held_job()
+    for i, status in enumerate(("error", "error")):
+        jid = sources.add_job_url(f"https://job-boards.greenhouse.io/tiktok/jobs/{i}", "TikTok", f"ML Engineer Intern {i}")
+        db.x("UPDATE jobs SET status=?, error=? WHERE id=?", (status, "Locator.click: Timeout 30000ms exceeded.", jid))
+
+    async def go():
+        app = Jobsmith(engine, splash=False)
+        async with app.run_test(size=(140, 40)) as pilot:
+            for _ in range(40):
+                await pilot.pause(0.1)
+                if "/review" in _texts(app):
+                    break
+            out = _texts(app)
+            assert out.count("ready for you") == 1 and "1 ready for you, 2 couldn't finish" in out   # one line, not three
+            assert "ML Engineer Intern" not in out
+            app.query_one("#prompt").value = "/review"
+            await pilot.press("enter")
+            await pilot.pause(1.2)
+            assert isinstance(app.screen, Review)
+            head = str(app.screen.query_one("#t").render())
+            assert "1 ready for you, 2 couldn't finish" in head                                   # the same words
+            rows = [str(app.screen.query_one("#jobs").get_row_at(i)) for i in range(app.screen.query_one("#jobs").row_count)]
+            assert any("TikTok · ML Engineer Intern" in r and "didn't answer in time" in r for r in rows), rows
+    asyncio.run(go())
