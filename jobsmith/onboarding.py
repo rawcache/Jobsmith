@@ -240,14 +240,14 @@ def preview(levels, seasons, categories, locations, picky) -> dict:
 
 
 def read_lists_early(levels: list[str]) -> bool:
-    """A fresh install has no listings to count yet: turn on the lists for these levels now so setup's live count
-    has something to count (step 5 still decides which stay on). True when it added one."""
-    if db.q1("SELECT 1 FROM jobs LIMIT 1") or db.q1("SELECT 1 FROM sources WHERE active=1 LIMIT 1"):
+    """A fresh install has no listings to count yet: make sure the lists for these levels are there to be read, so
+    setup's live count has something to count (step 5 still decides which stay on). True while there are none."""
+    if db.q1("SELECT 1 FROM jobs LIMIT 1"):
         return False
-    wanted = [v["url"] for v in PRESETS.values() if v["level"] in (levels or ["internship"])]
-    for url in wanted:
-        sources.add_source(url)
-    return bool(wanted)
+    for v in PRESETS.values():
+        if v["level"] in (levels or ["internship"]):
+            sources.add_source(v["url"])
+    return True
 
 
 def save_prefs(levels, seasons, categories, locations, picky) -> dict:
