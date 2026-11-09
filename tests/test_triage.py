@@ -711,3 +711,57 @@ async def test_an_ai_that_cant_be_used_says_why(fake_llm):
     draft.save_results(jid, fields, got)
     assert "key isn't valid" in draft.readiness(jid)["blockers"][0]     # Needs you says it too
 
+
+# A careers site whose Apply button Jobsmith couldn't press (a guide's mask over the page), or that wants a sign-in
+# first. Was: a 30-second timeout and "couldn't finish" with a browser's error for a reason.
+@pytest.fixture
+async def page():
+    from playwright.async_api import async_playwright
+    from jobsmith.fill import base
+    async with async_playwright() as pw:
+        exe = __import__("os").environ.get("JOBSMITH_CHROMIUM_PATH")
+        b = await pw.chromium.launch(headless=True, args=base.browser_args(), **({"executable_path": exe} if exe else {}))
+        p = await b.new_page()
+        await p.route("http*://**", lambda r: r.abort())
+        yield p
+        await b.close()
+
+
+def _apply_page(name: str) -> str:
+    from conftest import FIXTURES
+    return (FIXTURES / "apply_button" / name).resolve().as_uri()
+
+
+async def test_a_covered_apply_button_is_handed_to_you_quickly_with_the_reason(page):
+    import time
+    from jobsmith.fill import base, generic
+    t0 = time.time()
+    with pytest.raises(base.NeedsYou, match="Apply button"):
+        await generic.open_form(page, _apply_page("covered.html"))
+    assert time.time() - t0 < 20
+    assert not await page.evaluate("window.applied === true")
+
+
+async def test_the_apply_button_is_the_one_that_says_just_that_and_a_sign_in_after_it_is_yours(page):
+    from jobsmith.fill import base, generic
+    with pytest.raises(base.NeedsYou, match="sign in"):
+        await generic.open_form(page, _apply_page("menu_first.html"))
+    assert page.url.endswith("sign_in.html")                     # it pressed "Apply to this job", not the menu
+    assert await page.locator('input[type="password"]').input_value() == ""
+
+
+def test_an_application_that_needs_you_first_says_why():
+    from jobsmith import db, runner
+    jid = _greenhouse_job()
+    job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,)))
+    runner._held_for_you(job, runner.Run(jid, "fill"), "asks you to sign in before it shows its application form")
+    job = db.q1("SELECT status, hold_reason, error FROM jobs WHERE id=?", (jid,))
+    assert "sign in" in job["hold_reason"] and "never signs in" in job["hold_reason"]
+    assert job["status"] == "error" and "Timeout" not in job["error"]
+
+
+def test_another_model_isnt_the_busy_one():
+    from jobsmith import llm
+    a, b = llm.GeminiAPI("test-key-not-real"), llm.GeminiAPI("test-key-not-real")
+    b.model = a.model + "-other"
+    assert llm._busy_key(a) != llm._busy_key(b)

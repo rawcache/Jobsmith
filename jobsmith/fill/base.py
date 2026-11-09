@@ -855,6 +855,11 @@ BOT_WALL_RE = re.compile(r"access is temporarily restricted|detected unusual act
 BOT_WALL_FRAMES = re.compile(r"(^|\.)captcha-delivery\.com/|/px-captcha|perimeterx\.net/", re.I)
 
 
+class NeedsYou(Exception):
+    """Something only you can do stands before the form: a sign-in, or an Apply button Jobsmith can't press. The
+    message says which, to go after the site's name ("asks you to sign in before…")."""
+
+
 class BotWall(Exception):
     """The site showed a bot check instead of the form. The message is the line it showed."""
 
