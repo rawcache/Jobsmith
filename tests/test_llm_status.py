@@ -102,12 +102,15 @@ async def test_status_checks_a_separate_research_ai_side_by_side(monkeypatch):
     write, research = SlowCheck(), SlowCheck()
     research.name = "slow_research"
     monkeypatch.setattr(llm, "backend", lambda role="write": research if role == "research" else write)
-    monkeypatch.setattr(llm, "FIRST_CHECK_WAIT", 1.0)
+    # Two waits side by side take one wait; one after the other, two. The gap between those is what's measured, with
+    # room for a slow machine: a 3 s wait under 5 s (a Windows runner once took 2.06 s for a 1 s wait, over a 1.8 s
+    # limit that left 0.8 s for everything else).
+    monkeypatch.setattr(llm, "FIRST_CHECK_WAIT", 3.0)
     db.set_settings({"llm_backend": "gemini_api", "research_backend": "openai_api"})
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as c:
         t0 = time.monotonic()
         assert (await c.get("/api/status")).status_code == 200
-        assert time.monotonic() - t0 < 1.8                       # one wait, not one after the other
+        assert time.monotonic() - t0 < 5.0                       # one wait, not one after the other (6 s)
     assert (write.checks, research.checks) == (1, 1)
     write.release.set()
     research.release.set()
