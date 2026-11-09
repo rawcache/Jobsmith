@@ -410,10 +410,16 @@ in under 15 minutes without help.
       (keychain prompt, a lost terminal, Gemini's free limit, a sleeping Mac and `caffeinate`). The README leads
       with it; the extension is marked optional, with the developer-mode steps.
       Done: [getting-started.md](getting-started.md); README "Quick start" and "Chrome extension (optional)".
-- [ ] A CI test that walks first-run setup on a clean data folder through the dashboard, and
+- [x] A CI test that walks first-run setup on a clean data folder through the dashboard, and
       `docs/launch/usability-test.md`: a script for watching 3 non-developers set up, with the 15-minute target.
+      Done: `tests/test_setup_walk.py` (a real engine on a free port against an empty folder, the seven steps
+      through the dashboard; it runs with the rest of CI) and [launch/usability-test.md](launch/usability-test.md).
+      The three watched runs themselves are the gate's third check, still to do.
 - [ ] The Chrome Web Store listing prepared, not submitted: description, screenshots, privacy answers, permission
       justifications from SECURITY.md. (Submitting stays in Phase 3.)
+      Partly done: [launch/chrome-web-store.md](launch/chrome-web-store.md) has the description, privacy answers
+      and a justification for every permission, checked against the manifest and SECURITY.md. Left: the five
+      screenshots ([#54](https://github.com/rawcache/Jobsmith/issues/54)).
 
 Moved out of Phase 1: the full fit breakdown ([#6](https://github.com/rawcache/Jobsmith/issues/6)) and any
 OpenAI-compatible AI ([#7](https://github.com/rawcache/Jobsmith/issues/7)), both Phase 2. The whole plan is in

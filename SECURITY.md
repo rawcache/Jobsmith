@@ -18,7 +18,10 @@ What counts:
 The Chrome extension's `manifest.json` asks for as little as it can:
 
 - **Its page panel and autofill** (`content_scripts`) run on the pages you open, so the panel can appear on any
-  company's careers page. They only read the page you're on and talk to Jobsmith on your computer.
+  company's careers page. They only read the page you're on and talk to Jobsmith on your computer. On a job
+  posting or application form that means the page's address and title, up to 20,000 characters of its text, and
+  the form's questions and choices; never a password box. "Report this form" opens a GitHub issue page with the
+  form's questions (never your answers), only when you click it.
 - **`activeTab` and `scripting`**: when you click the toolbar button, the extension may add its script to the page
   you're looking at. That only matters for a tab that was open before the extension was loaded.
 - **`host_permissions`**, the sites the extension may reach on its own:
