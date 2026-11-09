@@ -15,7 +15,7 @@ RULES: list[tuple[str, str]] = [
     (r"preferred (first )?name|nickname", "preferred_name"),
     (r"^first name|^legal first name|given name", "first_name"),
     (r"^last name|^legal last name|surname|family name", "last_name"),
-    (r"^full name|^name$|^your name|(^|\byour |\b(enter|provide|state) )(full )?legal (full )?name\b(?! of)", "full_name"),
+    (r"^full name|^name$|^your name|(^|\byour |\b(enter|provide|state) )(full )?legal (full )?name\b(?! (of|for))", "full_name"),
     (r"(school|university|college|\.edu|student) e-?mail", "school_email"),
     (r"e-?mail", "email"),
     # before "phone": an extension box takes digits only, and a dialling code isn't your number
@@ -41,7 +41,7 @@ RULES: list[tuple[str, str]] = [
     (r"sponsor|visa|employer support to (obtain|maintain|get)", "needs_sponsorship"),
     (r"authori[sz](ed|ation) to work|work authori[sz]ation|eligible to work|legally (able|permitted|authori)|right to work", "work_authorized_us"),
     (r"u\.?s\.? citizen|citizenship", "us_citizen"),
-    (r"(confirm|acknowledge)( receipt)?.*(notice|polic|agreement|statement|terms)|privacy (notice|acknowledg\w*)|^(applicant |candidate )?(privacy|personal information) (policy|notice)\b(?!.*\b(link|url)\b)|\bccpa\b|\bgdpr\b|"
+    (r"(confirm|acknowledge)( receipt)?.*(notice|polic|agreement|statement|terms)|privacy (notice|acknowledg\w*)|^(applicant |candidate )?(privacy|personal information) (policy|notice)(\s*\([^)]*\))?$|\bccpa\b|\bgdpr\b|"
      r"arbitration agreement|i (have read|acknowledge|agree|consent|certify)|acknowledge,? (confirm|and)|"
      r"(agree|consent) to the (following|above)|by (checking|selecting|submitting)", "acknowledge_notices"),
     (r"ai[- ]assisted|(consent|agree|okay|ok|comfortable)\b.{0,40}\b(use of ai|ai (being )?used|ai[- ](tools?|assistants?|note|transcri|record))|ai (note[- ]?tak|transcri)|"
@@ -193,8 +193,41 @@ SYNONYMS = {
 }
 
 
+SAME_WORD = {"male": "man", "man": "male", "female": "woman", "woman": "female"}
+NONE = {"none", "n/a", "na", "not applicable"}
+NO_OPTION = re.compile(r"\W*(none|no|n/a|not applicable)\b", re.I)
+
+
 def _nums(s: str) -> list[float]:
     return [float(n) for n in re.findall(r"\d+(?:\.\d+)?", s)]
+
+
+def strict_pick(answer: str, options: list[str]) -> str | None:
+    """The one choice that means exactly this answer, or None: for answers only you may give (rule 2). The same
+    words, a decline for a decline, "Man" for "Male", the single "No…" choice for "None", or the single choice that
+    starts with the answer ("Asian (Not Hispanic or Latino)…" for "Asian (Indian)"). Never the nearest match."""
+    a = " ".join((answer or "").split())
+    if not a or not options:
+        return None
+    flat = lambda s: re.sub(r"[’'`]", "", " ".join(s.split()).strip(" .").lower())
+    al = flat(a)
+    only = lambda found: found[0] if len(found) == 1 else None
+    if got := only([o for o in options if flat(o) == al]):
+        return got
+    if DECLINE.search(a):
+        return only([o for o in options if DECLINE.search(o)])
+    if al in SAME_WORD:
+        return only([o for o in options if re.sub(r"\W+", " ", o).strip().lower() == SAME_WORD[al]])
+    if al in NONE:
+        return only([o for o in options if NO_OPTION.match(o)])
+    if al in ("yes", "no"):                             # "I am not a protected veteran": the one choice that says no
+        real = [o for o in options if not DECLINE.search(o)]
+        neg = [o for o in real if re.search(r"\bnot\b|\bno\b|don.?t|do not", o, re.I)]
+        return only(neg) if al == "no" else only([o for o in real if o not in neg])
+    head = al.split("(")[0].strip()
+    if len(head) > 2:
+        return only([o for o in options if re.match(rf"\W*{re.escape(head)}\b", flat(o))])
+    return None
 
 
 def pick_option(answer: str, options: list[str]) -> str | None:
@@ -205,9 +238,17 @@ def pick_option(answer: str, options: list[str]) -> str | None:
     al = a.lower()
     if not a:
         return None
-    for o in options:                                    # exact
-        if o.strip().lower() == al:
+    flat = lambda s: re.sub(r"[’'`]", "", s.strip().lower())
+    for o in options:                                    # exact, apostrophes aside ("Bachelor's", "Bachelors")
+        if flat(o) == flat(a):
             return o
+    for o in options:                                    # "Male" is "Man": the whole option, never "Cisgender man"
+        if SAME_WORD.get(al) == re.sub(r"\W+", " ", o).strip().lower():
+            return o
+    if al in NONE:                                       # "None" among "No Clearance", "Secret", "Top Secret"
+        none = [o for o in options if NO_OPTION.match(o)]
+        if len(none) == 1:
+            return none[0]
     if DECLINE.search(a):                                # decline-to-self-identify family
         for o in options:
             if DECLINE.search(o):
@@ -246,9 +287,14 @@ def pick_option(answer: str, options: list[str]) -> str | None:
             if len(on) == 1 and on[0] == v:
                 return o
     for o in options:                                    # prefix / containment
-        ol = o.lower()
-        if ol.startswith(al) or al.startswith(ol):
+        ol = " ".join(o.lower().split())                 # a trailing non-breaking space is still "Asian"
+        if ol and (ol.startswith(al) or al.startswith(ol)):
             return o
+    head = al.split("(")[0].strip()                      # "Asian (Indian)": the option that starts with "Asian",
+    if "(" in al and len(head) > 2:                      # never "American Indian" for sharing a word
+        starts = [o for o in options if re.match(rf"\W*{re.escape(head)}\b", o, re.I)]
+        if len(starts) == 1:
+            return starts[0]
     if "citizen" in al:                                 # "U.S. Citizen" vs "US Citizen / National", "Citizen"
         cands = [o for o in options if re.search(r"citizen", o, re.I) and not re.search(r"non-?citizen|not a", o, re.I)]
         if cands:

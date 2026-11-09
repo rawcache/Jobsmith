@@ -252,7 +252,8 @@ ANY_OF = re.compile(r"\bor\b|and/or|one of|any of|either", re.I)
 
 # "Authorized to work in the country for which you are applying?" names no country: it means the job's
 JOBS_COUNTRY = re.compile(r"\b(the|this) country (for which|in which|where|to which)|country (you('re| are)|you have) "
-                          r"appl|country (of|for) (this|the) (job|role|position|opening)", re.I)
+                          r"appl|country (of|for) (this|the) (job|role|position|opening)|country (specified|listed|named|"
+                          r"indicated|stated) (for|in|on) (this|the) (job|role|position|opening|posting)", re.I)
 
 
 _NOT_A_PLACE = re.compile(r"\b(remote|hybrid|on-?site|in-office|flexible)\b", re.I)
@@ -282,6 +283,17 @@ def _names_us(loc: str) -> bool:
         if not all(one_place(x) for x in pieces if x):
             return False
     return True
+
+
+US_CITIZEN_OPTION = re.compile(r"\b(u\.?\s?s\.?|united states)\b.{0,12}\bcitizen(?!ship)", re.I)
+NOT_CITIZEN_OPTION = re.compile(r"non-?\s?citizen|\bnot\b|\bno\b|neither|none", re.I)
+
+
+def _citizen_option(options: list[str]) -> str:
+    """The one choice that says "U.S. citizen" in a list of statuses (citizen, green card, refugee, none of the
+    above), for someone who confirmed they are one. None when no single choice says it."""
+    mine = [o for o in options if US_CITIZEN_OPTION.search(o) and not NOT_CITIZEN_OPTION.search(o)]
+    return mine[0] if len(mine) == 1 else ""
 
 
 def _place_scope(label: str, job: dict | None = None) -> str:
@@ -479,7 +491,7 @@ _ASKING = "are you do will please confirm indicate whether currently a an the to
 _US = "us u s usa united states america"
 # "...in the country for which you are applying?": the job's own country, which counts only when every place the
 # posting lists is in the US (see _plain_yes_no)
-_JOBS_COUNTRY = "country which where applying applied located based"
+_JOBS_COUNTRY = "country which where applying applied located based specified"
 PLAIN_YES_NO = {
     "work_authorized_us": f"{_ASKING} {_US} {_JOBS_COUNTRY} legally lawfully authorized authorised eligible "
                           "permitted have lawful "
@@ -502,6 +514,29 @@ PLAIN_CORE = {"work_authorized_us": [{"authorized", "authorised", "eligible", "a
               "us_citizen": [{"citizen"}], "hispanic_latino": [{"hispanic", "latino", "latina", "latinx"}],
               "veteran_status": [{"veteran"}], "disability_status": [{"disability"}],
               "first_gen": [{"first"}, {"generation"}]}
+# ...or a pick from a list, when the label is plainly that one fact and exactly one choice means your confirmed
+# answer (classify.strict_pick): "Gender" with Man/Woman for "Male", never "Cisgender man", never the nearest match.
+_WHICH = f"{_ASKING} what is your my i identify as how would you describe which best describes select one option status"
+_EXPORT = (f"{_ASKING} {_US} position requires require may access information technology items subject export "
+           "control controls laws law regulations regulation ear itar international traffic arms such as following "
+           "one protected individuals individual person persons defined under immigration naturalization nationality act "
+           "8 usc c 1324b 3 and purposes complying comply federal best applies you your citizenship status citizen is what")
+PLAIN_PICK = {
+    "gender": f"{_WHICH} gender identity sex",
+    "race": f"{_WHICH} race ethnicity racial ethnic background origin group category",
+    "hispanic_latino": f"{_WHICH} hispanic latino latina latinx or origin",
+    "veteran_status": f"{_WHICH} veteran protected",
+    "disability_status": f"{_WHICH} have disability",
+    "security_clearance": f"{_WHICH} have hold security clearance level highest current active and",
+    "us_person": _EXPORT, "us_citizen": _EXPORT, "citizenship_status": _EXPORT,
+}
+PLAIN_PICK = {k: set(v.split()) for k, v in PLAIN_PICK.items()}
+PICK_CORE = {"gender": [{"gender", "sex"}], "race": [{"race", "ethnicity", "racial", "ethnic"}],
+             "hispanic_latino": [{"hispanic", "latino", "latina", "latinx"}], "veteran_status": [{"veteran"}],
+             "disability_status": [{"disability"}], "security_clearance": [{"clearance"}],
+             "us_person": [{"export", "itar", "ear", "person"}], "us_citizen": [{"citizen"}],
+             "citizenship_status": [{"citizenship"}]}
+CITIZEN_LISTS = {"us_person", "us_citizen", "citizenship_status"}
 US_ONLY = {"work_authorized_us", "needs_sponsorship"}      # your profile answers these for the US
 # Your "Yes, I need sponsorship" means now or later, for whichever visa: a question about only now, or about one
 # visa type, may have another answer, so a Yes answers only one that asks about the future and names no visa
@@ -552,6 +587,30 @@ def _plain_yes_no(field: dict, ans: dict, job: dict | None) -> dict | None:
             "rationale": source_line(canon, ans, job, field["label"]) or f"Profile: {row.get('label') or canon}"}
 
 
+def _plain_pick(field: dict, ans: dict, job: dict | None) -> dict | None:
+    """Your confirmed answer, picked from a list, when the label is plainly that one fact and exactly one choice
+    means it. A list of statuses under an export-control question gets "U.S. citizen" only from a confirmed Yes."""
+    canon = classify.canon_for(field["label"])
+    asked = set(re.findall(r"[a-z0-9]+", f"{field['label']} {field.get('description') or ''}".lower()))
+    if canon not in PLAIN_PICK or not all(asked & core for core in PICK_CORE[canon]) or asked - PLAIN_PICK[canon]:
+        return None
+    options = [o for o in field.get("options") or [] if not _PLACEHOLDER.match(o)]
+    if field["qtype"] not in ("select", "radio", "listbox", "multiselect") or not options:
+        return None
+    row = ans.get("us_citizen" if canon in CITIZEN_LISTS else canon) or {}
+    value = (row.get("value") or "").strip()
+    if not value or not row.get("confirmed"):
+        return None
+    if canon in CITIZEN_LISTS:
+        out = _citizen_option(options) if value.lower() == "yes" else ""
+    else:
+        out = classify.strict_pick(value, options) or ""
+    if not out:
+        return None
+    return {"kind": "answer_bank", "canon": canon, "answer": out, "confidence": 1.0, "issues": [],
+            "rationale": source_line(canon, ans, job, field["label"]) or f"Profile: {row.get('label') or canon}"}
+
+
 def _yours_to_answer(field: dict, canon: str | None) -> dict:
     """A rule-2 question that isn't a plain Yes/No about one fact in your confirmed profile: left for you."""
     return {"kind": "answer_bank", "canon": canon, "answer": "", "confidence": 0.0 if field["required"] else 1.0,
@@ -567,9 +626,10 @@ def deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | Non
         return got
     if field["qtype"] == "file":             # "Cover letter explaining your visa status": never AI's to write
         return dict(_yours_to_answer(field, None), kind="file")
-    if got is not None and not (got.get("answer") or "").strip():
+    if got is not None and not (got.get("answer") or "").strip() and not got.get("no_option"):
         return got          # already left for you, with its own reason (a signature, a place outside the US)
-    return _plain_yes_no(field, ans, job) or _yours_to_answer(field, classify.canon_for(field["label"]))
+    return _plain_yes_no(field, ans, job) or _plain_pick(field, ans, job) or \
+        (got if got and got.get("no_option") else _yours_to_answer(field, classify.canon_for(field["label"])))
 
 
 # A password or PIN (a sign-in's, or the one to your portfolio) is never Jobsmith's to type (rule 5). Any "PIN" is
@@ -687,12 +747,14 @@ def _deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | No
         return None  # e.g. "how did you hear about us": let the AI pick from the options
     issues = []
     out = value
+    no_option = False            # your answer isn't among the choices as written: a stricter pick may still find it
     if field["options"] and value:
         out = classify.pick_option(value, field["options"]) or ""
         if not out:
             if not sensitive:
                 return None
             issues.append(f"Your answer '{value}' doesn't match any option here; pick one")
+            no_option = True
     if not value:
         if canon == "previously_employed":
             # confirming your resume lists every employer answers it only for this job's own company, not its
@@ -711,6 +773,8 @@ def _deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | No
                "confidence": 1.0 if (out and confirmed) else 0.5 if out else 0.0, "issues": issues}
     if canon in LEGAL_YES_NO and out:
         out_row["rationale"] = source_line(canon, ans, job, field["label"])
+    if no_option:
+        out_row["no_option"] = True
     return out_row
 
 
