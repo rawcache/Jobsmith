@@ -765,3 +765,31 @@ def test_another_model_isnt_the_busy_one():
     a, b = llm.GeminiAPI("test-key-not-real"), llm.GeminiAPI("test-key-not-real")
     b.model = a.model + "-other"
     assert llm._busy_key(a) != llm._busy_key(b)
+
+
+async def test_a_second_apply_button_is_pressed_when_the_first_is_covered(page):
+    from jobsmith.fill import generic
+    await generic.open_form(page, _apply_page("second_works.html"))
+    assert await page.evaluate("window.applied") == "second" and not await page.evaluate("window.menu === true")
+
+
+async def test_a_menu_with_the_word_isnt_pressed_past_a_covered_apply_button(page):
+    from jobsmith.fill import base, generic
+    with pytest.raises(base.NeedsYou, match="Apply button"):
+        await generic.open_form(page, _apply_page("only_menu_free.html"))
+    assert not await page.evaluate("window.menu === true")
+
+
+async def test_no_ai_is_spent_on_a_form_behind_your_sign_in(fake_llm, monkeypatch):
+    from jobsmith import db, runner, sources
+    from jobsmith.fill import base
+    ai = fake_llm(lambda s, p: {"answers": []})
+    jid = sources.add_job_url("https://careers.example.com/jobs/1", "Example", "Software Intern")
+
+    async def scan(job, run):
+        raise base.NeedsYou("asks you to sign in before it shows its application form")
+    monkeypatch.setattr(runner, "do_scan", scan)
+    db.x("UPDATE jobs SET description='Build software.' WHERE id=?", (jid,))
+    await runner.prepare(jid)
+    job = db.q1("SELECT status, hold_reason FROM jobs WHERE id=?", (jid,))
+    assert "sign in" in job["hold_reason"] and ai.prompts == [] and draft.drafts_for(jid) == []
