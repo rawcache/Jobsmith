@@ -152,8 +152,9 @@ ALSO_COUNTRIES = {"Georgia"}       # spelled out, it may mean the country
 _STOP = r"(?:in|within|during|over|since|from|between|before|after|until|prior to)"
 ASKS_ABOUT = re.compile(r"(?:(?:worked|work|been employed|employed)\s+(?:for|at|by|with)|(former|previous|past)\s+"
                         r"(?:employee|intern|contractor|worker)s?\s+(?:of|at|with))\s+(.+?)"
-                        r"(?=\s+(?:before|previously|in the past|at any time|ever)\b|\s*[,?(]|(?<!\b[A-Z])\.|\s+as\b"
+                        r"(?=\s+(?:before|previously|in the past|at any time|ever)\b|\s*[,?.(]|\s+as\b"
                         rf"|\s+(?:or|and)\s+(?:any|its|their|one)\b|\s+{_STOP}\b|$)", re.I)
+INITIALS = re.compile(r"\b(?:[A-Z]\.){2,}")
 NOT_A_COMPANY = re.compile(r"^(?:a|an|any|another|other)\b", re.I)      # "worked for a government agency"
 THIS_COMPANY = re.compile(r"^(?:us|this company|the company|our company|this organi[sz]ation|here)$", re.I)
 MEANS_THIS_COMPANY = re.compile(r"\b(?:us|here|our company|this company|this organi[sz]ation)\b", re.I)
@@ -183,8 +184,9 @@ def _asked_company(job: dict, label: str) -> tuple[str, bool, bool]:
     own_name = profile.employer_name(own)
     names_own = bool(own_name) and bool(re.search(rf"(?<![a-z0-9]){re.escape(own_name)}(?![a-z0-9])",
                                                   profile.employer_name(label)))
-    m = ASKS_ABOUT.search(label)
-    named = m.group(2).strip() if m else ""
+    # "the U.S. Government": the dots of initials aren't the end of the name (a lone "X." may end a sentence)
+    m = ASKS_ABOUT.search(INITIALS.sub(lambda i: i.group(0).replace(".", "\u2024"), label))
+    named = m.group(2).strip().replace("\u2024", ".") if m else ""
     specific = specific or bool(m and m.group(1))                       # "former intern at", "previous employee of"
     if named and not THIS_COMPANY.match(named):
         name = profile.employer_name(named)
