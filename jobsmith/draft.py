@@ -247,7 +247,8 @@ def _asked_elsewhere(label: str, job: dict) -> str:
     tl = db.get_settings().get("target_locations") or []
     company = (job.get("company") or "").lower()
     us_cities = {c.lower() for k, v in onboarding.LOCATIONS.items() if k not in onboarding.INTERNATIONAL for c in v}
-    theirs = " ".join(job.get("locations") or []).lower()
+    locs = [l for l in job.get("locations") or [] if l.strip()]
+    theirs = {l.split(",")[0].strip().lower() for l in locs if match._in_us(l)}       # the posting's US cities
     for named in ASKED_PLACE.findall(" ".join((label or "").split())):
         named = named.strip(" ,.")
         if not named or NOT_PLACES.match(named) or named.lower() in company or company.startswith(named.lower()):
@@ -255,9 +256,10 @@ def _asked_elsewhere(label: str, job: dict) -> str:
         city = named.split(",")[0].strip().lower()
         if tl:
             ok = match.place_matches({"locations": [named]}, tl)
-        else:           # anywhere in the US: the posting's own city, a US city Jobsmith knows, or "City, ST"
-            ok = match._in_us(named) or city in us_cities or (city and city in theirs and
-                                                              any(match._in_us(l) for l in job.get("locations") or []))
+        elif "," in named:      # "Lehi, UT", "Cambridge, UK": what follows the comma says where
+            ok = match._in_us(named)
+        else:                   # anywhere in the US, a bare city: one of the posting's own US cities, or a US city
+            ok = city in theirs or (city in us_cities and bool(locs) and all(match._in_us(l) for l in locs))
         if not ok:
             return named
     return ""
