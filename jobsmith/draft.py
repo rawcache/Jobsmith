@@ -757,6 +757,17 @@ def _yours_to_answer(field: dict, canon: str | None) -> dict:
             "rationale": "Left for you: Jobsmith answers these only with your confirmed Yes or No to a plain question"}
 
 
+# A box for a link or a handle: "Twitter URL", "Other URL", "Kaggle profile link". Short labels only: "Tell us about a
+# project (include a link)" is an essay.
+LINK_Q = re.compile(r"^(?=(?:\S+\s*){1,7}$).*(\b(urls?|links?|handle|username)\b|\b(twitter|instagram|facebook|youtube|"
+                    r"medium|substack|kaggle|leetcode|stack ?overflow|dribbble|behance|tiktok|bluesky|mastodon)\b"
+                    r"(?!.*\?))", re.I)
+# "If other, please specify", "If yes, please provide…": the answer hangs on another question's
+FOLLOW_UP = re.compile(r"^if\b.{0,60}?\b(other|yes|no|selected|answered|chose|checked|applicable|so|not)\b.{0,40}?,?\s*"
+                       r"(please\s+)?(specify|explain|describe|provide|list|elaborate|indicate|tell us|share|state|name)\b",
+                       re.I)
+
+
 def deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | None:
     """The answer from your profile alone, or None when AI (or a saved answer) may write it."""
     got = _deterministic(field, ans, job)
@@ -823,6 +834,18 @@ def _deterministic(field: dict, ans: dict, job: dict | None = None) -> dict | No
                 "issues": ["Asks about your disability beyond whether you have one; answer it yourself"]
                 if field["required"] else [],
                 "rationale": "About your disability beyond your profile's answer: left for you"}
+    if field["qtype"] in ("text", "textarea") and not field["options"] and not canon:
+        blank = lambda why, issue: {"kind": "answer_bank", "canon": None, "answer": "",
+                                    "confidence": 0.0 if field["required"] else 1.0,
+                                    "issues": [issue] if field["required"] else [], "rationale": why}
+        if LINK_Q.search(field["label"].strip()):
+            # an address only you know (rule 1): never AI's to write, and an optional one isn't worth waiting for
+            return blank("A link your profile doesn't have: left blank",
+                         "Asks for a link your profile doesn't have; add it yourself")
+        if FOLLOW_UP.search(field["label"].strip()):
+            # depends on what was picked in the question before it, which only the form knows
+            return blank("A follow-up to another question: left blank unless it applies",
+                         "A follow-up to another question; answer it yourself if it applies")
     if not canon or canon in ("resume", "cover_letter"):
         return None
     if canon == "phone_extension":
