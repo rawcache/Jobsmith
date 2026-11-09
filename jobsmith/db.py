@@ -202,6 +202,8 @@ def conn() -> sqlite3.Connection:
         dcols = {r[1] for r in c.execute("PRAGMA table_info(drafts)").fetchall()}
         if "model" not in dcols:
             c.execute("ALTER TABLE drafts ADD COLUMN model TEXT")
+        if "scope" not in dcols:        # 'job': your answer for this one application, never reused for another
+            c.execute("ALTER TABLE drafts ADD COLUMN scope TEXT")
         ucols = {r[1] for r in c.execute("PRAGMA table_info(usage)").fetchall()}
         if "ok" not in ucols:          # failed calls are logged too, so a run of refused calls shows up
             c.execute("ALTER TABLE usage ADD COLUMN ok INTEGER NOT NULL DEFAULT 1")

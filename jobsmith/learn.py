@@ -29,7 +29,8 @@ def similarity(a: str, b: str) -> float:
 def approved_examples() -> list[dict]:
     """Every answer the user approved (green) or corrected (edited)."""
     rows = db.q("""SELECT d.*, j.company, j.title AS job_title FROM drafts d JOIN jobs j ON j.id=d.job_id
-                   WHERE d.verdict='green' OR (d.final_answer IS NOT NULL AND d.final_answer != '')""")
+                   WHERE (d.verdict='green' OR (d.final_answer IS NOT NULL AND d.final_answer != ''))
+                   AND COALESCE(d.scope, '') != 'job'""")       # an answer for one job stays with that job
     out = []
     for r in rows:
         r = db.decode(r)

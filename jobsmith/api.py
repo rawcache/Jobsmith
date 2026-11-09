@@ -1358,6 +1358,20 @@ async def answer_fix(b: FixAnswer):
         raise HTTPException(400, str(e))
 
 
+class SkipIn(BaseModel):
+    job_id: str
+
+
+@app.post("/api/fixes/skip")
+def skip_fix_job(b: SkipIn):
+    """"Skip this job" under Needs you. Nothing is sent; the application stops waiting on you."""
+    from . import fixes
+    try:
+        return fixes.skip_job(b.job_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @app.post("/api/fixes/recheck")
 async def recheck_fixes():
     from . import fixes

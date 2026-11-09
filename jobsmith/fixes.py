@@ -127,9 +127,19 @@ def compute() -> dict:
         f["ready_after"] = sum(1 for r in rows if not r["own"] and (
             r["need"] == {f["id"]} if f["id"] == "resume_pdf" else r["need"] - {"resume_pdf"} == {f["id"]}))
     order = sorted(fixes.values(), key=lambda f: (f["id"] != "resume_pdf", -f["unblocks"], f["title"]))
+    # Two parts. About you: asked once, used on every form (your resume, a profile fact, a saved answer, a question
+    # several applications ask). About one job: a question only that application asks, shown under its company and
+    # role, with its own problems; its answer is never reused for another job.
+    for f in order:
+        f["part"] = "job" if f["kind"] == "question" and len(f["jobs"]) == 1 else "you"
+    mine = {f["id"]: f for f in order if f["part"] == "job"}
     apps = [{"id": r["job"]["id"], "company": r["job"]["company"], "title": r["job"]["title"],
-             "status": r["job"]["status"], "own": r["own"], "fixes": sorted(r["need"])} for r in rows if r["own"]]
-    return {"held": len(jobs), "fixes": order, "applications": apps}
+             "status": r["job"]["status"], "own": r["own"], "fixes": sorted(r["need"]),
+             "questions": sorted(k for k in r["need"] if k in mine)} for r in rows
+            if r["own"] or r["need"] & mine.keys()]
+    return {"held": len(jobs), "fixes": order, "applications": apps,
+            "about_you": [f["id"] for f in order if f["part"] == "you"],
+            "about_jobs": [a["id"] for a in apps]}
 
 
 def answer(fix_id: str, value: str) -> dict:
@@ -146,7 +156,8 @@ def answer(fix_id: str, value: str) -> dict:
     elif fix_id.startswith("question:"):
         if not value:
             raise ValueError("Type an answer first.")
-        _answer_question(fix_id, value)
+        asked_by = next((len(f["jobs"]) for f in compute()["fixes"] if f["id"] == fix_id), 0)
+        _answer_question(fix_id, value, job_only=asked_by == 1)
     elif fix_id == "resume_pdf":
         if profile.attachment_file() is None:
             raise ValueError("Upload your resume as a PDF first.")
@@ -156,8 +167,22 @@ def answer(fix_id: str, value: str) -> dict:
     return recheck(held)
 
 
-def _answer_question(fix_id: str, value: str) -> int:
-    """Your answer, on every held form that asks this question in the same words (with the same choices)."""
+def skip_job(job_id: str) -> dict:
+    """"Skip this job" under Needs you: the application is dropped, nothing is sent, and it stops waiting on you.
+    Never one that's being sent or was sent."""
+    from . import guardrails
+    j = db.q1("SELECT status FROM jobs WHERE id=?", (job_id,))
+    if not j:
+        raise ValueError("That application isn't here any more.")
+    if j["status"] not in HELD + ("drafted",) or guardrails.maybe_sent(job_id) or job_id in guardrails._submitting:
+        raise ValueError("That application isn't waiting on you, so it can't be skipped here.")
+    db.x("UPDATE jobs SET status='skipped', hold_reason=NULL, updated_at=? WHERE id=?", (db.now(), job_id))
+    return compute()
+
+
+def _answer_question(fix_id: str, value: str, job_only: bool = False) -> int:
+    """Your answer, on every held form that asks this question in the same words (with the same choices). job_only:
+    only one application asks it, so the answer is marked as that job's and never offered to another."""
     n = 0
     rows = [db.decode(d) for d in db.q("""SELECT d.* FROM drafts d JOIN jobs j ON j.id=d.job_id
                                          WHERE j.status IN ('filled','error') AND d.final_answer IS NULL
@@ -173,7 +198,8 @@ def _answer_question(fix_id: str, value: str) -> int:
             continue          # none of this form's choices is your answer: it stays for you on that form
         for t in twins[(d["job_id"], _twin(d["field"]))]:          # its twin box, if any, gets the same choice
             if t is d or not t["options"]:
-                db.x("UPDATE drafts SET final_answer=?, verdict='green', updated_at=? WHERE id=?", (ans, db.now(), t["id"]))
+                db.x("UPDATE drafts SET final_answer=?, verdict='green', scope=?, updated_at=? WHERE id=?",
+                     (ans, "job" if job_only else None, db.now(), t["id"]))
         n += 1
     return n
 

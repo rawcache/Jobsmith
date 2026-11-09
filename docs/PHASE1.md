@@ -393,9 +393,13 @@ in under 15 minutes without help.
       counted. Why 75: closed postings still counted, and setup's Start queued up to ten first applications at
       once. The same copy previews 138 to 367 matches once a level, two role types and places are chosen. It
       applies to an existing copy when setup is run again.
-- [ ] "Needs you" in two parts: "About you, answer once" and "About one job" (under that company and role, with
+- [x] "Needs you" in two parts: "About you, answer once" and "About one job" (under that company and role, with
       "Skip this job"). An answer for one job is never reused for another; questions many jobs ask become profile
       answers.
+      Done: `fixes.compute` (`part`, `questions`), `fixes.skip_job`, `drafts.scope`; dashboard
+      `web/src/components/Fixes.tsx` ([picture](images/needs-you.png)), terminal `tui.review_fixes`;
+      `tests/test_fixes.py` (`test_needs_you_is_about_you_once…`, `test_an_answer_for_one_job_is_never_reused…`,
+      `test_skip_this_job…`).
 - [ ] Terminal: every line names the company and the role; repeated events collapse ("TikTok · 3 roles couldn't
       finish"); start-up shows one summary line ("12 ready for you, 3 couldn't finish · /review"), not one line per
       job; "couldn't finish" always says why; the log and the list always show the same status.

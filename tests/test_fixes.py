@@ -616,3 +616,61 @@ async def test_out_of_ai_autopilot_still_sends_what_needs_none_and_says_so_once(
     res = await scheduler.run_once("test")
     assert queued == [plain]                                                   # the one waiting for AI keeps its turn
     assert res["summary"].count("AI budget is used") == 1
+
+
+# --------------------------------------------------------------------------- Needs you, in two parts
+COMMUTE = {"field": "q_commute", "label": "Can you commute to our Springfield office?", "qtype": "select",
+           "required": True, "options": ["Yes", "No"]}
+
+
+async def test_needs_you_is_about_you_once_and_about_one_job_under_its_company_and_role(fake_llm):
+    _alex(work_auth=False)
+    fake_llm(lambda s, p: {"answers": []})
+    a, b = await _held("Acme", WORK_AUTH, OFFICE), await _held("Globex", WORK_AUTH, OFFICE)
+    c = await _held("Initech", COMMUTE)
+    out = fixes.compute()
+    by = {f["id"]: f for f in out["fixes"]}
+    office, commute = fixes.question_id(OFFICE["label"], OFFICE["options"]), fixes.question_id(COMMUTE["label"], COMMUTE["options"])
+    assert by["profile:work_authorized_us"]["part"] == "you"
+    assert by["resume_pdf"]["part"] == "you"
+    assert by[commute]["part"] == "job" and by[commute]["jobs"] == [c]
+    assert commute not in out["about_you"] and "profile:work_authorized_us" in out["about_you"]
+    [app] = [x for x in out["applications"] if x["id"] == c]
+    assert (app["company"], app["title"]) == ("Initech", "Software Intern") and app["questions"] == [commute]
+    assert out["about_jobs"] == [x["id"] for x in out["applications"]]
+
+
+async def test_an_answer_for_one_job_is_never_reused_for_another(fake_llm, tmp_path, monkeypatch):
+    from jobsmith import learn
+    _alex()
+    resume_pdf(tmp_path)
+    fake_llm(lambda s, p: {"answers": []})
+    monkeypatch.setattr(commands, "queue", lambda ids: ids)
+    c = await _held("Initech", COMMUTE)
+    fixes.answer(fixes.question_id(COMMUTE["label"], COMMUTE["options"]), "Yes")
+    row = next(d for d in draft.drafts_for(c) if d["field"] == "q_commute")
+    assert row["final_answer"] == "Yes" and row["scope"] == "job"
+    assert learn.reusable_answer(COMMUTE["label"], "select", ["Yes", "No"]) is None        # not offered elsewhere
+    # one that several applications ask is answered once, and is there for the next form that asks it
+    a, b = await _held("Acme", OFFICE), await _held("Globex", OFFICE)
+    fixes.answer(fixes.question_id(OFFICE["label"], OFFICE["options"]), "No")
+    assert {d["scope"] for j in (a, b) for d in draft.drafts_for(j) if d["field"] == "q_office"} == {None}
+    assert learn.reusable_answer(OFFICE["label"], "select", ["Yes", "No"])["answer"] == "No"
+
+
+async def test_skip_this_job_drops_it_and_never_one_being_sent(fake_llm):
+    from jobsmith import guardrails
+    _alex()
+    fake_llm(lambda s, p: {"answers": []})
+    c, d = await _held("Initech", COMMUTE), await _held("Hooli", COMMUTE)
+    out = fixes.skip_job(c)
+    assert db.q1("SELECT status FROM jobs WHERE id=?", (c,))["status"] == "skipped"
+    assert c not in [x["id"] for x in out["applications"]] and not db.q("SELECT 1 FROM runs WHERE job_id=? AND kind='submit'", (c,))
+    guardrails.claim(d)                                   # Submit was pressed: it can't be skipped from here
+    try:
+        with pytest.raises(ValueError, match="isn't waiting on you"):
+            fixes.skip_job(d)
+    finally:
+        guardrails.release(d)
+    with pytest.raises(ValueError):
+        fixes.skip_job("nope")
