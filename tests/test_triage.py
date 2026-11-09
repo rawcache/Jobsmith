@@ -614,6 +614,9 @@ def test_yes_and_no_in_the_forms_own_words():
     # a protected veteran is more than a veteran: your Yes doesn't say which
     assert classify.strict_pick("Yes", ["I am a protected veteran", "I am not a protected veteran"]) is None
     assert classify.strict_pick("Yes", ["I have a disability that requires accommodation", "I have no disability"]) is None
+    assert classify.strict_pick("None", ["None (past)", "Secret", "Top Secret"]) is None
+    assert classify.strict_pick("No", ["No disability", "Disability"]) == "No disability"
+    assert classify.strict_pick("No", ["No, I have no disability", "Yes"]) == "No, I have no disability"
     assert classify.strict_pick("No", ["I have no disability and have never had one", "I have a disability"]) is None
     assert classify.strict_pick("No", ["I am not a protected veteran", "I am a protected veteran"]) == \
         "I am not a protected veteran"
