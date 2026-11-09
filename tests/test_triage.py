@@ -1003,7 +1003,9 @@ def test_two_facts_in_one_list_question_wait():
 
 
 # From the second look at held applications: boxes AI can't know the answer to were waiting for AI.
-@pytest.mark.parametrize("label", ["Twitter URL", "Twitter", "X (Twitter) profile", "Other URL", "Kaggle profile link"])
+@pytest.mark.parametrize("label", ["Twitter URL", "Twitter", "X (Twitter) profile", "Other URL", "Kaggle profile link",
+                                   "Please tell us your Twitter URL", "Tell us your Kaggle username",
+                                   "Twitter (optional)", "Your Twitter handle (optional)"])
 def test_a_link_your_profile_doesnt_have_is_left_blank_never_written(label):
     got = draft.offline(field(label, "text", required=False), profile.answers(), JOB)
     assert got is not None and got["answer"] == "" and not got["issues"]           # optional: blank, no AI, no hold
@@ -1013,6 +1015,7 @@ def test_a_link_your_profile_doesnt_have_is_left_blank_never_written(label):
 
 @pytest.mark.parametrize("label", ["If other, please specify", "If you selected Other, please specify below:",
                                    "If yes, please provide name and relationship to current employee:",
+                                   "If yes (e.g. a referral), please explain",
                                    "If \"Industry Conference\" or \"Other,\" please provide more details:"])
 def test_a_follow_up_to_another_question_is_never_ais_to_guess(label):
     got = draft.offline(field(label, "text", required=False), profile.answers(), JOB)
