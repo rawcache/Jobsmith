@@ -38,7 +38,7 @@ issue), and commit the tick with the work.
 - Every new site gets a fixture in `tests/fixtures/`, a `tests/test_fill.py` test (filled fields and what lands under
   "Needs you"), and an extension autofill test with the submit watcher on. `ats.SUPPORTED` and the README change
   only when those pass.
-- Commit and push after each item if tests pass and the Codex review finds nothing blocking. Ask before cutting a
+- Commit and push after each item if tests pass. Ask before cutting a
   release.
 
 ## 1. Guardrails (before any new site)

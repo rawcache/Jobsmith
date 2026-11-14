@@ -80,28 +80,3 @@ blocks every outward action.
   the saved Ramp and Palantir forms). Public claims about which sites work end to end must match what the tests
   prove.
 - Workday / iCIMS: filled page by page, stop at review; sign-in is the user's.
-
-## Working with Codex
-
-Codex (OpenAI's CLI, signed in with the user's ChatGPT account) is run from the shell; it is not an MCP server.
-Claude Code leads: it plans, edits, runs tests, and is the only one that commits or pushes. Codex is a second
-engineer for three jobs. Run `codex review --help` and `codex exec --help` once per session to confirm the flags.
-
-1. **Review.** After each logical change and before every commit, stage it and run a read-only review:
-   `codex review` (or `codex exec -s read-only -C . "Review git diff --staged against CLAUDE.md. List bugs, rule
-   breaks (invented facts, sent messages, personal data) and missing tests. Do not edit files."`).
-   Fix what holds up; tell the user what you didn't take and why.
-2. **Parallel, separate work.** Hand Codex one self-contained task in files you aren't touching:
-   `codex exec -s workspace-write -C . "<task, files to create, test to run>"`. It must not commit. Then run the
-   tests and review its changes as you would a contributor's (`git diff`).
-3. **Second opinion** on a design choice when two approaches look close (`-s read-only`).
-
-Never use `--dangerously-bypass-approvals-and-sandbox` or `-s danger-full-access`, never let Codex commit or push,
-and never give it anything from `data/`. Long tasks can take minutes; run them in the background and keep working.
-
-Always run `git add` as its own command before `git commit`, never in the same command. The commit hook in
-`.claude/settings.json` runs Codex before the whole command starts, so a combined `git add && git commit` is
-reviewed with nothing staged. The hook (`.claude/hooks/commit_review.py`, local like the settings file) finds
-`git commit` anywhere in a command and refuses one that also stages (`git add … &&`, `-a`, paths); its cases are
-in `.claude/hooks/test_commit_review.py`. A shared copy for contributors to opt in is in `scripts/hooks/` (README
-there); keep the two in step when the matcher changes.
