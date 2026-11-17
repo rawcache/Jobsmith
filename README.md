@@ -15,7 +15,7 @@ Local, free, and built for students applying to software, hardware, data and AI 
 
 <!-- DEMO GIF goes here: docs/images/demo.gif, 880 px wide, under 10 MB, the practice copy only (Alex Rivera),
      about 30 s: `apply to …` → applications filling above the prompt → one held under "Needs you" → answered
-     inline → sent. Replace the screenshot below with it. -->
+     inline → sent. Then replace the screenshot below with it. -->
 <p align="center"><img src="docs/images/terminal.png" alt="Jobsmith in the terminal answering: which companies did you apply to in the past few hours, and what's waiting for me to send?" width="880"></p>
 
 **What it does**
