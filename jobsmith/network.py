@@ -57,10 +57,10 @@ def import_csv(text: str) -> dict:
 
 
 def at_company(company: str, limit: int = 50) -> list[dict]:
-    """People you know at this company. 'Apple' matches 'Apple Inc.'; 'Amazon' matches 'Amazon Web Services'."""
-    _ensure()
+    """People you know at this company. 'Apple' matches 'Apple Inc.'; 'Amazon' matches 'Amazon Web Services'.
+    Read only: before any import there's no table and nobody to find, so it isn't made here (the MCP tool reads)."""
     key = norm_company(company)
-    if not key:
+    if not key or not db.has_table("connections"):
         return []
     rows = db.q("""SELECT first_name, last_name, url, company, position, connected_on FROM connections
                    WHERE company_norm = ? OR company_norm LIKE ? ORDER BY company_norm = ? DESC, last_name LIMIT ?""",

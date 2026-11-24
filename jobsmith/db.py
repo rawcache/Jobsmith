@@ -276,6 +276,11 @@ def q1(sql: str, params: Iterable[Any] = ()) -> dict | None:
     return rows[0] if rows else None
 
 
+def has_table(name: str) -> bool:
+    """Whether a table that's made on first use exists yet. Lets a read answer "nothing yet" without writing."""
+    return q1("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)) is not None
+
+
 def x(sql: str, params: Iterable[Any] = ()) -> int:
     with _lock:
         cur = conn().execute(sql, tuple(params))

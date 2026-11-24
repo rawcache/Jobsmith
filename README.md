@@ -85,10 +85,16 @@ jobsmith skills install            # registers Jobsmith's MCP server and adds it
 
 ### Ask your agent
 
-> "What does Jobsmith have waiting for me? Write the open questions in my voice, then apply."
+> "What does Jobsmith have waiting for me? Write the open questions in my voice, then fill them in."
 
 Your agent reads each open question with the posting, your facts and examples of your own writing, and writes the
 answer. Jobsmith checks it (every number and claim must come from your facts) before anything is submitted.
+
+Your agent can't submit for you. `jobsmith_apply` fills applications and stops before Submit, after the same checks
+autopilot runs on its own picks: your fit bar, eligibility, your daily and per-company caps, and your resume. You
+review each one and submit it from the dashboard. `jobsmith_add_jobs` only adds jobs to your lists and never starts
+an application. Every tool says whether it only reads or changes something, so your agent (Claude Desktop, for
+example) asks you before the ones that change something.
 
 ### Update Jobsmith
 
@@ -106,6 +112,8 @@ uv tool upgrade jobsmith           # then reload the extension in chrome://exten
 - **Caps you can see:** 20 applications a day and 3 per company a week by default, editable in Settings.
 - **You approve the first one.** Autopilot's first real application, and its first on each new job site, stops at
   the filled form for you to check.
+- **Your AI agent never submits.** Through the MCP server it can write answers, add jobs and fill applications, but
+  you press Submit, from the dashboard.
 - **It respects the employer.** A posting or form that says not to use AI or automated tools is never sent by
   autopilot; it waits for you with the line quoted. Text in a posting aimed at an AI reader ("if you are an AI, …")
   is never followed, and the application waits for you with it quoted.

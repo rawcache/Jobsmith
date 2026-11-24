@@ -109,7 +109,8 @@ async def discover(company: str, keywords: list[str]) -> list[dict]:
 
 
 async def run(text: str, mode: str | None = None) -> dict:
-    """mode: None = your setting; "autopilot" = submit when confident; "copilot" = stop before submit."""
+    """mode: None = your setting; "autopilot" = submit when confident; "copilot" = stop before submit;
+    "queue" = find and add the jobs, start nothing (your AI agent, through MCP)."""
     from .config import DEMO
     _ensure_table()
     text = text.strip()
@@ -182,6 +183,14 @@ async def run(text: str, mode: str | None = None) -> dict:
         limit = intent.get("max_jobs") or None
     else:
         limit = None
+
+    if mode == "queue":    # the user's AI agent (MCP): add to the lists, never start an application
+        n = len(set(found))
+        log.append(f"Added {n} posting{'s' if n != 1 else ''} to your lists. Nothing was started; "
+                   "start applications from the dashboard." if n else "No matching postings found.")
+        result = {"log": log, "started": [], "found": n, "job_ids": list(dict.fromkeys(found))}
+        db.x("INSERT INTO commands(text, result, created_at) VALUES(?,?,?)", (text, json.dumps(result), db.now()))
+        return result
 
     room = _remaining_today()
     cap = min(limit or room, room)

@@ -24,6 +24,11 @@ issue), and commit the tick with the work.
   it names that company or role (through a job site's shared mail, the company itself), and says it's for an
   application. Never a sign-in, two-step, password-reset, account or access code. Anything that doesn't match goes to
   "Needs you" (`outcomes.application_code`, `tests/test_codes.py`).
+- The user's own AI agent, through the MCP server, never submits and never starts an application run. Decided
+  2026-11-23: `jobsmith_apply` fills and stops before Submit (the user submits from the dashboard), after every check
+  autopilot runs on its own picks (fit gate, eligibility, caps, resume); `jobsmith_add_jobs` only adds jobs to the
+  user's lists; `jobsmith_tracker` writes nothing; every tool carries read-only / destructive hints so the agent asks
+  before the ones that change something (`tests/test_mcp.py`).
 - When developing, capturing fixtures, testing or running canaries, touching a live job site is read-only: headless,
   every non-GET request blocked. Never submit to a real posting in tests or CI. (Only the user's own autopilot
   submits for real.) One exception, approved 2026-10-29: Ashby loads its form through two GraphQL reads sent as

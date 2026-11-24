@@ -31,7 +31,10 @@ Tools: `jobsmith_status`, `jobsmith_find_jobs`, `jobsmith_job`, `jobsmith_add_jo
 `jobsmith_pending_questions`, `jobsmith_save_answers`.
 
 1. `jobsmith_status` first: what's running, what's held, what needs the user.
-2. To apply: `jobsmith_find_jobs` (or `jobsmith_add_jobs` with a company, link or list), then `jobsmith_apply`.
+2. To apply: `jobsmith_find_jobs` (or `jobsmith_add_jobs` with a company, link or list; it only adds them and
+   starts nothing), then `jobsmith_apply`. It fills each application and stops before Submit, after the fit gate,
+   eligibility, caps and resume checks; one that fails a check isn't filled and `jobsmith_job` says why. You can't
+   submit: tell the user their filled applications are waiting for them to submit from the dashboard.
 3. Written questions Jobsmith couldn't answer on its own come back from `jobsmith_pending_questions`, each with
    the posting, the user's relevant facts and examples of their own writing. Write each answer **only from
    those facts**, in the user's voice (match the examples: their sentence length, their words), and send them

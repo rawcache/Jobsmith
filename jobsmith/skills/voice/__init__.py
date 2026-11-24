@@ -102,9 +102,10 @@ def remove(pid: int) -> None:
 
 
 def passages() -> list[dict]:
-    """Your writing, plus every long answer you approved or wrote yourself in an application."""
-    _ensure()
-    rows = [dict(r, kind="sample") for r in db.q("SELECT id, source, title, text FROM voice_passages ORDER BY id")]
+    """Your writing, plus every long answer you approved or wrote yourself in an application.
+    Read only: until you add writing there's no samples table, and it isn't made here (MCP's read tools land here)."""
+    rows = [dict(r, kind="sample") for r in db.q("SELECT id, source, title, text FROM voice_passages ORDER BY id")] \
+        if db.has_table("voice_passages") else []
     for d in db.q("""SELECT d.id, d.label, COALESCE(d.final_answer, d.answer) text, j.company FROM drafts d JOIN jobs j ON j.id=d.job_id
                      WHERE (d.verdict='green' OR d.final_answer IS NOT NULL) AND d.qtype='textarea'
                        AND COALESCE(d.scope, '') != 'job'

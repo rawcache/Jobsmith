@@ -1037,11 +1037,15 @@ def mark_submitted(job_id: str) -> None:
     record_submission(job_id, "Marked submitted by you.")
 
 
-async def autopilot(job_ids: list[str], force: bool = False, submit: bool | None = None) -> None:
+async def autopilot(job_ids: list[str], force: bool = False, submit: bool | None = None,
+                    every_check: bool = False) -> None:
     """End to end for a batch: prepare each job, then fill (and submit when trusted + autonomous).
-    Jobs you don't qualify for are skipped with the reason, unless you picked them yourself (force)."""
+    Jobs you don't qualify for are skipped with the reason, unless you picked them yourself (force).
+    every_check (the user's AI agent, through MCP): the caps and the resume check run even though nothing is
+    submitted, so an agent can't fill past the limits the user set; a job held back says why."""
     from . import eligibility
     autonomous = applies_on_own() if submit is None else submit
+    guarded = (autonomous or every_check) and not force
 
     async def one(jid):
         if force:                # you picked it, so a job board role left out for you is a match again
@@ -1057,11 +1061,16 @@ async def autopilot(job_ids: list[str], force: bool = False, submit: bool | None
             if not gate["passed"]:
                 db.x("UPDATE jobs SET hold_reason=?, updated_at=? WHERE id=?", (gate["summary"], db.now(), jid))
                 return
-        if autonomous and not force:
+        if guarded:
             capped = guardrails.cap_reason(db.q1("SELECT id, company, title FROM jobs WHERE id=?", (jid,)) or {"id": jid})
             if capped:          # left as it is: autopilot picks it up again once there's room
+                if every_check:
+                    db.x("UPDATE jobs SET hold_reason=?, updated_at=? WHERE id=?", (capped, db.now(), jid))
                 return
-        if autonomous and not force and profile.attachment_file() is None:
+        if guarded and profile.attachment_file() is None:
+            if every_check:
+                db.x("UPDATE jobs SET hold_reason=?, updated_at=? WHERE id=?",
+                     ("Add your resume in Profile first: every application attaches it.", db.now(), jid))
             return              # every application attaches it: autopilot starts (and pays for) none until it's there
         await prepare(jid, hold_first=autonomous)
         full = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (jid,)))

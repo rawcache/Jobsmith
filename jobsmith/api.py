@@ -1085,7 +1085,7 @@ def put_draft(draft_id: int, d: DraftIn):
 
 
 class BatchIn(BaseModel):
-    action: str        # prepare | autopilot | skip | fill
+    action: str        # prepare | autopilot | skip | fill | agent (MCP: every check, never submits)
     ids: list[str]
 
 
@@ -1103,6 +1103,8 @@ async def batch(b: BatchIn):
             started += runner.spawn(j, "filling", runner.fill(j, submit=False))
         elif b.action == "autopilot":   # you picked these yourself, so apply even if a requirement looks off
             started += runner.spawn(j, "autopilot", runner.autopilot([j], force=True))
+        elif b.action == "agent":       # your AI agent picked these (MCP): every check runs, and it never submits
+            started += runner.spawn(j, "filling", runner.autopilot([j], submit=False, every_check=True))
     return {"started": started}
 
 
@@ -1137,7 +1139,8 @@ def screenshot(run_id: int):
 
 class CommandIn(BaseModel):
     text: str
-    mode: str | None = None    # "autopilot" | "copilot" for this request only (the terminal's --autopilot)
+    mode: str | None = None    # "autopilot" | "copilot" for this request only (the terminal's --autopilot);
+                               # "queue": add the jobs and start nothing (the MCP server)
 
 
 @app.post("/api/command")

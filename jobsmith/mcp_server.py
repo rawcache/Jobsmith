@@ -18,6 +18,7 @@ try:                                    # mcp 2.x
     from mcp.server.mcpserver import MCPServer as FastMCP
 except ImportError:                     # mcp 1.x
     from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from . import db, draft, eligibility, insights, network, outcomes, profile, traps
 from .skills import voice
@@ -25,7 +26,16 @@ from .skills import voice
 mcp = FastMCP("jobsmith", instructions=(
     "Jobsmith applies to internships and jobs for the user from their real resume. Start with jobsmith_status. "
     "Write answers only from the facts Jobsmith gives you, in the user's own voice. Never invent experience or numbers, "
-    "never answer demographic or work-authorization questions, never send messages, type passwords or solve CAPTCHAs."))
+    "never answer demographic or work-authorization questions, never send messages, type passwords or solve CAPTCHAs. "
+    "You can't submit applications: jobsmith_apply fills them and the user submits from the dashboard."))
+
+# What each tool does to the user's computer, so the agent (Claude Desktop, Claude Code) asks before the ones that
+# change something. Only the user's Jobsmith data is touched; "open world" ones also reach job sites or their AI.
+READ = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+ADDS = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
+ADDS_AI = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
+REPLACES = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
+OPENS_SITES = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
 
 
 def _post(path: str, body: dict) -> dict:
@@ -66,7 +76,7 @@ def _j(x) -> str:
     return json.dumps(traps.redact_obj(json.loads(json.dumps(x, default=str))), ensure_ascii=False)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 def jobsmith_status() -> str:
     """What Jobsmith is doing: applications running, held for the user, submitted today, and anything only the user can do."""
     counts = {r["status"]: r["n"] for r in db.q("SELECT status, COUNT(*) n FROM jobs WHERE active=1 GROUP BY status")}
@@ -76,14 +86,14 @@ def jobsmith_status() -> str:
                "autopilot_on": bool(db.get_setting("auto_run")), "email_connected": outcomes.email_ready()})
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 def jobsmith_profile() -> str:
     """The user's facts (cite them by id), profile answers, and how they write. Read this before writing anything."""
     ans = {k: v["value"] for k, v in profile.answers().items() if v.get("value") and k not in profile.SENSITIVE_KEYS}
     return _j({"facts": profile.facts_prompt_block(12000), "answers": ans, "voice": voice.style(), "voice_notes": voice.style_notes()})
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 def jobsmith_find_jobs(query: str = "", limit: int = 20, only_new: bool = True) -> str:
     """Best-fit roles from the user's job lists. query filters by company or title."""
     where, params = ["active=1"], []
@@ -97,7 +107,7 @@ def jobsmith_find_jobs(query: str = "", limit: int = 20, only_new: bool = True) 
     return _j([db.decode(r) for r in rows])
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 def jobsmith_job(job_id: str) -> str:
     """One job: the posting, pay and level, how the user's resume matches, eligibility, and every drafted answer."""
     j = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (job_id,)))
@@ -126,7 +136,7 @@ def _pending(limit: int) -> list[dict]:
     return out
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 def jobsmith_pending_questions(limit: int = 10) -> str:
     """Written questions Jobsmith couldn't answer confidently on its own, with what you need to answer them:
     the posting, the user's closest passages of their own writing, and any current draft. Answer them with
@@ -141,7 +151,7 @@ def jobsmith_pending_questions(limit: int = 10) -> str:
     return _j({"questions": rows, "voice_notes": voice.style_notes()})
 
 
-@mcp.tool()
+@mcp.tool(annotations=REPLACES)
 def jobsmith_save_answers(job_id: str, answers: list[dict]) -> str:
     """Save answers you wrote: [{"field": ..., "text": ..., "fact_ids": [...]}]. Jobsmith checks each one
     (claims and numbers must come from the cited facts; stock phrases the user never uses are flagged) and
@@ -175,35 +185,47 @@ def jobsmith_save_answers(job_id: str, answers: list[dict]) -> str:
     return _j({"saved": report, "readiness": draft.readiness(job_id)})
 
 
-@mcp.tool()
-def jobsmith_apply(job_ids: list[str], submit: bool | None = None) -> str:
-    """Start applying to these jobs (autopilot fills them in the browser on the user's computer, and submits only
-    when every answer is trusted, unless the user's settings say otherwise). submit=False fills and stops."""
-    return _j(_post("/api/jobs/batch", {"action": "autopilot" if submit is not False else "fill", "ids": job_ids}))
+@mcp.tool(annotations=OPENS_SITES)
+def jobsmith_apply(job_ids: list[str]) -> str:
+    """Fill these applications in the browser on the user's computer, and stop before Submit. This never submits:
+    the user reviews each filled application and submits it themselves from the Jobsmith dashboard.
+    Every check runs first, as for a job autopilot picks itself: the fit gate, eligibility, the user's daily and
+    per-company caps, and that their resume is added. A job that fails a check is not filled; jobsmith_job and
+    jobsmith_status show why (hold_reason). "started" counts the jobs Jobsmith began working on."""
+    return _j(_post("/api/jobs/batch", {"action": "agent", "ids": job_ids}))
 
 
-@mcp.tool()
+@mcp.tool(annotations=OPENS_SITES)
 def jobsmith_add_jobs(text: str) -> str:
-    """Point Jobsmith at jobs in plain words: a company ('NVIDIA hardware internships'), a job link, or a GitHub job list."""
-    return _j(_post("/api/command", {"text": text}))
+    """Add jobs to the user's lists in plain words: a company ('NVIDIA hardware internships'), a job link, or a
+    GitHub job list. Jobsmith reads and scores them; it never starts an application from here. To fill some, pass
+    the returned job_ids to jobsmith_apply. (If the user turned on autopilot, it may pick good fits up later on its
+    own schedule, as it does for any job in their lists.)"""
+    return _j(_post("/api/command", {"text": text, "mode": "queue"}))
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 def jobsmith_tracker() -> str:
-    """Every application and its stage (applied, assessment, interview, offer, rejected), with replies so far."""
-    outcomes._ensure()
+    """Every application and its stage (applied, assessment, interview, offer, rejected), with replies so far.
+    Read only: it writes nothing, not even on the first call."""
     rows = db.q("""SELECT id, company, title, status, outcome, updated_at FROM jobs WHERE status IN ('submitted','filled','error','drafted')
                    ORDER BY updated_at DESC LIMIT 200""")
-    return _j({"applications": rows, "funnel": outcomes.funnel()})
+    # outcomes.funnel() would first create the replies table (outcomes._ensure); the outcome column it reads is
+    # already part of the jobs table (db.conn), so count it here without writing.
+    funnel = {"submitted": 0}
+    for r in db.q("SELECT outcome, COUNT(*) n FROM jobs WHERE status='submitted' GROUP BY outcome"):
+        funnel["submitted"] += r["n"]
+        funnel[r["outcome"] or "no_reply"] = r["n"]
+    return _j({"applications": rows, "funnel": funnel})
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 def jobsmith_people_at(company: str) -> str:
     """The user's LinkedIn connections at a company (from their own export)."""
     return _j(network.at_company(company, 20))
 
 
-@mcp.tool()
+@mcp.tool(annotations=ADDS_AI)
 async def jobsmith_draft_outreach(job_id: str, first_name: str, last_name: str = "", kind: str = "referral") -> str:
     """Draft a referral ask (kind=referral), recruiter note (recruiter) or thank-you (thanks) to someone the user knows.
     Show it to the user; never send it."""
@@ -214,14 +236,14 @@ async def jobsmith_draft_outreach(job_id: str, first_name: str, last_name: str =
     return _j(await outreach.draft(job_id, person, kind))
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 def jobsmith_voice_examples(question: str, job_id: str = "") -> str:
     """The user's own passages that best fit a question, for writing in their voice."""
     job = db.decode(db.q1("SELECT * FROM jobs WHERE id=?", (job_id,))) if job_id else None
     return _j({"passages": voice.search(question, job, k=4), "voice_notes": voice.style_notes()})
 
 
-@mcp.tool()
+@mcp.tool(annotations=ADDS)
 def jobsmith_voice_add(text: str, title: str = "") -> str:
     """Save writing the user gave you (an essay, a cover letter, an answer they wrote) so Jobsmith learns their voice."""
     return _j({"added_passages": voice.add(text, "from your agent", title)})
