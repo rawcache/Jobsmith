@@ -37,6 +37,13 @@ Local, free, and built for students applying to software, hardware, data and AI 
 
 ## Quick start
 
+### Open Jobsmith
+
+Run `jobsmith` (or `jobsmith open`). It starts Jobsmith if it isn't running, opens the dashboard in your browser and
+prints where: `Jobsmith is open at http://127.0.0.1:8765`. The dashboard only answers on your own computer. On a Mac,
+`jobsmith install-launcher` adds a Jobsmith app to your Applications folder, so Cmd+Space, "Jobsmith" opens it with
+no terminal at all (`--remove` takes it away). Your agent can open it too: `jobsmith_dashboard`.
+
 **New here? Follow [Getting started](docs/getting-started.md):** install, set up and your first application in
 about 15 minutes, with pictures and what to do if something goes wrong. No coding needed.
 
@@ -54,7 +61,8 @@ On Windows, paste into PowerShell:
 powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/rawcache/Jobsmith/main/install.ps1 | iex"
 ```
 
-Then run `jobsmith`. The installer says if you need to open a new window first. It needs no git, compiler or admin
+Then run `jobsmith` to open the dashboard, or `jobsmith --terminal` for the terminal app described here. The
+installer says if you need to open a new window first. It needs no git, compiler or admin
 rights, and works on Intel and Apple silicon Macs, Linux (x86 and ARM) and Windows (x86 and ARM).
 
 The first run asks what you're applying for and which AI to use, and reads your resume. Then it works like Claude

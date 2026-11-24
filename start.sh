@@ -16,5 +16,5 @@ if command -v npm >/dev/null 2>&1 && [ -n "$(find web/src -newer jobsmith/web_di
 fi
 
 uv run jobsmith doctor || true        # also downloads a browser if you don't have Chrome or Edge
-echo "Starting Jobsmith at http://127.0.0.1:8765 (Ctrl+C to stop). In another terminal, run: uv run jobsmith"
+echo "Starting Jobsmith at http://127.0.0.1:8765 (Ctrl+C to stop). In another terminal, run: uv run jobsmith --terminal"
 exec uv run jobsmith serve "$@"

@@ -29,6 +29,12 @@ issue), and commit the tick with the work.
   autopilot runs on its own picks (fit gate, eligibility, caps, resume); `jobsmith_add_jobs` only adds jobs to the
   user's lists; `jobsmith_tracker` writes nothing; every tool carries read-only / destructive hints so the agent asks
   before the ones that change something (`tests/test_mcp.py`).
+- One front door, decided 2026-11-24: bare `jobsmith` (and `jobsmith open`, and the Mac launcher from
+  `jobsmith install-launcher`) starts the engine if needed, opens the dashboard in the browser and prints only
+  "Jobsmith is open at <url>", or one plain sentence if the engine can't start, never a traceback. The terminal app is
+  `jobsmith --terminal`. The dashboard binds 127.0.0.1 only and its address carries no token. Every "Needs you" item,
+  in `jobsmith_status` and the dashboard's banner, links to the page that fixes it; `jobsmith_dashboard` opens it
+  (`jobsmith/frontdoor.py`, `jobsmith/needs.py`, `tests/test_frontdoor.py`).
 - When developing, capturing fixtures, testing or running canaries, touching a live job site is read-only: headless,
   every non-GET request blocked. Never submit to a real posting in tests or CI. (Only the user's own autopilot
   submits for real.) One exception, approved 2026-10-29: Ashby loads its form through two GraphQL reads sent as

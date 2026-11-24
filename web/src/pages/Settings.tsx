@@ -92,7 +92,7 @@ export default function Settings({ focus }: { focus?: string }) {
 
       <EmailCard s={s} save={save} onMsg={setSaved} />
 
-      <section className="card">
+      <section className="card" id="ai">
         <h2>Your AI</h2>
         <p>{status ? <>Writing with <strong>{status.llm.writing.label}</strong>{status.llm.writing.ok ? "." : <span className="warn-text">: {status.llm.writing.message}</span>}</> : null}</p>
         <div className="ai-pick">

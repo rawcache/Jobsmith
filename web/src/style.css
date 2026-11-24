@@ -1160,3 +1160,11 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .count-n { font: 600 28px var(--mono); color: var(--accent); min-width: 3ch; text-align: right; }
 .count > span:last-child { display: flex; flex-direction: column; }
 .count-advice { margin-top: 2px; }
+
+/* The banner over every page while something about you holds applications (NeedsBanner.tsx). */
+.needs-banner { background: var(--warn-soft); color: var(--warn-ink); border-bottom: 1px solid var(--warn-line); font-size: 13.5px; }
+.needs-in { max-width: 1120px; margin: 0 auto; padding: 9px 24px; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.needs-in ul { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; padding: 0; list-style: none; }
+.needs-in a { color: var(--warn-ink); text-decoration: underline; text-underline-offset: 2px; }
+.needs-n { opacity: .8; }
+.bank.flash { box-shadow: 0 0 0 3px var(--chip); border-radius: 6px; transition: box-shadow .3s; }

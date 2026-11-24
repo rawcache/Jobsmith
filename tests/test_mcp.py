@@ -184,7 +184,7 @@ def test_people_and_voice_examples_still_find_what_was_added():
 
 async def test_every_tool_says_whether_it_changes_anything():
     tools = {t.name: t.annotations for t in await mcp_server.mcp.list_tools()}
-    assert len(tools) == 13 and all(a is not None for a in tools.values())
+    assert len(tools) == 14 and all(a is not None for a in tools.values())
     read_only = {n for n, a in tools.items() if a.read_only_hint}
     assert read_only == {"jobsmith_status", "jobsmith_profile", "jobsmith_find_jobs", "jobsmith_job",
                          "jobsmith_pending_questions", "jobsmith_tracker", "jobsmith_people_at", "jobsmith_voice_examples"}

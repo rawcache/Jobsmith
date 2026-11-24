@@ -1,6 +1,9 @@
 """Command line.
 
-    jobsmith                  the terminal app (see tui.py): prompt, live progress, review
+    jobsmith                  open the dashboard in your browser, starting Jobsmith if needed (see frontdoor.py)
+    jobsmith open             the same
+    jobsmith --terminal       the terminal app (see tui.py): prompt, live progress, review
+    jobsmith install-launcher a Jobsmith app in ~/Applications on a Mac (--remove to take it away)
     jobsmith serve            just the engine and the dashboard at http://127.0.0.1:8765
     jobsmith sync | ingest PATH | doctor
     jobsmith stats | audit    the Phase 1 gate numbers (see clicmds.py)
@@ -30,12 +33,32 @@ def main() -> None:
         from . import devtools
         devtools.main(argv)
         return
+    # The front door: someone who has never used a terminal runs `jobsmith` (or the Jobsmith app) and gets the
+    # dashboard in their browser. The terminal app is one flag away.
+    if not argv or argv == ["open"]:
+        from . import frontdoor
+        code = frontdoor.main()
+        if code:
+            sys.exit(code)
+        return
+    if argv[0] == "install-launcher":
+        from . import frontdoor
+        rest = [a for a in argv[1:] if a != "--remove"]
+        if rest:
+            print("Usage: jobsmith install-launcher [--remove]")
+            sys.exit(2)
+        code = frontdoor.install_launcher(remove="--remove" in argv)
+        if code:
+            sys.exit(code)
+        return
+    if "--terminal" in argv:
+        argv = [a for a in argv if a != "--terminal"]
     if not argv or argv[0] not in ENGINE_CMDS:
         from . import tui
         tui.main(argv)
         return
     p = argparse.ArgumentParser(prog="jobsmith", description="Applies to jobs for you. Run `jobsmith` with no "
-                                "arguments for the terminal app, or `jobsmith serve` for the dashboard.")
+                                "arguments to open the dashboard, or `jobsmith --terminal` for the terminal app.")
     sub = p.add_subparsers(dest="cmd")
     s = sub.add_parser("serve", help="start the dashboard")
     s.add_argument("--port", type=int, default=8765)
@@ -46,7 +69,7 @@ def main() -> None:
     d = sub.add_parser("doctor", help="check AI backend, browser, resume")
     d.add_argument("--browser", action="store_true",
                    help="only make sure a browser is ready, quietly unless one must be downloaded (the installer)")
-    args = p.parse_args()
+    args = p.parse_args(argv)
 
     if args.cmd == "serve":
         import uvicorn

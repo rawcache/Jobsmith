@@ -20,14 +20,17 @@ except ImportError:                     # mcp 1.x
     from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
-from . import db, draft, eligibility, insights, network, outcomes, profile, traps
+from . import db, draft, eligibility, frontdoor, insights, needs, network, outcomes, profile, traps
 from .skills import voice
 
 mcp = FastMCP("jobsmith", instructions=(
     "Jobsmith applies to internships and jobs for the user from their real resume. Start with jobsmith_status. "
     "Write answers only from the facts Jobsmith gives you, in the user's own voice. Never invent experience or numbers, "
     "never answer demographic or work-authorization questions, never send messages, type passwords or solve CAPTCHAs. "
-    "You can't submit applications: jobsmith_apply fills them and the user submits from the dashboard."))
+    "You can't submit applications: jobsmith_apply fills them and the user submits from the dashboard. "
+    "Whenever the user has to do something themselves (fix a profile answer, connect their AI, approve or submit an "
+    "application), give them the link from jobsmith_status's needs_you (or call jobsmith_dashboard to open it for "
+    "them) instead of describing menus or pages."))
 
 # What each tool does to the user's computer, so the agent (Claude Desktop, Claude Code) asks before the ones that
 # change something. Only the user's Jobsmith data is touched; "open world" ones also reach job sites or their AI.
@@ -36,34 +39,19 @@ ADDS = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint
 ADDS_AI = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
 REPLACES = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
 OPENS_SITES = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
+# Opens the dashboard on the user's screen (and starts Jobsmith's engine if it isn't running): it changes what they
+# see and may start a process, so not read-only; it deletes and sends nothing, and reaches no website.
+OPENS_DASHBOARD = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
 
 
 def _post(path: str, body: dict) -> dict:
     """Ask the local engine to act (it owns the browser). Starts it if needed, quietly: on an MCP stdio server,
     anything printed to stdout would corrupt the conversation with the agent."""
-    import os
-    import subprocess
-    import sys
-    import time
     import httpx
-    from .config import DATA_DIR
-    base = os.environ.get("JOBSMITH_URL", f"http://127.0.0.1:{os.environ.get('JOBSMITH_PORT', '8765')}")
-
-    def up() -> bool:
-        try:
-            return httpx.get(base + "/api/status", timeout=3).status_code == 200
-        except httpx.HTTPError:
-            return False
-    if not up():
-        log = open(DATA_DIR / "server.log", "a")
-        subprocess.Popen([sys.executable, "-m", "jobsmith", "serve", "--no-open"], stdout=log, stderr=log,
-                         stdin=subprocess.DEVNULL, start_new_session=os.name != "nt")
-        for _ in range(60):
-            time.sleep(0.5)
-            if up():
-                break
-        else:
-            return {"error": f"Jobsmith's engine didn't start. See {DATA_DIR / 'server.log'}"}
+    base = frontdoor.base_url()
+    ok, _started, problem = frontdoor.ensure_engine(base)
+    if not ok:
+        return {"error": problem}
     r = httpx.post(base + path, json=body, timeout=120)
     try:
         return r.json()
@@ -76,14 +64,51 @@ def _j(x) -> str:
     return json.dumps(traps.redact_obj(json.loads(json.dumps(x, default=str))), ensure_ascii=False)
 
 
+def _ai_state() -> tuple[bool, str] | None:
+    """Whether the user's AI is connected, as the running engine last checked it (no new check, no AI call here).
+    With no engine running: only "no AI chosen" is certain; anything else is left unsaid."""
+    import httpx
+    try:
+        ai = httpx.get(frontdoor.base_url() + "/api/status", timeout=3).json()["llm"]
+        return bool(ai["ok"]), ai.get("message") or ""
+    except (httpx.HTTPError, ValueError, KeyError, TypeError):
+        from . import llm
+        return (False, "No AI is chosen") if isinstance(llm.backend(), llm.NoLLM) else None
+
+
 @mcp.tool(annotations=READ)
 def jobsmith_status() -> str:
-    """What Jobsmith is doing: applications running, held for the user, submitted today, and anything only the user can do."""
+    """What Jobsmith is doing: applications running, held for the user, submitted today, and anything only the user
+    can do. "dashboard" is the address of the user's Jobsmith dashboard. Each "needs_you" item says in plain words
+    what's needed, names the page that fixes it ("page") and gives a direct "link" to it: hand the user that link
+    rather than describing where to click."""
     counts = {r["status"]: r["n"] for r in db.q("SELECT status, COUNT(*) n FROM jobs WHERE active=1 GROUP BY status")}
     held = db.q("SELECT id, company, title, status, hold_reason, error FROM jobs WHERE status IN ('filled','error') ORDER BY updated_at DESC LIMIT 15")
     pending = len(_pending(50))
-    return _j({"counts": counts, "held_for_user": held, "open_questions_for_you_to_write": pending,
+    base = frontdoor.base_url()
+    items = [{k: i[k] for k in ("key", "text", "page", "link", "waiting")} for i in needs.items(_ai_state(), base)]
+    return _j({"dashboard": base, "counts": counts, "held_for_user": held, "needs_you": items,
+               "open_questions_for_you_to_write": pending,
                "autopilot_on": bool(db.get_setting("auto_run")), "email_connected": outcomes.email_ready()})
+
+
+@mcp.tool(annotations=OPENS_DASHBOARD)
+def jobsmith_dashboard(link: str = "") -> str:
+    """Open the user's Jobsmith dashboard in the default browser on their computer (starting Jobsmith first if it
+    isn't running) and return its address. Pass a "link" from jobsmith_status's needs_you to open that exact page
+    (a profile answer, the AI settings, an application to approve); anything that isn't a dashboard link opens the
+    home page. Use it when the user wants to see or fix something themselves, and give them the link too."""
+    base = frontdoor.base_url()
+    href = ""
+    if link.startswith(base + "/#/"):
+        href = link[len(base) + 1:]
+    elif link.startswith("#/"):
+        href = link
+    r = frontdoor.open_dashboard(href, opener=frontdoor.quiet_open)
+    if not r.ok:
+        return _j({"dashboard": base, "error": r.problem})
+    return _j({"dashboard": base, "opened_page": r.url, "opened": r.opened, "started_jobsmith": r.started,
+               **({} if r.opened else {"note": "The browser didn't open by itself; give the user the link."})})
 
 
 @mcp.tool(annotations=READ)
@@ -188,7 +213,8 @@ def jobsmith_save_answers(job_id: str, answers: list[dict]) -> str:
 @mcp.tool(annotations=OPENS_SITES)
 def jobsmith_apply(job_ids: list[str]) -> str:
     """Fill these applications in the browser on the user's computer, and stop before Submit. This never submits:
-    the user reviews each filled application and submits it themselves from the Jobsmith dashboard.
+    the user reviews each filled application and submits it themselves from the Jobsmith dashboard (give them the
+    link: jobsmith_status lists each one under needs_you, or jobsmith_dashboard opens it).
     Every check runs first, as for a job autopilot picks itself: the fit gate, eligibility, the user's daily and
     per-company caps, and that their resume is added. A job that fails a check is not filled; jobsmith_job and
     jobsmith_status show why (hold_reason). "started" counts the jobs Jobsmith began working on."""

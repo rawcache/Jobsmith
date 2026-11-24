@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { ago, api, Answer, companyHref, Fact } from "../api";
 import { StatusCtx } from "../main";
 import { Dots, Icon } from "../ui";
@@ -31,7 +31,7 @@ function AnswerField({ a, onSaved }: { a: Answer; onSaved: () => void }) {
   const save = () => api.put(`/api/answers/${a.key}`, { value: v, confirmed: true }).then(onSaved);
   const pending = !a.confirmed && !!a.value;
   return (
-    <label className={`bank ${pending ? "pending" : ""}`}>
+    <label id={`ans-${a.key}`} className={`bank ${pending ? "pending" : ""}`}>
       <span>{a.label}{pending && <em> check this</em>}</span>
       <div className="row tight">
         <input value={v} onChange={e => setV(e.target.value)} onBlur={() => v !== a.value && save()}
@@ -229,7 +229,9 @@ function Slot({ title, hint, accept, doc, label, onPick, busy, onView }: {
   );
 }
 
-export default function Profile() {
+/** focus: a link straight to one thing to fix, from Needs you, the banner or your agent: "resume" (the files tab)
+ *  or a profile answer's key ("desired_pay", "us_citizen"). */
+export default function Profile({ focus }: { focus?: string }) {
   const { refresh } = useContext(StatusCtx);
   const [r, setR] = useState<Resp | null>(null);
   const [msg, setMsg] = useState<string[]>([]);
@@ -239,6 +241,16 @@ export default function Profile() {
   const [tab, setTab] = useState<"files" | "answers" | "work" | "facts">("answers");
   const load = () => api.get<Resp>("/api/profile").then(setR);
   useEffect(() => { load(); }, []);
+  const shown = useRef("");     // each link scrolls once, not again whenever you switch tabs
+  useEffect(() => { if (focus) setTab(focus === "resume" ? "files" : "answers"); }, [focus]);
+  useEffect(() => {
+    if (!r || !focus || shown.current === focus) return;
+    const el = document.getElementById(focus === "resume" ? "resume" : `ans-${focus}`);
+    if (!el) return;
+    shown.current = focus;
+    el.scrollIntoView({ block: "center" }); el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 1600);
+    if (focus !== "resume") el.querySelector("input")?.focus({ preventScroll: true });
+  }, [focus, !!r, tab]);
 
   const upload = async (files: FileList | null, slot: string) => {
     if (!files?.length) return;
@@ -289,7 +301,7 @@ export default function Profile() {
           {msg.length > 0 && <ul className="toast">{msg.map(m => <li key={m}>{m}</li>)}</ul>}
 
           {tab === "files" && (
-            <section className="card">
+            <section className="card" id="resume">
               <h2>Resume and files</h2>
               <Slot title="Resume" accept=".tex,.pdf,.docx,.txt,.md" busy={uploading === "resume"} onView={setViewing} doc={r.resume.resume}
                     onPick={f => upload(f, "resume")} hint="Your LaTeX .tex is read exactly. A PDF or Word file works too." />

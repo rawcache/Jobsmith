@@ -1356,6 +1356,15 @@ def get_fixes():
     return fixes.compute()
 
 
+@app.get("/api/needs")
+async def get_needs():
+    """What's holding applications, each with a link to the page that fixes it: the banner at the top of the dashboard
+    lists the ones about you (`blocking`). Read-only; never carries a profile answer."""
+    from . import needs
+    rows = needs.items(await llm.available_cached(role="write"))
+    return {"items": rows, "blocking": needs.blocking(rows)}
+
+
 class FixAnswer(BaseModel):
     id: str
     value: str = ""

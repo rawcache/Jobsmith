@@ -23,6 +23,7 @@ import Outreach from "./pages/Outreach";
 import Followups from "./pages/Followups";
 import Voice from "./pages/Voice";
 import Preferences from "./pages/Preferences";
+import NeedsBanner from "./components/NeedsBanner";
 
 export type Status = {
   llm: { backend: string; ok: boolean; message: string;
@@ -93,6 +94,7 @@ function App() {
         <div className="content">
           <TopBar view={view ?? ""} status={status} onToast={say} />
           {status?.demo && <p className="demo-band">Practice copy: a made-up person and made-up jobs. Nothing here opens a real site or sends anything.</p>}
+          <NeedsBanner route={route} />
           <main className="wrap">
             {view === "matches" ? <Matches selected={arg} /> :
              view === "job" && arg ? <JobPage id={arg} /> :
@@ -100,7 +102,7 @@ function App() {
              view === "companies" ? <Companies /> :
              view === "tracker" ? <Tracker /> :
              view === "documents" ? <Documents /> :
-             view === "profile" ? <Profile /> :
+             view === "profile" ? <Profile focus={arg} /> :
              view === "settings" ? <Settings focus={arg} /> :
              view === "preferences" ? <Preferences /> :
              view === "skills" ? <Skills /> :

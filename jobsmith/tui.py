@@ -1,6 +1,6 @@
 """Jobsmith in the terminal.
 
-    jobsmith                      open the prompt (sets you up the first time)
+    jobsmith --terminal           open the prompt (sets you up the first time); bare `jobsmith` opens the dashboard
     jobsmith "apply to nvidia"    one request, then watch it work
     jobsmith --autopilot ...      submit whatever it's confident about without asking (this run only)
     jobsmith smith                set up smith, the free AI that runs on this computer
