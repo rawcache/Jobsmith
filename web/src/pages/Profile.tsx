@@ -171,7 +171,7 @@ function LinksEdit({ onDone }: { onDone: () => void }) {
       <div className="card-h"><h2>Your links</h2></div>
       {LINK_KEYS.map(([k, label, ph]) => (
         <label key={k} className="field">{label}<input value={v[k] ?? ""} placeholder={ph} onChange={e => setV({ ...v, [k]: e.target.value })} /></label>))}
-      <p className="small muted">A username works too, like <code>rawcache</code> for GitHub.</p>
+      <p className="small muted">A plain username works too for GitHub and Devpost.</p>
       <div className="row tight"><button className="btn primary sm" onClick={save}>Save</button><button className="link" onClick={onDone}>Cancel</button></div>
     </section>
   );

@@ -1166,5 +1166,5 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .needs-in { max-width: 1120px; margin: 0 auto; padding: 9px 24px; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
 .needs-in ul { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; padding: 0; list-style: none; }
 .needs-in a { color: var(--warn-ink); text-decoration: underline; text-underline-offset: 2px; }
-.needs-n { opacity: .8; }
+.needs-n { color: var(--warn); }
 .bank.flash { box-shadow: 0 0 0 3px var(--chip); border-radius: 6px; transition: box-shadow .3s; }

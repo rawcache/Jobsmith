@@ -36,7 +36,7 @@ export default function EmailCard({ s, save, onMsg }: { s: S; save: (p: S) => Pr
       </ul>
       <div className="seg" role="radiogroup" aria-label="Email provider">{([["gmail", "Gmail"], ["outlook", "Outlook / Microsoft 365"], ["imap", "Other"]] as [string, string][]).map(([k, l]) => (
         <button key={k} role="radio" aria-checked={prov === k} className={prov === k ? "on" : ""} onClick={() => save({ email_provider: k })}>{l}</button>))}</div>
-      <label className="field">Email address that receives the codes<input defaultValue={s.gmail_address} placeholder={prov === "outlook" ? "you@school.edu" : "you@gmail.com"}
+      <label className="field">Email address that receives the codes<input defaultValue={s.gmail_address} placeholder={prov === "outlook" ? "you@school.edu" : "you@example.com"}
         onBlur={e => save({ gmail_address: e.target.value.trim() })} /></label>
       {prov === "gmail" && (<>
         <label className="field">App password<input type="password" defaultValue={s.gmail_app_password} placeholder="16 letters from Google" onBlur={e => save({ gmail_app_password: e.target.value })} /></label>
