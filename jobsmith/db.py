@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS documents (
 CREATE TABLE IF NOT EXISTS facts (
   id TEXT PRIMARY KEY,             -- f_xxxxxx
   category TEXT NOT NULL,          -- identity|education|experience|project|skill|award|leadership|link|other
-  subject TEXT NOT NULL DEFAULT '',-- e.g. "Rooms To Go - ML Engineer Intern"
+  subject TEXT NOT NULL DEFAULT '',-- e.g. "Northwind Labs - ML Engineer Intern"
   text TEXT NOT NULL,
   source TEXT NOT NULL DEFAULT '', -- filename or "user"
   active INTEGER NOT NULL DEFAULT 1,
