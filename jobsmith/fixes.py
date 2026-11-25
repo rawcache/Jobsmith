@@ -16,6 +16,8 @@ import re
 from . import classify, db, draft, essays, profile
 
 LABELS = {k: label for k, label, _ in profile.ANSWER_BANK}
+# answers only your confirmed profile gives (rule 2): never grouped into a question you answer here
+RULE2 = set(profile.EEO_KEYS) | set(draft.RULE2_CANONS)
 YES_NO = {"work_authorized_us", "needs_sponsorship", "us_citizen", "willing_to_relocate", "relatives_at_company",
           "over_18", "acknowledge_notices", "ai_tools_consent", "background_check_ok", "non_compete",
           "hispanic_latino", "first_gen", "resume_lists_all_employers"}
@@ -52,6 +54,38 @@ def _one_per_question(items: list[dict]) -> list[dict]:
     return list(best.values())
 
 
+# "Offices: New York", "Offices: Boston": the form reader splits one "select all that apply" into a box per option
+# when the boxes' ids share nothing (the extension groups them anyway). Grouped again here, by their shared question.
+PARENT = re.compile(r"^(.{3,200}):\s+(\S[^:]{0,200})$")     # the last ": " splits question from option
+
+
+def _checkbox_groups(job_id: str) -> dict[str, dict]:
+    """Lone checkboxes of one form that are options of one question, by each box's field: {field: group}. A group is
+    {id, label, options, fields, required}. Never one that only your profile may answer (demographics, work
+    authorization, sponsorship): those stay as they are, profile-only (rule 2)."""
+    by_parent: dict[str, list[dict]] = {}
+    for d in draft.drafts_for(job_id):
+        m = d["qtype"] == "checkbox" and not d.get("options") and PARENT.match(d["label"] or "")
+        if m:
+            by_parent.setdefault(m.group(1).strip(), []).append(dict(d, option=m.group(2).strip()))
+    out: dict[str, dict] = {}
+    for parent, boxes in by_parent.items():
+        options = list(dict.fromkeys(b["option"] for b in boxes))
+        if len(options) < 2 or any(b.get("canon") in RULE2 for b in boxes) or \
+                draft._profile_only({"label": parent, "options": options}):
+            continue
+        g = {"id": question_id(parent, options), "label": parent, "options": options,
+             "fields": {b["field"]: b["option"] for b in boxes}, "required": any(b.get("required") for b in boxes)}
+        out.update({b["field"]: g for b in boxes})
+    return out
+
+
+def _group_fix(g: dict) -> dict:
+    return {"id": g["id"], "kind": "question", "key": g["label"], "title": f"Answer “{g['label']}”",
+            "choices": g["options"], "multi": True, "value": "", "required": g["required"],
+            "detail": "Tick every one that applies. Your answer goes on every held form that asks this."}
+
+
 def _fix_for(item: dict, job: dict, answers: dict) -> dict | None:
     """The shared fix one blocker waits on, or None when it's this application's own."""
     canon, issue, label = item.get("canon"), item.get("issue") or "", item.get("label") or ""
@@ -73,8 +107,11 @@ def _fix_for(item: dict, job: dict, answers: dict) -> dict | None:
                 "detail": "Used as you write it on every form that asks. {company} and {role} are filled in for you."}
     if UNANSWERED.search(issue) and item.get("qtype") != "file":
         opts = item.get("options") or []
+        multi = item.get("qtype") == "multiselect" and len(opts) > 1 and not draft._profile_only(item)
         return {"id": question_id(label, opts), "kind": "question", "key": label, "title": f"Answer “{label}”",
-                "choices": opts, "value": "", "detail": "Your answer goes on every held form that asks this."}
+                "choices": opts, "multi": multi, "value": "", "required": bool(item.get("required")),
+                "detail": ("Tick every one that applies. " if multi else "")
+                + "Your answer goes on every held form that asks this."}
     return None
 
 
@@ -96,10 +133,13 @@ def compute() -> dict:
             own.append(j["hold_reason"])
         else:
             r = draft.readiness(j["id"])
+            groups = _checkbox_groups(j["id"])
             for it in _one_per_question(r["items"]):
                 if it.get("pending"):
                     continue                                      # written by AI once the rest is answered
                 fx = _fix_for(it, j, answers)
+                if fx and fx["kind"] == "question" and it.get("field") in groups:
+                    fx = _group_fix(groups[it["field"]])          # one option of a question: the question, once
                 if fx:
                     fixes.setdefault(fx["id"], dict(fx, jobs=[]))
                     need.add(fx["id"])
@@ -142,10 +182,25 @@ def compute() -> dict:
             "about_jobs": [a["id"] for a in apps]}
 
 
-def answer(fix_id: str, value: str) -> dict:
-    """Answer one fix with your own words, then re-check every held application. Returns what the re-check did."""
+def answer(fix_id: str, value: str = "", values: list[str] | None = None) -> dict:
+    """Answer one fix with your own words, then re-check every held application. Returns what the re-check did.
+    values: the options you ticked, for a question that takes several (a checkbox list); none ticked is an answer
+    too, unless the form requires one."""
     value = value if fix_id.startswith("essay:") else (value or "").strip()
     held = _held_on_answers()           # taken before your answer goes in: the ones it may free
+    fx = next((f for f in compute()["fixes"] if f["id"] == fix_id), None) if fix_id.startswith("question:") else None
+    if values is None and fx and fx.get("multi") and value:
+        values = [v for v in re.split(r"[;\n]", value)]          # typed as a list (the terminal, an agent)
+    if values is not None:
+        if not fx or not fx.get("multi"):
+            raise ValueError("That question takes one answer, not a list.")
+        picked = [v for v in dict.fromkeys(v.strip() for v in values) if v]
+        if any(v not in fx["choices"] for v in picked):
+            raise ValueError("Pick from the options listed.")
+        if not picked and fx.get("required"):
+            raise ValueError("Tick at least one first: the form requires it.")
+        _answer_ticked(fix_id, picked, only_job=fx["jobs"][0] if len(fx["jobs"]) == 1 else "")
+        return recheck(held)
     if fix_id.startswith("profile:"):
         key = fix_id.split(":", 1)[1]
         if key not in LABELS or not value:
@@ -203,6 +258,35 @@ def _answer_question(fix_id: str, value: str, only_job: str = "") -> int:
                 db.x("UPDATE drafts SET final_answer=?, verdict='green', scope=?, updated_at=? WHERE id=?",
                      (ans, "job" if job_only else None, db.now(), t["id"]))
         n += 1
+    return n
+
+
+def _answer_ticked(fix_id: str, picked: list[str], only_job: str = "") -> int:
+    """The options you ticked, on every held form that asks this question with these options: a checkbox list gets
+    them as one answer; a question read as a box per option gets Yes on the boxes you ticked and No on the rest."""
+    n = 0
+    jobs = [r["id"] for r in db.q("SELECT id FROM jobs WHERE status IN ('filled','error')")
+            if not only_job or r["id"] == only_job]
+    for jid in jobs:
+        groups = _checkbox_groups(jid)
+        rows = draft.drafts_for(jid)
+        for d in rows:
+            if d.get("final_answer") is not None or d.get("verdict") == "green":
+                continue              # yours already: never overwritten
+            if d["field"] in groups and groups[d["field"]]["id"] == fix_id:
+                ans, boxes = ("Yes" if groups[d["field"]]["fields"][d["field"]] in picked else "No"), [d]
+            elif d.get("options") and question_id(d["label"], d["options"]) == fix_id:
+                ans = "; ".join(p for p in picked if p in d["options"])
+                if not ans:
+                    continue          # nothing ticked on a list: left for you on that form
+                # its twin box, if any (the same list read without its choices), gets the same answer
+                boxes = [t for t in rows if t is d or (not t.get("options") and _twin(t["field"]) == _twin(d["field"]))]
+            else:
+                continue
+            for b in boxes:
+                db.x("UPDATE drafts SET final_answer=?, verdict='green', scope=?, updated_at=? WHERE id=?",
+                     (ans, "job" if only_job else None, db.now(), b["id"]))
+            n += 1
     return n
 
 

@@ -7,16 +7,22 @@ import { Icon, poll } from "../ui";
 export type Fix = {
   id: string; kind: "resume_pdf" | "profile" | "essay" | "question"; title: string; detail: string;
   choices?: string[]; value: string; unblocks: number; ready_after: number; jobs: string[];
+  multi?: boolean;         // takes several: shown as checkboxes, saved as the set you ticked
+  required?: boolean;
   part: "you" | "job";     // asked once for every form, or one application's own question
 };
 export type HeldJob = { id: string; company: string; title: string; own: string[]; questions: string[] };
 export type FixesData = { held: number; fixes: Fix[]; applications: HeldJob[] };
 type Answered = FixesData & { freed: string[]; started: string[]; note: string };
+/** Held applications whose hold no longer applies (your AI is connected now, or an earlier version held them). */
+type RetryPlan = { count: number; stale: number; waiting: number; note: string; jobs: { id: string; why: string }[] };
 
 /** onCount: how many fixes there are, each time they load (Home says "Nothing is waiting" only at none). */
 export default function Fixes({ onChange, onCount, limit = 6 }: { onChange?: () => void; onCount?: (n: number) => void; limit?: number }) {
   const [d, setD] = useState<FixesData | null>(null);
   const [said, setSaid] = useState("");
+  const [retry, setRetry] = useState<RetryPlan | null>(null);
+  const [retrying, setRetrying] = useState(false);
   // what you've typed, by fix: kept here, so a refresh that moves or hides a row never loses it
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const seq = useRef(0);       // only the newest answer is shown: a refresh sent before your answer landed is dropped
@@ -26,10 +32,24 @@ export default function Fixes({ onChange, onCount, limit = 6 }: { onChange?: () 
     const get = () => {
       const mine = ++seq.current;
       api.get<FixesData>("/api/fixes").then(r => { if (mine === seq.current) show(r); }).catch(() => {});
+      api.get<RetryPlan>("/api/fixes/retry").then(setRetry).catch(() => {});
     };
     get(); const t = poll(get, 15000); return () => t.stop();
   }, []);
-  if (!d || (d.fixes.length === 0 && d.applications.length === 0)) return null;
+  if (!d || (d.fixes.length === 0 && d.applications.length === 0 && !retry?.stale)) return null;
+  const runRetry = async () => {
+    setRetrying(true);
+    try {
+      seq.current++;
+      const r = await api.post<FixesData & RetryPlan & { started: string[] }>("/api/fixes/retry", {});
+      show(r); setRetry(null);
+      const n = r.started.length;
+      setSaid(n ? `Retrying ${n} application${n === 1 ? "" : "s"}. Each is filled again and waits for you; nothing is sent.`
+                : r.note || "Nothing needed a retry.");
+      onChange?.();
+    } catch (e) { setSaid((e as Error).message); }
+    setRetrying(false);
+  };
   const done = (r: Answered) => {
     seq.current++;
     show(r);
@@ -64,6 +84,13 @@ export default function Fixes({ onChange, onCount, limit = 6 }: { onChange?: () 
   return (
     <div className="fixes">
       {said && <p className="small ok-text fix-said" role="status">{said}</p>}
+      {retry && retry.stale > 0 && (<div className="fix-retry">
+        <p className="small muted">{retry.stale} held application{retry.stale === 1 ? " was" : "s were"} held for a
+          reason that no longer applies ({[...new Set(retry.jobs.map(j => j.why))].join("; ") || "your limits come first"}).
+          {retry.note ? ` ${retry.note}` : ""} A retry fills them again and never sends.</p>
+        <button className="btn sm" disabled={retrying || retry.count === 0} onClick={runRetry}>
+          Retry held applications <span className="num">({retry.count})</span></button>
+      </div>)}
       {shownYou.length > 0 && (<section aria-label="About you">
         <h3 className="fix-part">About you <span className="muted">· answer once, used on every form</span></h3>
         <ul className="fix-rows">{shownYou.map(row)}</ul>
@@ -87,9 +114,9 @@ function FixRow({ f, onDone, v, setV, clear }: { f: Fix; onDone: (r: Answered) =
                                                 clear: (sent: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const send = async (value: string) => {
+  const send = async (value: string, values?: string[]) => {
     setBusy(true); setErr("");
-    try { onDone(await api.post<Answered>("/api/fixes/answer", { id: f.id, value })); clear(value); }
+    try { onDone(await api.post<Answered>("/api/fixes/answer", { id: f.id, value, ...(values ? { values } : {}) })); clear(value); }
     catch (e) { setErr((e as Error).message); }
     setBusy(false);
   };
@@ -110,6 +137,8 @@ function FixRow({ f, onDone, v, setV, clear }: { f: Fix; onDone: (r: Answered) =
       {f.kind === "resume_pdf" ? (
         <label className="btn sm primary upload-btn"><input type="file" accept=".pdf" disabled={busy}
           onChange={e => { upload(e.target.files); e.target.value = ""; }} /><Icon name="upload" size={14} />Upload your resume PDF</label>
+      ) : f.multi && f.choices && f.choices.length > 0 ? (
+        <Ticks f={f} v={v} setV={setV} busy={busy} send={send} />
       ) : f.choices && f.choices.length > 0 ? (
         <div className="fix-choices">{f.choices.map(c => (
           <button key={c} className="btn sm" disabled={busy} onClick={() => send(c)}>{c}</button>))}</div>
@@ -127,5 +156,25 @@ function FixRow({ f, onDone, v, setV, clear }: { f: Fix; onDone: (r: Answered) =
       )}
       {err && <p className="small bad-text">{err}</p>}
     </li>
+  );
+}
+
+/** A question that takes several answers (offices, clubs, "select all that apply"): one checkbox per option, saved
+ *  together as the set you ticked. What's ticked is kept as lines, so a refresh never loses it. */
+function Ticks({ f, v, setV, busy, send }: { f: Fix; v: string; setV: (t: string) => void; busy: boolean;
+                                             send: (value: string, values?: string[]) => void }) {
+  const ticked = v ? v.split("\n") : [];
+  const flip = (c: string) => setV((ticked.includes(c) ? ticked.filter(t => t !== c) : [...ticked, c]).join("\n"));
+  const picked = f.choices!.filter(c => ticked.includes(c));      // in the form's order
+  return (
+    <form onSubmit={e => { e.preventDefault(); send(v, picked); }}>
+      <fieldset className="fix-ticks" disabled={busy}>
+        <legend className="small muted">Tick every one that applies{f.required ? " (at least one)" : ""}</legend>
+        {f.choices!.map(c => (
+          <label key={c} className="fix-tick"><input type="checkbox" checked={ticked.includes(c)} onChange={() => flip(c)} />{c}</label>))}
+      </fieldset>
+      <button className="btn sm primary" disabled={busy || (!!f.required && picked.length === 0)}>
+        {picked.length ? `Save ${picked.length} ticked` : "Save: none of these"}</button>
+    </form>
   );
 }

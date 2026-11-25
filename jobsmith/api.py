@@ -40,6 +40,8 @@ async def only_local_callers(request, call_next):
 @app.on_event("startup")
 async def _startup():
     db.conn()
+    from . import retry
+    retry.version_since()          # when this version first ran: holds older than that are worth a retry
     profile.ensure_answer_bank()
     profile.migrate_documents()
     await profile.import_profile_json()
@@ -1368,6 +1370,7 @@ async def get_needs():
 class FixAnswer(BaseModel):
     id: str
     value: str = ""
+    values: list[str] | None = None     # the options you ticked, for a question that takes several
 
 
 @app.post("/api/fixes/answer")
@@ -1376,9 +1379,25 @@ async def answer_fix(b: FixAnswer):
     limits. Async: it may start applications."""
     from . import fixes
     try:
-        return fixes.answer(b.id, b.value)
+        return fixes.answer(b.id, b.value, b.values)
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+@app.get("/api/fixes/retry")
+async def retry_plan():
+    """How many held applications "Retry held applications" would run again, before it runs: the ones whose hold
+    no longer applies (your AI is connected now, or an earlier version held them)."""
+    from . import retry
+    return retry.plan((await llm.available_cached(role="write"))[0])
+
+
+@app.post("/api/fixes/retry")
+async def retry_run():
+    """Run them again: drafted and filled with every check and your limits, never sent. Async: starts applications."""
+    from . import fixes, retry
+    r = retry.run((await llm.available_cached(role="write"))[0])
+    return dict(r, **fixes.compute())
 
 
 class SkipIn(BaseModel):

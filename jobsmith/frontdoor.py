@@ -11,6 +11,7 @@ engine's Host and Origin checks (api.only_local_callers) are what keep other web
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import socket
 import subprocess
@@ -92,6 +93,58 @@ def _why_it_stopped(log: Path) -> str:
     except OSError:
         return ""
     return "port" if "address already in use" in tail.lower() or "errno 48" in tail.lower() else ""
+
+
+def engine_check(base: str | None = None) -> tuple[bool, str]:
+    """For `jobsmith doctor`: whether the engine can run here: one already answers, or its port is free for it.
+    Starts nothing."""
+    base = base or base_url()
+    port = _port(base)
+    if engine_up(base):
+        return True, f"running, answering on port {port}"
+    if _port_taken(base):
+        return False, (f"can't start: another program is using port {port}. Quit that program (or restart your "
+                       "computer) and open Jobsmith again.")
+    return True, f"not running; port {port} is free, so it can start"
+
+
+# What an engine error line means, in plain words. First match wins.
+_PLAIN = [
+    (r"address already in use|errno (48|98|10048)\b", "Another program was using the engine's port, so it couldn't start."),
+    (r"No module named '([^']+)'", "A part of Jobsmith is missing ({0}). Reinstall Jobsmith (or run `uv sync`)."),
+    (r"database is locked", "Jobsmith's data file was busy: another Jobsmith was probably running. Close it and try again."),
+    (r"database disk image is malformed|file is not a database", "Jobsmith's data file is damaged."),
+    (r"No space left on device", "Your disk is full, so the engine couldn't save its work."),
+    (r"PermissionError|Permission denied", "The engine wasn't allowed to read or write a file it needs."),
+    (r"SyntaxError|ImportError", "Jobsmith's install is broken. Reinstall Jobsmith."),
+    (r"Fatal Python error|Segmentation fault", "The engine crashed inside Python itself. Open Jobsmith again; "
+                                                "if it keeps happening, update Jobsmith."),
+    (r"ConnectError|ConnectTimeout|Name or service not known|nodename nor servname",
+     "The engine couldn't reach a site over the internet. Check your connection."),
+]
+_ERROR_LINE = re.compile(r"\b\w*(Error|Exception)\b:?|^ERROR\b|Fatal Python error|Segmentation fault|\[Errno \d+\]")
+
+
+def last_error(log: Path | None = None) -> tuple[str, str] | None:
+    """The last error the engine wrote to its log, as (plain words, the line itself), or None when there is none.
+    File paths in the line are cut to their file names."""
+    log = log or _log_path()
+    try:
+        lines = log.read_text(errors="replace").splitlines()[-2000:]
+    except OSError:
+        return None
+    line = next((l.strip() for l in reversed(lines) if _ERROR_LINE.search(l) and not l.lstrip().startswith(
+        ("Traceback", "File \"", "raise ", "^"))), None)
+    if not line:
+        return None
+    line = re.sub(r"(?:[A-Za-z]:)?[/\\][^\s'\"]*[/\\]([^/\\\s'\"]+)", r"\1", line)[:300]
+    for pat, words in _PLAIN:
+        m = re.search(pat, line, re.I)
+        if m:
+            return words.format(*(g for g in m.groups() if g and g not in ("48", "98", "10048"))), line
+    kind = re.match(r"(?:\w+\.)*(\w+(?:Error|Exception))\b:?\s*(.*)", line)
+    said = f"{kind.group(1)}: {kind.group(2)}".rstrip(": ") if kind else line
+    return f"The engine stopped on an error it didn't expect ({said}).", line
 
 
 def ensure_engine(base: str | None = None, timeout: float = START_TIMEOUT,

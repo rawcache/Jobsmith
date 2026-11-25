@@ -582,13 +582,22 @@ class Review(View):
             if text is None or (f["kind"] != "essay" and not text.strip()):
                 return
             value = text if f["kind"] == "essay" else text.strip()
-            if f.get("choices"):
+            body: dict = {"id": f["id"], "value": value}
+            if f.get("choices") and f.get("multi"):         # several, split by ";": the set you tick
+                low = {c.lower(): c for c in f["choices"]}
+                picked = [p.strip() for p in value.split(";") if p.strip()]
+                if any(p.lower() not in low for p in picked):
+                    self.notify("Pick from: " + " / ".join(f["choices"]) + " (separate several with ;)",
+                                severity="warning")
+                    return
+                body = {"id": f["id"], "values": [low[p.lower()] for p in picked]}
+            elif f.get("choices"):
                 match = [c for c in f["choices"] if c.lower() == value.lower()]
                 if not match:
                     self.notify("Pick one of: " + " / ".join(f["choices"]), severity="warning")
                     return
-                value = match[0]
-            r = self.send("POST", "/api/fixes/answer", {"id": f["id"], "value": value}, timeout=120)
+                body["value"] = match[0]
+            r = self.send("POST", "/api/fixes/answer", body, timeout=120)
             if r.get("error"):
                 self.notify(str(r["error"]), severity="warning")
                 return
@@ -598,7 +607,8 @@ class Review(View):
             self.notify(msg, timeout=8)
             self.app.say(f"{f['title']}: saved. {msg}")
             self.load_jobs()
-        hint = (" (" + " / ".join(f["choices"]) + ")") if f.get("choices") else \
+        hint = (" (tick several, separated by ;: " + " / ".join(f["choices"]) + ")") if f.get("multi") else \
+            (" (" + " / ".join(f["choices"]) + ")") if f.get("choices") else \
             ("  {company} and {role} are filled in for you" if f["kind"] == "essay" else "")
         self.app.push_screen(EditAnswer(f["title"] + hint, f.get("value") or ""), saved)
 

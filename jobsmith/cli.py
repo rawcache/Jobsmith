@@ -107,6 +107,21 @@ def main() -> None:
         print(f"Browser: {browser_check()}")
         print(f"Resume PDF for attaching: {profile.primary_resume_pdf() or 'none uploaded'}")
         print(f"Facts: {len(profile.facts())}")
+        doctor_engine(print)
+
+
+def doctor_engine(say=print) -> bool:
+    """`jobsmith doctor`'s engine lines: can it start here, and the last error it wrote, in plain words."""
+    from . import frontdoor
+    ok, msg = frontdoor.engine_check()
+    say(f"Engine: {'OK' if ok else 'NOT READY'} - {msg}")
+    err = frontdoor.last_error()
+    if err:
+        say(f"Last engine error: {err[0]}")
+        say(f"  (from server.log: {err[1][:160]})")
+    else:
+        say("Last engine error: none in server.log")
+    return ok
 
 
 def browser_check(say=lambda _msg: None) -> str:

@@ -1123,9 +1123,16 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .fix p { margin: 2px 0 8px; }
 .fix-choices { display: flex; flex-wrap: wrap; gap: 6px; }
 .fix-line { display: flex; gap: 6px; }
+.fix-ticks { border: 0; margin: 0 0 8px; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.fix-ticks legend { padding: 0; margin-bottom: 4px; width: 100%; }
+.fix-tick { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink); }
+.fix-tick input { accent-color: var(--accent); }
 .fix-line input { flex: 1; min-width: 0; }
 .fix textarea { width: 100%; margin-bottom: 6px; }
 .fix-said { margin: 6px 0 2px; }
+.fix-retry { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; }
+.fix-retry p { margin: 0; }
+.fix-retry .btn { flex: none; }
 .fix-part { margin: 12px 0 2px; font-size: 12.5px; font-weight: 600; color: var(--ink); }
 .fix-part .muted { font-weight: 400; }
 .fix-job { margin-top: 8px; padding: 8px 10px 4px; border: 1px solid var(--line-2); border-radius: 8px; }
